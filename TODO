@@ -1,0 +1,187 @@
+
+Researching best workflow
+I’m checking the NOMAD plugin model and the local codebase conventions so I can recommend a workflow that preserves fast standalone GUI work now without boxing you out of later integration.
+
+Searched for regex patterns in nomad package files
+Fetched https://nomad-lab.eu/prod/v1/docs/howto/plugins/plugins.html
+Determining workflow recommendations
+I’ve confirmed NOMAD supports both API and App plugin entry points, which changes the recommendation: the best setup is not “plugin or app template” as a single choice, but a split architecture with a standalone app now and a thin NOMAD plugin later.
+
+Reviewed apps.py and models.py, clarified file linking requirements
+The best workflow for your stated goal is:
+
+Keep planes as a standalone full-stack product for now, and add a separate thin NOMAD integration plugin later.
+
+That is the highest-flexibility path. Starting from the NOMAD plugin template alone would optimize for integration too early and slow down the part you care about most right now: fast GUI iteration, mocked services, isolated DB resets, and decoupled frontend/backend work. Your current planes stack already gives you that. The plugin template is still useful, but as a second package, not as the main product shell.
+
+Why this is the better split
+
+planes is already a complete app: its own React frontend, FastAPI backend, PostgreSQL, Docker composition, and test surface.
+NOMAD plugins are Python packages loaded into NOMAD through entry points. NOMAD does support app-like and API plugin entry points, but those are still integration surfaces inside the NOMAD runtime, not a replacement for an independently evolving full-stack app. You can see NOMAD loading API plugins in main.py and app entry points being collected in apps.py. The entry point types themselves are defined in plugins.py.
+If you force Planes into a plugin shape now, you will likely sacrifice exactly the things you want: independent frontend dev server, mock auth, mock DBs, isolated migrations, and faster UI experimentation.
+Recommended architecture
+
+Use two packages:
+
+planes
+This remains your primary application during development.
+It owns:
+
+React GUI
+FastAPI backend
+mocked or real PostgreSQL
+optional mock NOMAD adapter
+standalone Docker and tests
+packages/nomad-planes-plugin
+This is a small integration layer built from the NOMAD plugin template.
+It owns:
+
+API entry points into NOMAD
+optional app entry point metadata for discovery/navigation
+auth/session bridging
+NOMAD-side proxying or launch metadata
+schema/search integration glue
+later embedding hooks for the GUI
+That split gives you clean separation:
+
+product code in planes
+integration code in the NOMAD plugin
+This is better than trying to make planes itself “the plugin”, unless you already know you want to give up standalone deployment.
+
+Practical workflow
+
+Phase 1: Build fast in standalone mode
+Keep planes as the main dev target.
+
+Add these capabilities there:
+
+AUTH_MODE=mock|standalone|nomad
+DATA_MODE=mock|local|nomad
+mock adapters for NOMAD entries/schemas/users
+fixture seed commands for DB reset and demo data
+frontend feature flags for mocked backend and mocked auth
+contract tests against a stable internal adapter interface
+At this stage, your frontend should never depend directly on NOMAD-specific URLs or payload quirks. It should talk only to the Planes backend.
+
+Phase 2: Define strict integration seams
+Inside Planes, isolate all NOMAD coupling behind adapters.
+
+Recommended seams:
+
+auth_provider
+schema_provider
+entry_provider
+user_provider
+search_provider
+Each seam should have at least two implementations:
+
+mock
+nomad
+That is the main design decision that preserves future flexibility. If you do this well, later integration becomes mostly adapter work, not a rewrite.
+
+Phase 3: Add a NOMAD plugin as a bridge
+Create a separate plugin package from the NOMAD plugin template.
+
+That plugin should do only NOMAD-specific work:
+
+register API endpoints in NOMAD
+expose app metadata if useful
+translate NOMAD auth/session into something Planes understands
+proxy or federate selected data into Planes
+optionally expose a URL inside NOMAD pointing to the Planes GUI
+This bridge can remain thin for a long time.
+
+Phase 4: Integrate the GUI gradually
+You do not need to fully “move” the GUI into NOMAD immediately.
+
+Use this progression:
+
+External standalone GUI with NOMAD SSO
+Link from NOMAD into Planes
+Reverse-proxy Planes under a NOMAD path
+Optionally embed parts later as a micro-frontend or app plugin
+That sequence keeps risk low.
+
+What I would change in Planes now
+
+These are the highest-value changes to make immediately:
+
+Introduce a backend service layer instead of letting route handlers call DB or NOMAD code directly.
+Add provider interfaces:
+AuthProvider
+DatasetProvider
+SchemaProvider
+SearchProvider
+Keep all NOMAD-specific DTO mapping in one module tree, not spread through the app.
+Make frontend authentication pluggable:
+local dev login
+mock login
+bearer token passthrough from NOMAD
+Keep the frontend talking only to the Planes backend, never directly to NOMAD APIs during normal app flow.
+Make URL base paths configurable from day one:
+root /
+proxied /planes/
+embedded mode if needed later
+Make CORS, cookie, and token transport mode configurable:
+header bearer
+cookie passthrough
+dev mock token
+Add deterministic seed/reset commands for local DB and mock state.
+Define a versioned internal API contract between frontend and backend.
+Those changes matter more than choosing the perfect template.
+
+Should you use different software packages in Docker now?
+
+Yes, but selectively. The goal is not to replace your stack, only to reduce future friction.
+
+Keep
+
+FastAPI
+React
+Docker Compose
+PostgreSQL for standalone product data
+Those are good choices for fast product iteration.
+
+Consider adding
+
+Mock Service Worker in the frontend for realistic API mocking during GUI work
+WireMock or a lightweight mock API container only if you need external-service simulation beyond your FastAPI mocks
+Traefik or a single reverse proxy strategy that can support both standalone and proxied /planes/ deployment
+Redis only if you later need shared cache/session/event bridging
+Keycloak test realm import for reproducible auth integration tests
+Do not switch to Mongo just to match NOMAD
+That would be premature. Use PostgreSQL in Planes if it fits your app model. Integration with NOMAD should happen at the API and auth boundary, not by forcing storage convergence early.
+
+Do not collapse frontend into NOMAD’s GUI build yet
+That would slow you down immediately and buy you little today. Instead, make the frontend embeddable later:
+
+configurable base path
+no hardcoded absolute URLs
+no assumptions about owning the whole browser history
+optional shell mode for iframe/proxy embedding
+Decision
+
+For your case, the best starting point is:
+
+keep the full-stack app template in planes
+do not start with only the NOMAD plugin template
+later add a small dedicated NOMAD plugin package as the bridge
+So the answer is: use the app template as the product, and the plugin template as the integration layer.
+
+That is the best workflow if your priorities are:
+
+maximum development speed now
+independent testing and mocking
+minimal lock-in to NOMAD internals
+clean later integration into NOMAD
+A concrete target structure would be:
+
+planes
+packages/nomad-planes-plugin
+Where:
+
+planes is the app
+nomad-planes-plugin is the connector
+If you want, I can next turn this into a concrete repository blueprint: package layout, interfaces, Docker topology, auth modes, and a staged migration plan for the next 2 to 3 implementation phases.
+
+GPT-5.4 • 1x
