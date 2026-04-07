@@ -22,7 +22,7 @@ def read_experiments(
         statement = (
             select(Experiment).order_by(col(Experiment.created_at).desc()).offset(skip).limit(limit)
         )
-        items = session.exec(statement).all()
+        items = [ExperimentPublic.model_validate(item) for item in session.exec(statement).all()]
     else:
         count_statement = (
             select(func.count())
@@ -37,7 +37,7 @@ def read_experiments(
             .offset(skip)
             .limit(limit)
         )
-        items = session.exec(statement).all()
+        items = [ExperimentPublic.model_validate(item) for item in session.exec(statement).all()]
     return ExperimentsPublic(data=items, count=count)
 
 
