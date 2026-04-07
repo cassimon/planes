@@ -57,6 +57,792 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const CanvasElementCreateSchema = {
+    properties: {
+        element_type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Element Type'
+        },
+        x: {
+            type: 'number',
+            title: 'X',
+            default: 0
+        },
+        y: {
+            type: 'number',
+            title: 'Y',
+            default: 0
+        },
+        width: {
+            type: 'number',
+            title: 'Width',
+            default: 100
+        },
+        height: {
+            type: 'number',
+            title: 'Height',
+            default: 100
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        color: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Color'
+        }
+    },
+    type: 'object',
+    required: ['element_type'],
+    title: 'CanvasElementCreate'
+} as const;
+
+export const CanvasElementPublicSchema = {
+    properties: {
+        element_type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Element Type'
+        },
+        x: {
+            type: 'number',
+            title: 'X',
+            default: 0
+        },
+        y: {
+            type: 'number',
+            title: 'Y',
+            default: 0
+        },
+        width: {
+            type: 'number',
+            title: 'Width',
+            default: 100
+        },
+        height: {
+            type: 'number',
+            title: 'Height',
+            default: 100
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        color: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Color'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['element_type', 'id'],
+    title: 'CanvasElementPublic'
+} as const;
+
+export const CanvasElementUpdateSchema = {
+    properties: {
+        element_type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Element Type'
+        },
+        x: {
+            type: 'number',
+            title: 'X',
+            default: 0
+        },
+        y: {
+            type: 'number',
+            title: 'Y',
+            default: 0
+        },
+        width: {
+            type: 'number',
+            title: 'Width',
+            default: 100
+        },
+        height: {
+            type: 'number',
+            title: 'Height',
+            default: 100
+        },
+        content: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Content'
+        },
+        color: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 50
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Color'
+        }
+    },
+    type: 'object',
+    required: ['element_type'],
+    title: 'CanvasElementUpdate'
+} as const;
+
+export const DeviceGroupCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        substrate_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Substrate Name'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'DeviceGroupCreate'
+} as const;
+
+export const DeviceGroupPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        substrate_name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Substrate Name'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id'],
+    title: 'DeviceGroupPublic'
+} as const;
+
+export const ExperimentCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        device_type: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Device Type'
+        },
+        active_area_cm2: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Area Cm2'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        substrates: {
+            items: {
+                '$ref': '#/components/schemas/SubstrateCreate'
+            },
+            type: 'array',
+            title: 'Substrates',
+            default: []
+        },
+        layers: {
+            items: {
+                '$ref': '#/components/schemas/ExperimentLayerCreate'
+            },
+            type: 'array',
+            title: 'Layers',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'ExperimentCreate'
+} as const;
+
+export const ExperimentLayerCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        material_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Material Id'
+        },
+        solution_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Solution Id'
+        },
+        temperature: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Temperature'
+        },
+        temperature_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Temperature Unit',
+            default: '°C'
+        },
+        duration: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Duration'
+        },
+        duration_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Duration Unit',
+            default: 'min'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'ExperimentLayerCreate'
+} as const;
+
+export const ExperimentLayerPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        material_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Material Id'
+        },
+        solution_id: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'uuid'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Solution Id'
+        },
+        temperature: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Temperature'
+        },
+        temperature_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Temperature Unit',
+            default: '°C'
+        },
+        duration: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Duration'
+        },
+        duration_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Duration Unit',
+            default: 'min'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id'],
+    title: 'ExperimentLayerPublic'
+} as const;
+
+export const ExperimentPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        device_type: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Device Type'
+        },
+        active_area_cm2: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Area Cm2'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created At'
+        },
+        substrates: {
+            items: {
+                '$ref': '#/components/schemas/SubstratePublic'
+            },
+            type: 'array',
+            title: 'Substrates'
+        },
+        layers: {
+            items: {
+                '$ref': '#/components/schemas/ExperimentLayerPublic'
+            },
+            type: 'array',
+            title: 'Layers'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'owner_id', 'substrates', 'layers'],
+    title: 'ExperimentPublic'
+} as const;
+
+export const ExperimentResultsCreateSchema = {
+    properties: {
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        measurement_files: {
+            items: {
+                '$ref': '#/components/schemas/MeasurementFileCreate'
+            },
+            type: 'array',
+            title: 'Measurement Files',
+            default: []
+        },
+        device_groups: {
+            items: {
+                '$ref': '#/components/schemas/DeviceGroupCreate'
+            },
+            type: 'array',
+            title: 'Device Groups',
+            default: []
+        }
+    },
+    type: 'object',
+    title: 'ExperimentResultsCreate'
+} as const;
+
+export const ExperimentResultsListPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ExperimentResultsPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ExperimentResultsListPublic'
+} as const;
+
+export const ExperimentResultsPublicSchema = {
+    properties: {
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        experiment_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Experiment Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created At'
+        },
+        measurement_files: {
+            items: {
+                '$ref': '#/components/schemas/MeasurementFilePublic'
+            },
+            type: 'array',
+            title: 'Measurement Files'
+        },
+        device_groups: {
+            items: {
+                '$ref': '#/components/schemas/DeviceGroupPublic'
+            },
+            type: 'array',
+            title: 'Device Groups'
+        }
+    },
+    type: 'object',
+    required: ['id', 'experiment_id', 'owner_id', 'measurement_files', 'device_groups'],
+    title: 'ExperimentResultsPublic'
+} as const;
+
+export const ExperimentResultsUpdateSchema = {
+    properties: {
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    title: 'ExperimentResultsUpdate'
+} as const;
+
+export const ExperimentUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        description: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Description'
+        },
+        device_type: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Device Type'
+        },
+        active_area_cm2: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Active Area Cm2'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    title: 'ExperimentUpdate'
+} as const;
+
+export const ExperimentsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/ExperimentPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'ExperimentsPublic'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -196,6 +982,371 @@ export const ItemsPublicSchema = {
     title: 'ItemsPublic'
 } as const;
 
+export const MaterialCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        cas_number: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cas Number'
+        },
+        molecular_weight: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Molecular Weight'
+        },
+        density: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Density'
+        },
+        density_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Density Unit',
+            default: 'g/cm3'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'MaterialCreate'
+} as const;
+
+export const MaterialPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        cas_number: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cas Number'
+        },
+        molecular_weight: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Molecular Weight'
+        },
+        density: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Density'
+        },
+        density_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Density Unit',
+            default: 'g/cm3'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created At'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'owner_id'],
+    title: 'MaterialPublic'
+} as const;
+
+export const MaterialUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        cas_number: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Cas Number'
+        },
+        molecular_weight: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Molecular Weight'
+        },
+        density: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Density'
+        },
+        density_unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Density Unit',
+            default: 'g/cm3'
+        },
+        supplier: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Supplier'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    title: 'MaterialUpdate'
+} as const;
+
+export const MaterialsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/MaterialPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'MaterialsPublic'
+} as const;
+
+export const MeasurementFileCreateSchema = {
+    properties: {
+        filename: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Filename'
+        },
+        file_type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'File Type'
+        },
+        file_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Path'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    required: ['filename', 'file_type'],
+    title: 'MeasurementFileCreate'
+} as const;
+
+export const MeasurementFilePublicSchema = {
+    properties: {
+        filename: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Filename'
+        },
+        file_type: {
+            type: 'string',
+            maxLength: 50,
+            title: 'File Type'
+        },
+        file_path: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'File Path'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['filename', 'file_type', 'id'],
+    title: 'MeasurementFilePublic'
+} as const;
+
 export const MessageSchema = {
     properties: {
         message: {
@@ -226,6 +1377,110 @@ export const NewPasswordSchema = {
     title: 'NewPassword'
 } as const;
 
+export const PlaneCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        elements: {
+            items: {
+                '$ref': '#/components/schemas/CanvasElementCreate'
+            },
+            type: 'array',
+            title: 'Elements',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'PlaneCreate'
+} as const;
+
+export const PlanePublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created At'
+        },
+        elements: {
+            items: {
+                '$ref': '#/components/schemas/CanvasElementPublic'
+            },
+            type: 'array',
+            title: 'Elements'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'owner_id', 'elements'],
+    title: 'PlanePublic'
+} as const;
+
+export const PlaneUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        }
+    },
+    type: 'object',
+    title: 'PlaneUpdate'
+} as const;
+
+export const PlanesPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/PlanePublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'PlanesPublic'
+} as const;
+
 export const PrivateUserCreateSchema = {
     properties: {
         email: {
@@ -249,6 +1504,247 @@ export const PrivateUserCreateSchema = {
     type: 'object',
     required: ['email', 'password', 'full_name'],
     title: 'PrivateUserCreate'
+} as const;
+
+export const SolutionComponentCreateSchema = {
+    properties: {
+        amount: {
+            type: 'number',
+            title: 'Amount'
+        },
+        unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Unit'
+        },
+        material_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Material Id'
+        }
+    },
+    type: 'object',
+    required: ['amount', 'unit', 'material_id'],
+    title: 'SolutionComponentCreate'
+} as const;
+
+export const SolutionComponentPublicSchema = {
+    properties: {
+        amount: {
+            type: 'number',
+            title: 'Amount'
+        },
+        unit: {
+            type: 'string',
+            maxLength: 50,
+            title: 'Unit'
+        },
+        material_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Material Id'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['amount', 'unit', 'material_id', 'id'],
+    title: 'SolutionComponentPublic'
+} as const;
+
+export const SolutionCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        components: {
+            items: {
+                '$ref': '#/components/schemas/SolutionComponentCreate'
+            },
+            type: 'array',
+            title: 'Components',
+            default: []
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'SolutionCreate'
+} as const;
+
+export const SolutionPublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        },
+        owner_id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Owner Id'
+        },
+        created_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Created At'
+        },
+        components: {
+            items: {
+                '$ref': '#/components/schemas/SolutionComponentPublic'
+            },
+            type: 'array',
+            title: 'Components'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id', 'owner_id', 'components'],
+    title: 'SolutionPublic'
+} as const;
+
+export const SolutionUpdateSchema = {
+    properties: {
+        name: {
+            anyOf: [
+                {
+                    type: 'string',
+                    maxLength: 255,
+                    minLength: 1
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Name'
+        },
+        notes: {
+            anyOf: [
+                {
+                    type: 'string'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Notes'
+        }
+    },
+    type: 'object',
+    title: 'SolutionUpdate'
+} as const;
+
+export const SolutionsPublicSchema = {
+    properties: {
+        data: {
+            items: {
+                '$ref': '#/components/schemas/SolutionPublic'
+            },
+            type: 'array',
+            title: 'Data'
+        },
+        count: {
+            type: 'integer',
+            title: 'Count'
+        }
+    },
+    type: 'object',
+    required: ['data', 'count'],
+    title: 'SolutionsPublic'
+} as const;
+
+export const SubstrateCreateSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        thickness_nm: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Thickness Nm'
+        }
+    },
+    type: 'object',
+    required: ['name'],
+    title: 'SubstrateCreate'
+} as const;
+
+export const SubstratePublicSchema = {
+    properties: {
+        name: {
+            type: 'string',
+            maxLength: 255,
+            minLength: 1,
+            title: 'Name'
+        },
+        thickness_nm: {
+            anyOf: [
+                {
+                    type: 'number'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Thickness Nm'
+        },
+        id: {
+            type: 'string',
+            format: 'uuid',
+            title: 'Id'
+        }
+    },
+    type: 'object',
+    required: ['name', 'id'],
+    title: 'SubstratePublic'
 } as const;
 
 export const TokenSchema = {
@@ -413,6 +1909,31 @@ export const UserRegisterSchema = {
     type: 'object',
     required: ['email', 'password'],
     title: 'UserRegister'
+} as const;
+
+export const UserStatePublicSchema = {
+    properties: {
+        data: {
+            additionalProperties: true,
+            type: 'object',
+            title: 'Data'
+        },
+        updated_at: {
+            anyOf: [
+                {
+                    type: 'string',
+                    format: 'date-time'
+                },
+                {
+                    type: 'null'
+                }
+            ],
+            title: 'Updated At'
+        }
+    },
+    type: 'object',
+    required: ['data'],
+    title: 'UserStatePublic'
 } as const;
 
 export const UserUpdateSchema = {

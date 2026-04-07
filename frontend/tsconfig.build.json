@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["tests/**/*.ts"]
+  "exclude": [
+    "tests/**/*.ts",
+    "src/old_gui/**",
+    "src/gui/App.tsx",
+    "src/gui/main.tsx",
+    "src/gui/Router.tsx"
+  ]
 }

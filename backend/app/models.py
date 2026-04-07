@@ -1,9 +1,10 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import EmailStr
-from sqlalchemy import DateTime
+from sqlalchemy import Column, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -485,6 +486,27 @@ class PlanePublic(PlaneBase):
 class PlanesPublic(SQLModel):
     data: list[PlanePublic]
     count: int
+
+
+# ============================================================================
+# User State (JSON blob for full GUI state per user)
+# ============================================================================
+
+class UserState(SQLModel, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE", unique=True
+    )
+    data: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=False, server_default="{}"))
+    updated_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),
+    )
+
+
+class UserStatePublic(SQLModel):
+    data: dict[str, Any]
+    updated_at: datetime | None = None
 
 
 # Generic message

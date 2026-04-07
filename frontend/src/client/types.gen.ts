@@ -9,6 +9,132 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+export type CanvasElementCreate = {
+    element_type: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    content?: (string | null);
+    color?: (string | null);
+};
+
+export type CanvasElementPublic = {
+    element_type: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    content?: (string | null);
+    color?: (string | null);
+    id: string;
+};
+
+export type CanvasElementUpdate = {
+    element_type: string;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+    content?: (string | null);
+    color?: (string | null);
+};
+
+export type DeviceGroupCreate = {
+    name: string;
+    substrate_name?: (string | null);
+};
+
+export type DeviceGroupPublic = {
+    name: string;
+    substrate_name?: (string | null);
+    id: string;
+};
+
+export type ExperimentCreate = {
+    name: string;
+    description?: (string | null);
+    device_type?: (string | null);
+    active_area_cm2?: (number | null);
+    notes?: (string | null);
+    substrates?: Array<SubstrateCreate>;
+    layers?: Array<ExperimentLayerCreate>;
+};
+
+export type ExperimentLayerCreate = {
+    name: string;
+    material_id?: (string | null);
+    solution_id?: (string | null);
+    temperature?: (number | null);
+    temperature_unit?: string;
+    duration?: (number | null);
+    duration_unit?: string;
+    notes?: (string | null);
+};
+
+export type ExperimentLayerPublic = {
+    name: string;
+    material_id?: (string | null);
+    solution_id?: (string | null);
+    temperature?: (number | null);
+    temperature_unit?: string;
+    duration?: (number | null);
+    duration_unit?: string;
+    notes?: (string | null);
+    id: string;
+};
+
+export type ExperimentPublic = {
+    name: string;
+    description?: (string | null);
+    device_type?: (string | null);
+    active_area_cm2?: (number | null);
+    notes?: (string | null);
+    id: string;
+    owner_id: string;
+    created_at?: (string | null);
+    substrates: Array<SubstratePublic>;
+    layers: Array<ExperimentLayerPublic>;
+};
+
+export type ExperimentResultsCreate = {
+    notes?: (string | null);
+    measurement_files?: Array<MeasurementFileCreate>;
+    device_groups?: Array<DeviceGroupCreate>;
+};
+
+export type ExperimentResultsListPublic = {
+    data: Array<ExperimentResultsPublic>;
+    count: number;
+};
+
+export type ExperimentResultsPublic = {
+    notes?: (string | null);
+    id: string;
+    experiment_id: string;
+    owner_id: string;
+    created_at?: (string | null);
+    measurement_files: Array<MeasurementFilePublic>;
+    device_groups: Array<DeviceGroupPublic>;
+};
+
+export type ExperimentResultsUpdate = {
+    notes?: (string | null);
+};
+
+export type ExperimentsPublic = {
+    data: Array<ExperimentPublic>;
+    count: number;
+};
+
+export type ExperimentUpdate = {
+    name?: (string | null);
+    description?: (string | null);
+    device_type?: (string | null);
+    active_area_cm2?: (number | null);
+    notes?: (string | null);
+};
+
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
@@ -36,6 +162,59 @@ export type ItemUpdate = {
     description?: (string | null);
 };
 
+export type MaterialCreate = {
+    name: string;
+    cas_number?: (string | null);
+    molecular_weight?: (number | null);
+    density?: (number | null);
+    density_unit?: string;
+    supplier?: (string | null);
+    notes?: (string | null);
+};
+
+export type MaterialPublic = {
+    name: string;
+    cas_number?: (string | null);
+    molecular_weight?: (number | null);
+    density?: (number | null);
+    density_unit?: string;
+    supplier?: (string | null);
+    notes?: (string | null);
+    id: string;
+    owner_id: string;
+    created_at?: (string | null);
+};
+
+export type MaterialsPublic = {
+    data: Array<MaterialPublic>;
+    count: number;
+};
+
+export type MaterialUpdate = {
+    name?: (string | null);
+    cas_number?: (string | null);
+    molecular_weight?: (number | null);
+    density?: (number | null);
+    density_unit?: string;
+    supplier?: (string | null);
+    notes?: (string | null);
+};
+
+export type MeasurementFileCreate = {
+    filename: string;
+    file_type: string;
+    file_path?: (string | null);
+    notes?: (string | null);
+};
+
+export type MeasurementFilePublic = {
+    filename: string;
+    file_type: string;
+    file_path?: (string | null);
+    notes?: (string | null);
+    id: string;
+};
+
 export type Message = {
     message: string;
 };
@@ -45,11 +224,82 @@ export type NewPassword = {
     new_password: string;
 };
 
+export type PlaneCreate = {
+    name: string;
+    elements?: Array<CanvasElementCreate>;
+};
+
+export type PlanePublic = {
+    name: string;
+    id: string;
+    owner_id: string;
+    created_at?: (string | null);
+    elements: Array<CanvasElementPublic>;
+};
+
+export type PlanesPublic = {
+    data: Array<PlanePublic>;
+    count: number;
+};
+
+export type PlaneUpdate = {
+    name?: (string | null);
+};
+
 export type PrivateUserCreate = {
     email: string;
     password: string;
     full_name: string;
     is_verified?: boolean;
+};
+
+export type SolutionComponentCreate = {
+    amount: number;
+    unit: string;
+    material_id: string;
+};
+
+export type SolutionComponentPublic = {
+    amount: number;
+    unit: string;
+    material_id: string;
+    id: string;
+};
+
+export type SolutionCreate = {
+    name: string;
+    notes?: (string | null);
+    components?: Array<SolutionComponentCreate>;
+};
+
+export type SolutionPublic = {
+    name: string;
+    notes?: (string | null);
+    id: string;
+    owner_id: string;
+    created_at?: (string | null);
+    components: Array<SolutionComponentPublic>;
+};
+
+export type SolutionsPublic = {
+    data: Array<SolutionPublic>;
+    count: number;
+};
+
+export type SolutionUpdate = {
+    name?: (string | null);
+    notes?: (string | null);
+};
+
+export type SubstrateCreate = {
+    name: string;
+    thickness_nm?: (number | null);
+};
+
+export type SubstratePublic = {
+    name: string;
+    thickness_nm?: (number | null);
+    id: string;
 };
 
 export type Token = {
@@ -90,6 +340,13 @@ export type UsersPublic = {
     count: number;
 };
 
+export type UserStatePublic = {
+    data: {
+        [key: string]: unknown;
+    };
+    updated_at?: (string | null);
+};
+
 export type UserUpdate = {
     email?: (string | null);
     is_active?: boolean;
@@ -112,6 +369,38 @@ export type ValidationError = {
         [key: string]: unknown;
     };
 };
+
+export type ExperimentsReadExperimentsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type ExperimentsReadExperimentsResponse = (ExperimentsPublic);
+
+export type ExperimentsCreateItemData = {
+    requestBody: ExperimentCreate;
+};
+
+export type ExperimentsCreateItemResponse = (ExperimentPublic);
+
+export type ExperimentsReadExperimentData = {
+    id: string;
+};
+
+export type ExperimentsReadExperimentResponse = (ExperimentPublic);
+
+export type ExperimentsUpdateItemData = {
+    id: string;
+    requestBody: ExperimentUpdate;
+};
+
+export type ExperimentsUpdateItemResponse = (ExperimentPublic);
+
+export type ExperimentsDeleteExperimentData = {
+    id: string;
+};
+
+export type ExperimentsDeleteExperimentResponse = (unknown);
 
 export type ItemsReadItemsData = {
     limit?: number;
@@ -171,11 +460,176 @@ export type LoginRecoverPasswordHtmlContentData = {
 
 export type LoginRecoverPasswordHtmlContentResponse = (string);
 
+export type MaterialsReadMaterialsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type MaterialsReadMaterialsResponse = (MaterialsPublic);
+
+export type MaterialsCreateItemData = {
+    requestBody: MaterialCreate;
+};
+
+export type MaterialsCreateItemResponse = (MaterialPublic);
+
+export type MaterialsReadMaterialData = {
+    id: string;
+};
+
+export type MaterialsReadMaterialResponse = (MaterialPublic);
+
+export type MaterialsUpdateItemData = {
+    id: string;
+    requestBody: MaterialUpdate;
+};
+
+export type MaterialsUpdateItemResponse = (MaterialPublic);
+
+export type MaterialsDeleteMaterialData = {
+    id: string;
+};
+
+export type MaterialsDeleteMaterialResponse = (unknown);
+
+export type PlanesReadPlanesData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type PlanesReadPlanesResponse = (PlanesPublic);
+
+export type PlanesCreateItemData = {
+    requestBody: PlaneCreate;
+};
+
+export type PlanesCreateItemResponse = (PlanePublic);
+
+export type PlanesReadPlaneData = {
+    id: string;
+};
+
+export type PlanesReadPlaneResponse = (PlanePublic);
+
+export type PlanesUpdateItemData = {
+    id: string;
+    requestBody: PlaneUpdate;
+};
+
+export type PlanesUpdateItemResponse = (PlanePublic);
+
+export type PlanesDeletePlaneData = {
+    id: string;
+};
+
+export type PlanesDeletePlaneResponse = (unknown);
+
+export type PlanesReadPlaneElementsData = {
+    planeId: string;
+};
+
+export type PlanesReadPlaneElementsResponse = (Array<CanvasElementPublic>);
+
+export type PlanesCreateElementData = {
+    planeId: string;
+    requestBody: CanvasElementCreate;
+};
+
+export type PlanesCreateElementResponse = (CanvasElementPublic);
+
+export type PlanesUpdateElementData = {
+    elementId: string;
+    planeId: string;
+    requestBody: CanvasElementUpdate;
+};
+
+export type PlanesUpdateElementResponse = (CanvasElementPublic);
+
+export type PlanesDeleteElementData = {
+    elementId: string;
+    planeId: string;
+};
+
+export type PlanesDeleteElementResponse = (unknown);
+
 export type PrivateCreateUserData = {
     requestBody: PrivateUserCreate;
 };
 
 export type PrivateCreateUserResponse = (UserPublic);
+
+export type ResultsReadResultsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type ResultsReadResultsResponse = (ExperimentResultsListPublic);
+
+export type ResultsCreateResultData = {
+    experimentId: string;
+    requestBody: ExperimentResultsCreate;
+};
+
+export type ResultsCreateResultResponse = (ExperimentResultsPublic);
+
+export type ResultsReadResultData = {
+    id: string;
+};
+
+export type ResultsReadResultResponse = (ExperimentResultsPublic);
+
+export type ResultsUpdateResultData = {
+    id: string;
+    requestBody: ExperimentResultsUpdate;
+};
+
+export type ResultsUpdateResultResponse = (ExperimentResultsPublic);
+
+export type ResultsDeleteResultData = {
+    id: string;
+};
+
+export type ResultsDeleteResultResponse = (unknown);
+
+export type SolutionsReadSolutionsData = {
+    limit?: number;
+    skip?: number;
+};
+
+export type SolutionsReadSolutionsResponse = (SolutionsPublic);
+
+export type SolutionsCreateItemData = {
+    requestBody: SolutionCreate;
+};
+
+export type SolutionsCreateItemResponse = (SolutionPublic);
+
+export type SolutionsReadSolutionData = {
+    id: string;
+};
+
+export type SolutionsReadSolutionResponse = (SolutionPublic);
+
+export type SolutionsUpdateItemData = {
+    id: string;
+    requestBody: SolutionUpdate;
+};
+
+export type SolutionsUpdateItemResponse = (SolutionPublic);
+
+export type SolutionsDeleteSolutionData = {
+    id: string;
+};
+
+export type SolutionsDeleteSolutionResponse = (unknown);
+
+export type StateReadStateResponse = (UserStatePublic);
+
+export type StateUpdateStateData = {
+    requestBody: UserStatePublic;
+};
+
+export type StateUpdateStateResponse = (UserStatePublic);
 
 export type UsersReadUsersData = {
     limit?: number;

@@ -16,61 +16,61 @@
  */
 
 import type {
-  Material,
-  Solution,
+  CanvasElement,
   Experiment,
   ExperimentResults,
+  Material,
   Plane,
-  CanvasElement,
-} from './AppContext';
+  Solution,
+} from "./AppContext"
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export type AuthTokens = {
-  accessToken: string;
-  refreshToken?: string;
-  expiresAt?: number; // Unix ms
-};
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number // Unix ms
+}
 
 export type AuthTokenManager = {
   /** Get the current access token, refreshing if expired. */
-  getAccessToken(): Promise<string>;
+  getAccessToken(): Promise<string>
   /** Store new tokens (e.g. after login or refresh). */
-  setTokens(tokens: AuthTokens): void;
+  setTokens(tokens: AuthTokens): void
   /** Clear tokens (logout). */
-  clearTokens(): void;
+  clearTokens(): void
   /** Register a listener for auth state changes. Returns unsubscribe fn. */
-  onAuthChange(listener: (authenticated: boolean) => void): () => void;
-};
+  onAuthChange(listener: (authenticated: boolean) => void): () => void
+}
 
 /**
  * A simple token manager that stores tokens in memory with optional
  * localStorage persistence.  Replace with your OAuth / SSO flow as needed.
  */
 export function createTokenManager(options?: {
-  storageKey?: string;
-  onRefresh?: (refreshToken: string) => Promise<AuthTokens>;
+  storageKey?: string
+  onRefresh?: (refreshToken: string) => Promise<AuthTokens>
 }): AuthTokenManager {
-  const storageKey = options?.storageKey ?? 'plains_auth';
-  const listeners = new Set<(authenticated: boolean) => void>();
+  const storageKey = options?.storageKey ?? "plains_auth"
+  const listeners = new Set<(authenticated: boolean) => void>()
 
-  let tokens: AuthTokens | null = loadFromStorage();
+  let tokens: AuthTokens | null = loadFromStorage()
 
   function loadFromStorage(): AuthTokens | null {
     try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? (JSON.parse(raw) as AuthTokens) : null;
+      const raw = localStorage.getItem(storageKey)
+      return raw ? (JSON.parse(raw) as AuthTokens) : null
     } catch {
-      return null;
+      return null
     }
   }
 
   function persist() {
     try {
       if (tokens) {
-        localStorage.setItem(storageKey, JSON.stringify(tokens));
+        localStorage.setItem(storageKey, JSON.stringify(tokens))
       } else {
-        localStorage.removeItem(storageKey);
+        localStorage.removeItem(storageKey)
       }
     } catch {
       // Storage unavailable (SSR, private mode) — graceful no-op
@@ -78,62 +78,62 @@ export function createTokenManager(options?: {
   }
 
   function notify() {
-    const authed = tokens !== null;
+    const authed = tokens !== null
     for (const fn of listeners) {
-      fn(authed);
+      fn(authed)
     }
   }
 
   return {
     async getAccessToken(): Promise<string> {
       if (!tokens) {
-        throw new Error('Not authenticated');
+        throw new Error("Not authenticated")
       }
 
       // Refresh if expired (with 30 s buffer)
       if (tokens.expiresAt && Date.now() > tokens.expiresAt - 30_000) {
         if (options?.onRefresh && tokens.refreshToken) {
-          tokens = await options.onRefresh(tokens.refreshToken);
-          persist();
+          tokens = await options.onRefresh(tokens.refreshToken)
+          persist()
         } else {
-          throw new Error('Token expired and no refresh handler configured');
+          throw new Error("Token expired and no refresh handler configured")
         }
       }
 
-      return tokens.accessToken;
+      return tokens.accessToken
     },
 
     setTokens(t: AuthTokens) {
-      tokens = t;
-      persist();
-      notify();
+      tokens = t
+      persist()
+      notify()
     },
 
     clearTokens() {
-      tokens = null;
-      persist();
-      notify();
+      tokens = null
+      persist()
+      notify()
     },
 
     onAuthChange(listener: (authenticated: boolean) => void) {
-      listeners.add(listener);
+      listeners.add(listener)
       return () => {
-        listeners.delete(listener);
-      };
+        listeners.delete(listener)
+      }
     },
-  };
+  }
 }
 
 // ── Backend adapter interface ────────────────────────────────────────────────
 
 /** Full application state snapshot used for initial load and persistence. */
 export type AppSnapshot = {
-  materials: Material[];
-  solutions: Solution[];
-  experiments: Experiment[];
-  results: ExperimentResults[];
-  planes: Plane[];
-};
+  materials: Material[]
+  solutions: Solution[]
+  experiments: Experiment[]
+  results: ExperimentResults[]
+  planes: Plane[]
+}
 
 /**
  * Backend adapter — the contract that any persistence layer must fulfil.
@@ -145,61 +145,61 @@ export interface BackendAdapter {
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   /** Load the full application state (called once on mount). */
-  load(): Promise<AppSnapshot>;
+  load(): Promise<AppSnapshot>
 
   /** Persist the full application state (called on unmount / periodic save). */
-  save(snapshot: AppSnapshot): Promise<void>;
+  save(snapshot: AppSnapshot): Promise<void>
 
   // ── Materials ──────────────────────────────────────────────────────────────
 
-  getMaterials(): Promise<Material[]>;
-  createMaterial(material: Material): Promise<Material>;
-  updateMaterial(material: Material): Promise<Material>;
-  deleteMaterial(id: string): Promise<void>;
+  getMaterials(): Promise<Material[]>
+  createMaterial(material: Material): Promise<Material>
+  updateMaterial(material: Material): Promise<Material>
+  deleteMaterial(id: string): Promise<void>
 
   // ── Solutions ──────────────────────────────────────────────────────────────
 
-  getSolutions(): Promise<Solution[]>;
-  createSolution(solution: Solution): Promise<Solution>;
-  updateSolution(solution: Solution): Promise<Solution>;
-  deleteSolution(id: string): Promise<void>;
+  getSolutions(): Promise<Solution[]>
+  createSolution(solution: Solution): Promise<Solution>
+  updateSolution(solution: Solution): Promise<Solution>
+  deleteSolution(id: string): Promise<void>
 
   // ── Experiments ────────────────────────────────────────────────────────────
 
-  getExperiments(): Promise<Experiment[]>;
-  createExperiment(experiment: Experiment): Promise<Experiment>;
-  updateExperiment(experiment: Experiment): Promise<Experiment>;
-  deleteExperiment(id: string): Promise<void>;
+  getExperiments(): Promise<Experiment[]>
+  createExperiment(experiment: Experiment): Promise<Experiment>
+  updateExperiment(experiment: Experiment): Promise<Experiment>
+  deleteExperiment(id: string): Promise<void>
 
   // ── Results ────────────────────────────────────────────────────────────────
 
-  getResults(): Promise<ExperimentResults[]>;
-  createResults(results: ExperimentResults): Promise<ExperimentResults>;
-  updateResults(results: ExperimentResults): Promise<ExperimentResults>;
-  deleteResults(id: string): Promise<void>;
+  getResults(): Promise<ExperimentResults[]>
+  createResults(results: ExperimentResults): Promise<ExperimentResults>
+  updateResults(results: ExperimentResults): Promise<ExperimentResults>
+  deleteResults(id: string): Promise<void>
 
   // ── Planes & Elements ──────────────────────────────────────────────────────
 
-  getPlanes(): Promise<Plane[]>;
-  createPlane(plane: Plane): Promise<Plane>;
-  updatePlane(plane: Plane): Promise<Plane>;
-  deletePlane(id: string): Promise<void>;
+  getPlanes(): Promise<Plane[]>
+  createPlane(plane: Plane): Promise<Plane>
+  updatePlane(plane: Plane): Promise<Plane>
+  deletePlane(id: string): Promise<void>
 
-  createElement(planeId: string, element: CanvasElement): Promise<CanvasElement>;
-  updateElement(planeId: string, element: CanvasElement): Promise<CanvasElement>;
-  deleteElement(planeId: string, elementId: string): Promise<void>;
+  createElement(planeId: string, element: CanvasElement): Promise<CanvasElement>
+  updateElement(planeId: string, element: CanvasElement): Promise<CanvasElement>
+  deleteElement(planeId: string, elementId: string): Promise<void>
 }
 
 // ── In-memory (default) adapter ──────────────────────────────────────────────
 
-const LOCAL_STORAGE_KEY = 'plains_app_state';
+const LOCAL_STORAGE_KEY = "plains_app_state"
 
 /**
  * Default backend that keeps state in memory with optional localStorage
  * persistence for page reloads.
  */
 export class InMemoryBackend implements BackendAdapter {
-  private data: AppSnapshot;
+  private data: AppSnapshot
 
   constructor(initial?: Partial<AppSnapshot>) {
     this.data = {
@@ -208,34 +208,34 @@ export class InMemoryBackend implements BackendAdapter {
       experiments: initial?.experiments ?? [],
       results: initial?.results ?? [],
       planes: initial?.planes ?? [],
-    };
+    }
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   async load(): Promise<AppSnapshot> {
     try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY)
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<AppSnapshot>;
+        const parsed = JSON.parse(raw) as Partial<AppSnapshot>
         this.data = {
           materials: parsed.materials ?? this.data.materials,
           solutions: parsed.solutions ?? this.data.solutions,
           experiments: parsed.experiments ?? this.data.experiments,
           results: parsed.results ?? this.data.results,
           planes: parsed.planes ?? this.data.planes,
-        };
+        }
       }
     } catch {
       // Corrupted storage — start fresh
     }
-    return { ...this.data };
+    return { ...this.data }
   }
 
   async save(snapshot: AppSnapshot): Promise<void> {
-    this.data = snapshot;
+    this.data = snapshot
     try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(snapshot));
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(snapshot))
     } catch {
       // Storage full or unavailable
     }
@@ -244,106 +244,119 @@ export class InMemoryBackend implements BackendAdapter {
   // ── Materials ──────────────────────────────────────────────────────────────
 
   async getMaterials() {
-    return [...this.data.materials];
+    return [...this.data.materials]
   }
   async createMaterial(m: Material) {
-    this.data.materials = [...this.data.materials, m];
-    return m;
+    this.data.materials = [...this.data.materials, m]
+    return m
   }
   async updateMaterial(m: Material) {
-    this.data.materials = this.data.materials.map((x) => (x.id === m.id ? m : x));
-    return m;
+    this.data.materials = this.data.materials.map((x) =>
+      x.id === m.id ? m : x,
+    )
+    return m
   }
   async deleteMaterial(id: string) {
-    this.data.materials = this.data.materials.filter((x) => x.id !== id);
+    this.data.materials = this.data.materials.filter((x) => x.id !== id)
   }
 
   // ── Solutions ──────────────────────────────────────────────────────────────
 
   async getSolutions() {
-    return [...this.data.solutions];
+    return [...this.data.solutions]
   }
   async createSolution(s: Solution) {
-    this.data.solutions = [...this.data.solutions, s];
-    return s;
+    this.data.solutions = [...this.data.solutions, s]
+    return s
   }
   async updateSolution(s: Solution) {
-    this.data.solutions = this.data.solutions.map((x) => (x.id === s.id ? s : x));
-    return s;
+    this.data.solutions = this.data.solutions.map((x) =>
+      x.id === s.id ? s : x,
+    )
+    return s
   }
   async deleteSolution(id: string) {
-    this.data.solutions = this.data.solutions.filter((x) => x.id !== id);
+    this.data.solutions = this.data.solutions.filter((x) => x.id !== id)
   }
 
   // ── Experiments ────────────────────────────────────────────────────────────
 
   async getExperiments() {
-    return [...this.data.experiments];
+    return [...this.data.experiments]
   }
   async createExperiment(e: Experiment) {
-    this.data.experiments = [...this.data.experiments, e];
-    return e;
+    this.data.experiments = [...this.data.experiments, e]
+    return e
   }
   async updateExperiment(e: Experiment) {
-    this.data.experiments = this.data.experiments.map((x) => (x.id === e.id ? e : x));
-    return e;
+    this.data.experiments = this.data.experiments.map((x) =>
+      x.id === e.id ? e : x,
+    )
+    return e
   }
   async deleteExperiment(id: string) {
-    this.data.experiments = this.data.experiments.filter((x) => x.id !== id);
+    this.data.experiments = this.data.experiments.filter((x) => x.id !== id)
   }
 
   // ── Results ────────────────────────────────────────────────────────────────
 
   async getResults() {
-    return [...this.data.results];
+    return [...this.data.results]
   }
   async createResults(r: ExperimentResults) {
-    this.data.results = [...this.data.results, r];
-    return r;
+    this.data.results = [...this.data.results, r]
+    return r
   }
   async updateResults(r: ExperimentResults) {
-    this.data.results = this.data.results.map((x) => (x.id === r.id ? r : x));
-    return r;
+    this.data.results = this.data.results.map((x) => (x.id === r.id ? r : x))
+    return r
   }
   async deleteResults(id: string) {
-    this.data.results = this.data.results.filter((x) => x.id !== id);
+    this.data.results = this.data.results.filter((x) => x.id !== id)
   }
 
   // ── Planes & Elements ──────────────────────────────────────────────────────
 
   async getPlanes() {
-    return [...this.data.planes];
+    return [...this.data.planes]
   }
   async createPlane(p: Plane) {
-    this.data.planes = [...this.data.planes, p];
-    return p;
+    this.data.planes = [...this.data.planes, p]
+    return p
   }
   async updatePlane(p: Plane) {
-    this.data.planes = this.data.planes.map((x) => (x.id === p.id ? p : x));
-    return p;
+    this.data.planes = this.data.planes.map((x) => (x.id === p.id ? p : x))
+    return p
   }
   async deletePlane(id: string) {
-    this.data.planes = this.data.planes.filter((x) => x.id !== id);
+    this.data.planes = this.data.planes.filter((x) => x.id !== id)
   }
 
   async createElement(planeId: string, element: CanvasElement) {
     this.data.planes = this.data.planes.map((p) =>
-      p.id === planeId ? { ...p, elements: [...p.elements, element] } : p
-    );
-    return element;
+      p.id === planeId ? { ...p, elements: [...p.elements, element] } : p,
+    )
+    return element
   }
   async updateElement(planeId: string, element: CanvasElement) {
     this.data.planes = this.data.planes.map((p) =>
       p.id === planeId
-        ? { ...p, elements: p.elements.map((e) => (e.id === element.id ? element : e)) }
-        : p
-    );
-    return element;
+        ? {
+            ...p,
+            elements: p.elements.map((e) =>
+              e.id === element.id ? element : e,
+            ),
+          }
+        : p,
+    )
+    return element
   }
   async deleteElement(planeId: string, elementId: string) {
     this.data.planes = this.data.planes.map((p) =>
-      p.id === planeId ? { ...p, elements: p.elements.filter((e) => e.id !== elementId) } : p
-    );
+      p.id === planeId
+        ? { ...p, elements: p.elements.filter((e) => e.id !== elementId) }
+        : p,
+    )
   }
 }
 
@@ -363,128 +376,140 @@ export class InMemoryBackend implements BackendAdapter {
 export class HttpBackend implements BackendAdapter {
   constructor(
     private baseUrl: string,
-    private auth: AuthTokenManager
+    private auth: AuthTokenManager,
   ) {}
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const token = await this.auth.getAccessToken();
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const token = await this.auth.getAccessToken()
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       body: body ? JSON.stringify(body) : undefined,
-    });
+    })
 
     if (res.status === 401) {
-      this.auth.clearTokens();
-      throw new Error('Unauthorized — please log in again');
+      this.auth.clearTokens()
+      throw new Error("Unauthorized — please log in again")
     }
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`);
+      const text = await res.text().catch(() => "")
+      throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`)
     }
 
     if (res.status === 204) {
-      return undefined as T;
+      return undefined as T
     }
-    return res.json() as Promise<T>;
+    return res.json() as Promise<T>
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   async load(): Promise<AppSnapshot> {
-    return this.request('GET', '/state');
+    return this.request("GET", "/state")
   }
 
   async save(snapshot: AppSnapshot): Promise<void> {
-    await this.request('PUT', '/state', snapshot);
+    await this.request("PUT", "/state", snapshot)
   }
 
   // ── Materials ──────────────────────────────────────────────────────────────
 
   async getMaterials() {
-    return this.request<Material[]>('GET', '/materials');
+    return this.request<Material[]>("GET", "/materials")
   }
   async createMaterial(m: Material) {
-    return this.request<Material>('POST', '/materials', m);
+    return this.request<Material>("POST", "/materials", m)
   }
   async updateMaterial(m: Material) {
-    return this.request<Material>('PUT', `/materials/${m.id}`, m);
+    return this.request<Material>("PUT", `/materials/${m.id}`, m)
   }
   async deleteMaterial(id: string) {
-    await this.request('DELETE', `/materials/${id}`);
+    await this.request("DELETE", `/materials/${id}`)
   }
 
   // ── Solutions ──────────────────────────────────────────────────────────────
 
   async getSolutions() {
-    return this.request<Solution[]>('GET', '/solutions');
+    return this.request<Solution[]>("GET", "/solutions")
   }
   async createSolution(s: Solution) {
-    return this.request<Solution>('POST', '/solutions', s);
+    return this.request<Solution>("POST", "/solutions", s)
   }
   async updateSolution(s: Solution) {
-    return this.request<Solution>('PUT', `/solutions/${s.id}`, s);
+    return this.request<Solution>("PUT", `/solutions/${s.id}`, s)
   }
   async deleteSolution(id: string) {
-    await this.request('DELETE', `/solutions/${id}`);
+    await this.request("DELETE", `/solutions/${id}`)
   }
 
   // ── Experiments ────────────────────────────────────────────────────────────
 
   async getExperiments() {
-    return this.request<Experiment[]>('GET', '/experiments');
+    return this.request<Experiment[]>("GET", "/experiments")
   }
   async createExperiment(e: Experiment) {
-    return this.request<Experiment>('POST', '/experiments', e);
+    return this.request<Experiment>("POST", "/experiments", e)
   }
   async updateExperiment(e: Experiment) {
-    return this.request<Experiment>('PUT', `/experiments/${e.id}`, e);
+    return this.request<Experiment>("PUT", `/experiments/${e.id}`, e)
   }
   async deleteExperiment(id: string) {
-    await this.request('DELETE', `/experiments/${id}`);
+    await this.request("DELETE", `/experiments/${id}`)
   }
 
   // ── Results ────────────────────────────────────────────────────────────────
 
   async getResults() {
-    return this.request<ExperimentResults[]>('GET', '/results');
+    return this.request<ExperimentResults[]>("GET", "/results")
   }
   async createResults(r: ExperimentResults) {
-    return this.request<ExperimentResults>('POST', '/results', r);
+    return this.request<ExperimentResults>("POST", "/results", r)
   }
   async updateResults(r: ExperimentResults) {
-    return this.request<ExperimentResults>('PUT', `/results/${r.id}`, r);
+    return this.request<ExperimentResults>("PUT", `/results/${r.id}`, r)
   }
   async deleteResults(id: string) {
-    await this.request('DELETE', `/results/${id}`);
+    await this.request("DELETE", `/results/${id}`)
   }
 
   // ── Planes & Elements ──────────────────────────────────────────────────────
 
   async getPlanes() {
-    return this.request<Plane[]>('GET', '/planes');
+    return this.request<Plane[]>("GET", "/planes")
   }
   async createPlane(p: Plane) {
-    return this.request<Plane>('POST', '/planes', p);
+    return this.request<Plane>("POST", "/planes", p)
   }
   async updatePlane(p: Plane) {
-    return this.request<Plane>('PUT', `/planes/${p.id}`, p);
+    return this.request<Plane>("PUT", `/planes/${p.id}`, p)
   }
   async deletePlane(id: string) {
-    await this.request('DELETE', `/planes/${id}`);
+    await this.request("DELETE", `/planes/${id}`)
   }
 
   async createElement(planeId: string, element: CanvasElement) {
-    return this.request<CanvasElement>('POST', `/planes/${planeId}/elements`, element);
+    return this.request<CanvasElement>(
+      "POST",
+      `/planes/${planeId}/elements`,
+      element,
+    )
   }
   async updateElement(planeId: string, element: CanvasElement) {
-    return this.request<CanvasElement>('PUT', `/planes/${planeId}/elements/${element.id}`, element);
+    return this.request<CanvasElement>(
+      "PUT",
+      `/planes/${planeId}/elements/${element.id}`,
+      element,
+    )
   }
   async deleteElement(planeId: string, elementId: string) {
-    await this.request('DELETE', `/planes/${planeId}/elements/${elementId}`);
+    await this.request("DELETE", `/planes/${planeId}/elements/${elementId}`)
   }
 }

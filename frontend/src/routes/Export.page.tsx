@@ -1,10 +1,14 @@
-import { Box, Text, Title } from '@mantine/core';
+import { Container, Text, Title } from "@mantine/core"
 
 export function ExportPage() {
   return (
-    <Box p="md">
-      <Title order={2}>Export Page</Title>
-      <Text c="dimmed" size="sm">Coming soon...</Text>
-    </Box>
-  );
+    <Container>
+      <Title order={2} mt="md">
+        Export
+      </Title>
+      <Text c="dimmed" mt="sm">
+        Export your data here.
+      </Text>
+    </Container>
+  )
 }

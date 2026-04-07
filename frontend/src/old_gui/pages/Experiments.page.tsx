@@ -5,8 +5,8 @@ import {
   Button,
   Card,
   Checkbox,
-  ColorSwatch,
   Collapse,
+  ColorSwatch,
   Divider,
   FileInput,
   Group,
@@ -19,41 +19,41 @@ import {
   Stack,
   Tabs,
   Text,
-  TextInput,
   Textarea,
+  TextInput,
   Title,
   Tooltip,
-} from '@mantine/core';
+} from "@mantine/core"
 import {
   IconChevronDown,
   IconChevronRight,
   IconFlask,
+  IconInfoCircle,
   IconLayersLinked,
   IconPlus,
-  IconTrash,
-  IconX,
-  IconInfoCircle,
   IconStack2,
+  IconTrash,
   IconUpload,
-} from '@tabler/icons-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+  IconX,
+} from "@tabler/icons-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
+  type DeviceArchitecture,
   type Experiment,
   type ExperimentLayer,
-  type ParamMode,
-  type ProcessParam,
-  type DeviceArchitecture,
-  type Substrate,
+  generateSubstrates,
+  getExperimentMissingFields,
+  getExperimentStatus,
+  getVariedParameters,
   newExperiment,
   newLayer,
-  generateSubstrates,
+  type ParamMode,
+  type ProcessParam,
   regenerateSubstrateNames,
-  getExperimentStatus,
-  getExperimentMissingFields,
-  getVariedParameters,
+  type Substrate,
   useAppContext,
   useEntityCollection,
-} from '../store/AppContext';
+} from "../store/AppContext"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Buffered inputs — keep a local draft so parent only re-renders on commit
@@ -64,26 +64,26 @@ function BufferedTextInput({
   value,
   onCommit,
   ...rest
-}: Omit<React.ComponentProps<typeof TextInput>, 'value' | 'onChange'> & {
-  value: string;
-  onCommit: (v: string) => void;
+}: Omit<React.ComponentProps<typeof TextInput>, "value" | "onChange"> & {
+  value: string
+  onCommit: (v: string) => void
 }) {
-  const [draft, setDraft] = useState(value);
-  const latest = useRef(value);
+  const [draft, setDraft] = useState(value)
+  const latest = useRef(value)
   // Sync when the external value changes (e.g. different experiment selected)
   useEffect(() => {
     if (value !== latest.current) {
-      setDraft(value);
-      latest.current = value;
+      setDraft(value)
+      latest.current = value
     }
-  }, [value]);
+  }, [value])
 
   const commit = useCallback(() => {
     if (draft !== latest.current) {
-      latest.current = draft;
-      onCommit(draft);
+      latest.current = draft
+      onCommit(draft)
     }
-  }, [draft, onCommit]);
+  }, [draft, onCommit])
 
   return (
     <TextInput
@@ -92,11 +92,13 @@ function BufferedTextInput({
       onChange={(e) => setDraft(e.currentTarget.value)}
       onBlur={commit}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {commit();}
-        rest.onKeyDown?.(e);
+        if (e.key === "Enter") {
+          commit()
+        }
+        rest.onKeyDown?.(e)
       }}
     />
-  );
+  )
 }
 
 /** Textarea that buffers locally and commits on blur. */
@@ -104,25 +106,25 @@ function BufferedTextarea({
   value,
   onCommit,
   ...rest
-}: Omit<React.ComponentProps<typeof Textarea>, 'value' | 'onChange'> & {
-  value: string;
-  onCommit: (v: string) => void;
+}: Omit<React.ComponentProps<typeof Textarea>, "value" | "onChange"> & {
+  value: string
+  onCommit: (v: string) => void
 }) {
-  const [draft, setDraft] = useState(value);
-  const latest = useRef(value);
+  const [draft, setDraft] = useState(value)
+  const latest = useRef(value)
   useEffect(() => {
     if (value !== latest.current) {
-      setDraft(value);
-      latest.current = value;
+      setDraft(value)
+      latest.current = value
     }
-  }, [value]);
+  }, [value])
 
   const commit = useCallback(() => {
     if (draft !== latest.current) {
-      latest.current = draft;
-      onCommit(draft);
+      latest.current = draft
+      onCommit(draft)
     }
-  }, [draft, onCommit]);
+  }, [draft, onCommit])
 
   return (
     <Textarea
@@ -131,7 +133,7 @@ function BufferedTextarea({
       onChange={(e) => setDraft(e.currentTarget.value)}
       onBlur={commit}
     />
-  );
+  )
 }
 
 /** NumberInput that buffers locally and commits on blur. */
@@ -139,26 +141,26 @@ function BufferedNumberInput({
   value,
   onCommit,
   ...rest
-}: Omit<React.ComponentProps<typeof NumberInput>, 'value' | 'onChange'> & {
-  value: number;
-  onCommit: (v: number) => void;
+}: Omit<React.ComponentProps<typeof NumberInput>, "value" | "onChange"> & {
+  value: number
+  onCommit: (v: number) => void
 }) {
-  const [draft, setDraft] = useState<string | number>(value);
-  const latest = useRef(value);
+  const [draft, setDraft] = useState<string | number>(value)
+  const latest = useRef(value)
   useEffect(() => {
     if (value !== latest.current) {
-      setDraft(value);
-      latest.current = value;
+      setDraft(value)
+      latest.current = value
     }
-  }, [value]);
+  }, [value])
 
   const commit = useCallback(() => {
-    const num = Number(draft) || 0;
+    const num = Number(draft) || 0
     if (num !== latest.current) {
-      latest.current = num;
-      onCommit(num);
+      latest.current = num
+      onCommit(num)
     }
-  }, [draft, onCommit]);
+  }, [draft, onCommit])
 
   return (
     <NumberInput
@@ -167,7 +169,7 @@ function BufferedNumberInput({
       onChange={(v) => setDraft(v as string | number)}
       onBlur={commit}
     />
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,36 +181,42 @@ function DeviceStackPreview({
   layers,
   architecture,
 }: {
-  substrateMaterial: string;
-  layers: ExperimentLayer[];
-  architecture: DeviceArchitecture;
+  substrateMaterial: string
+  layers: ExperimentLayer[]
+  architecture: DeviceArchitecture
 }) {
-  const LAYER_HEIGHT = 40;
-  const SUBSTRATE_HEIGHT = 50;
+  const LAYER_HEIGHT = 40
+  const SUBSTRATE_HEIGHT = 50
 
   return (
     <Paper withBorder p="md" radius="md">
       <Group justify="space-between" mb="sm">
-        <Text size="sm" fw={600}>Device Stack</Text>
-        <Badge size="sm" variant="light" color="violet">{architecture}</Badge>
+        <Text size="sm" fw={600}>
+          Device Stack
+        </Text>
+        <Badge size="sm" variant="light" color="violet">
+          {architecture}
+        </Badge>
       </Group>
-      
-      <Box style={{ display: 'flex', flexDirection: 'column-reverse', gap: 2 }}>
+
+      <Box style={{ display: "flex", flexDirection: "column-reverse", gap: 2 }}>
         {/* Substrate at bottom */}
         <Box
           style={{
-            background: 'linear-gradient(135deg, #a8d5e5 0%, #74b9d0 100%)',
+            background: "linear-gradient(135deg, #a8d5e5 0%, #74b9d0 100%)",
             height: SUBSTRATE_HEIGHT,
             borderRadius: 4,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid rgba(0,0,0,0.1)',
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid rgba(0,0,0,0.1)",
           }}
         >
-          <Text size="xs" fw={600} c="dark">{substrateMaterial}</Text>
+          <Text size="xs" fw={600} c="dark">
+            {substrateMaterial}
+          </Text>
         </Box>
-        
+
         {/* Layers stacked on top */}
         {layers.map((layer, idx) => (
           <Box
@@ -217,21 +225,26 @@ function DeviceStackPreview({
               background: layer.color,
               height: LAYER_HEIGHT,
               borderRadius: 4,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px solid rgba(0,0,0,0.1)',
-              position: 'relative',
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              border: "1px solid rgba(0,0,0,0.1)",
+              position: "relative",
             }}
           >
-            <Text size="xs" fw={600} c="white" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>
+            <Text
+              size="xs"
+              fw={600}
+              c="white"
+              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
+            >
               {layer.name}
             </Text>
             <Text
               size="10px"
               c="white"
               style={{
-                position: 'absolute',
+                position: "absolute",
                 right: 6,
                 top: 2,
                 opacity: 0.7,
@@ -242,14 +255,14 @@ function DeviceStackPreview({
           </Box>
         ))}
       </Box>
-      
+
       {layers.length === 0 && (
         <Text size="xs" c="dimmed" ta="center" mt="sm">
           Add layers to see the device stack
         </Text>
       )}
     </Paper>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,18 +275,18 @@ function ProcessParamInput({
   onChange,
   placeholder,
   unit,
-  type = 'text',
+  type = "text",
 }: {
-  label: string;
-  param?: ProcessParam;
-  onChange: (param: ProcessParam | undefined) => void;
-  placeholder?: string;
-  unit?: string;
-  type?: 'text' | 'number';
+  label: string
+  param?: ProcessParam
+  onChange: (param: ProcessParam | undefined) => void
+  placeholder?: string
+  unit?: string
+  type?: "text" | "number"
 }) {
-  const hasValue = param && param.value !== '';
-  const [expanded, setExpanded] = useState(hasValue);
-  
+  const hasValue = param && param.value !== ""
+  const [expanded, setExpanded] = useState(hasValue)
+
   if (!expanded) {
     return (
       <Button
@@ -282,76 +295,90 @@ function ProcessParamInput({
         color="gray"
         leftSection={<IconPlus size={12} />}
         onClick={() => {
-          setExpanded(true);
-          onChange({ value: '', mode: 'constant' });
+          setExpanded(true)
+          onChange({ value: "", mode: "constant" })
         }}
-        style={{ justifyContent: 'flex-start' }}
+        style={{ justifyContent: "flex-start" }}
       >
         Add {label}
       </Button>
-    );
+    )
   }
 
   return (
     <Box>
       <Group gap="xs" mb={4}>
-        <Text size="xs" fw={500}>{label}</Text>
-        {unit && <Text size="xs" c="dimmed">({unit})</Text>}
+        <Text size="xs" fw={500}>
+          {label}
+        </Text>
+        {unit && (
+          <Text size="xs" c="dimmed">
+            ({unit})
+          </Text>
+        )}
         <ActionIcon
           size="xs"
           variant="subtle"
           color="red"
           onClick={() => {
-            setExpanded(false);
-            onChange(undefined);
+            setExpanded(false)
+            onChange(undefined)
           }}
         >
           <IconX size={10} />
         </ActionIcon>
       </Group>
-      
+
       <Group gap="xs">
-        {type === 'number' ? (
+        {type === "number" ? (
           <BufferedNumberInput
             size="xs"
             value={param?.value ? parseFloat(param.value) : 0}
-            onCommit={(val) => onChange({ ...param!, value: String(val ?? '') })}
+            onCommit={(val) =>
+              onChange({ ...param!, value: String(val ?? "") })
+            }
             placeholder={placeholder}
             style={{ flex: 1 }}
-            disabled={param?.mode === 'variation'}
+            disabled={param?.mode === "variation"}
           />
         ) : (
           <BufferedTextInput
             size="xs"
-            value={param?.value ?? ''}
+            value={param?.value ?? ""}
             onCommit={(v) => onChange({ ...param!, value: v })}
             placeholder={placeholder}
             style={{ flex: 1 }}
-            disabled={param?.mode === 'variation'}
+            disabled={param?.mode === "variation"}
           />
         )}
-        
+
         <SegmentedControl
           size="xs"
-          value={param?.mode ?? 'constant'}
+          value={param?.mode ?? "constant"}
           onChange={(v) => onChange({ ...param!, mode: v as ParamMode })}
           data={[
-            { label: 'Const', value: 'constant' },
-            { label: 'Vary', value: 'variation' },
+            { label: "Const", value: "constant" },
+            { label: "Vary", value: "variation" },
           ]}
         />
       </Group>
-      
-      {param?.mode === 'variation' && (
-        <Paper withBorder p="xs" mt="xs" style={{ background: 'var(--mantine-color-yellow-0)' }}>
+
+      {param?.mode === "variation" && (
+        <Paper
+          withBorder
+          p="xs"
+          mt="xs"
+          style={{ background: "var(--mantine-color-yellow-0)" }}
+        >
           <Text size="xs" c="dimmed">
-            <IconInfoCircle size={12} style={{ verticalAlign: 'middle' }} /> Variation editor coming soon. 
-            Define different values for different substrates here.
+            <IconInfoCircle size={12} style={{ verticalAlign: "middle" }} />{" "}
+            Variation editor coming soon. Define different values for different
+            substrates here.
           </Text>
         </Paper>
       )}
     </Box>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -366,18 +393,19 @@ function LayerCard({
   materials,
   solutions,
 }: {
-  layer: ExperimentLayer;
-  index: number;
-  onUpdate: (layer: ExperimentLayer) => void;
-  onDelete: () => void;
-  materials: { id: string; name: string }[];
-  solutions: { id: string; name: string }[];
+  layer: ExperimentLayer
+  index: number
+  onUpdate: (layer: ExperimentLayer) => void
+  onDelete: () => void
+  materials: { id: string; name: string }[]
+  solutions: { id: string; name: string }[]
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(true)
 
-  const updateParam = (key: keyof ExperimentLayer) => (param: ProcessParam | undefined) => {
-    onUpdate({ ...layer, [key]: param });
-  };
+  const updateParam =
+    (key: keyof ExperimentLayer) => (param: ProcessParam | undefined) => {
+      onUpdate({ ...layer, [key]: param })
+    }
 
   // Count filled optional parameters
   const filledParams = [
@@ -389,41 +417,50 @@ function LayerCard({
     layer.annealingTime,
     layer.annealingTemp,
     layer.annealingAtmosphere,
-  ].filter((p) => p && p.value).length;
+  ].filter((p) => p?.value).length
 
   return (
-    <Card withBorder radius="md" p={0} style={{ overflow: 'visible' }}>
+    <Card withBorder radius="md" p={0} style={{ overflow: "visible" }}>
       {/* Header */}
       <Group
         gap="sm"
         p="sm"
         style={{
           background: `linear-gradient(90deg, ${layer.color}22 0%, transparent 100%)`,
-          cursor: 'pointer',
+          cursor: "pointer",
         }}
         onClick={() => setExpanded(!expanded)}
       >
         <ColorSwatch color={layer.color} size={20} />
-        <Text fw={600} style={{ flex: 1 }}>{layer.name || `Layer ${index + 1}`}</Text>
-        
+        <Text fw={600} style={{ flex: 1 }}>
+          {layer.name || `Layer ${index + 1}`}
+        </Text>
+
         {filledParams > 0 && (
           <Badge size="xs" variant="light" color="teal">
             {filledParams} params
           </Badge>
         )}
-        
+
         <ActionIcon
           size="sm"
           variant="subtle"
           color="red"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
         >
           <IconTrash size={14} />
         </ActionIcon>
-        
-        {expanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+
+        {expanded ? (
+          <IconChevronDown size={16} />
+        ) : (
+          <IconChevronRight size={16} />
+        )}
       </Group>
-      
+
       <Collapse expanded={expanded}>
         <Box p="sm" pt={0}>
           {/* Basic info */}
@@ -439,47 +476,57 @@ function LayerCard({
               label="Color"
               type="color"
               value={layer.color}
-              onChange={(e) => onUpdate({ ...layer, color: e.currentTarget.value })}
+              onChange={(e) =>
+                onUpdate({ ...layer, color: e.currentTarget.value })
+              }
               style={{ width: 80 }}
             />
             <Select
               size="xs"
               label="Material"
               placeholder="Select or leave empty"
-              data={materials.map((m) => ({ value: m.id, label: m.name || 'Unnamed' }))}
+              data={materials.map((m) => ({
+                value: m.id,
+                label: m.name || "Unnamed",
+              }))}
               value={layer.materialId ?? null}
-              onChange={(v) => onUpdate({ ...layer, materialId: v ?? undefined })}
+              onChange={(v) =>
+                onUpdate({ ...layer, materialId: v ?? undefined })
+              }
               clearable
               searchable
             />
           </SimpleGrid>
-          
+
           <Select
             size="xs"
             label="Solution"
             placeholder="Select or leave empty"
-            data={solutions.map((s) => ({ value: s.id, label: s.name || 'Unnamed' }))}
+            data={solutions.map((s) => ({
+              value: s.id,
+              label: s.name || "Unnamed",
+            }))}
             value={layer.solutionId ?? null}
             onChange={(v) => onUpdate({ ...layer, solutionId: v ?? undefined })}
             clearable
             searchable
             mb="md"
           />
-          
+
           <Divider label="Process Parameters" labelPosition="center" mb="sm" />
-          
+
           {/* Suggested parameters - show add buttons for missing ones */}
           <SimpleGrid cols={2} spacing="sm">
             <ProcessParamInput
               label="Deposition Method"
               param={layer.depositionMethod}
-              onChange={updateParam('depositionMethod')}
+              onChange={updateParam("depositionMethod")}
               placeholder="e.g. Spin coating"
             />
             <ProcessParamInput
               label="Substrate Temperature"
               param={layer.substrateTemp}
-              onChange={updateParam('substrateTemp')}
+              onChange={updateParam("substrateTemp")}
               placeholder="e.g. 25"
               unit="°C"
               type="number"
@@ -487,13 +534,13 @@ function LayerCard({
             <ProcessParamInput
               label="Deposition Atmosphere"
               param={layer.depositionAtmosphere}
-              onChange={updateParam('depositionAtmosphere')}
+              onChange={updateParam("depositionAtmosphere")}
               placeholder="e.g. N2 glovebox"
             />
             <ProcessParamInput
               label="Solution Volume"
               param={layer.solutionVolume}
-              onChange={updateParam('solutionVolume')}
+              onChange={updateParam("solutionVolume")}
               placeholder="e.g. 50"
               unit="µL"
               type="number"
@@ -501,13 +548,13 @@ function LayerCard({
             <ProcessParamInput
               label="Drying/Quenching"
               param={layer.dryingMethod}
-              onChange={updateParam('dryingMethod')}
+              onChange={updateParam("dryingMethod")}
               placeholder="e.g. Antisolvent drip"
             />
             <ProcessParamInput
               label="Annealing Time"
               param={layer.annealingTime}
-              onChange={updateParam('annealingTime')}
+              onChange={updateParam("annealingTime")}
               placeholder="e.g. 10"
               unit="min"
               type="number"
@@ -515,7 +562,7 @@ function LayerCard({
             <ProcessParamInput
               label="Annealing Temperature"
               param={layer.annealingTemp}
-              onChange={updateParam('annealingTemp')}
+              onChange={updateParam("annealingTemp")}
               placeholder="e.g. 100"
               unit="°C"
               type="number"
@@ -523,16 +570,16 @@ function LayerCard({
             <ProcessParamInput
               label="Annealing Atmosphere"
               param={layer.annealingAtmosphere}
-              onChange={updateParam('annealingAtmosphere')}
+              onChange={updateParam("annealingAtmosphere")}
               placeholder="e.g. Air"
             />
           </SimpleGrid>
-          
+
           <BufferedTextarea
             size="xs"
             label="Notes"
             placeholder="Any additional notes for this layer..."
-            value={layer.notes ?? ''}
+            value={layer.notes ?? ""}
             onCommit={(v) => onUpdate({ ...layer, notes: v })}
             mt="sm"
             minRows={2}
@@ -540,7 +587,7 @@ function LayerCard({
         </Box>
       </Collapse>
     </Card>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -551,85 +598,102 @@ function ParameterVariationTab({
   experiment,
   onUpdate,
 }: {
-  experiment: Experiment;
-  onUpdate: (exp: Experiment) => void;
+  experiment: Experiment
+  onUpdate: (exp: Experiment) => void
 }) {
-  const variedParams = getVariedParameters(experiment);
-  const [selectedParamKeys, setSelectedParamKeys] = useState<Set<string>>(new Set());
-  const [helperValue, setHelperValue] = useState('');
-  const [helperCount, setHelperCount] = useState(1);
+  const variedParams = getVariedParameters(experiment)
+  const [selectedParamKeys, setSelectedParamKeys] = useState<Set<string>>(
+    new Set(),
+  )
+  const [helperValue, setHelperValue] = useState("")
+  const [helperCount, setHelperCount] = useState(1)
 
   const toggleParam = (paramKey: string) => {
     setSelectedParamKeys((prev) => {
-      const next = new Set(prev);
-      next.has(paramKey) ? next.delete(paramKey) : next.add(paramKey);
-      return next;
-    });
-  };
+      const next = new Set(prev)
+      next.has(paramKey) ? next.delete(paramKey) : next.add(paramKey)
+      return next
+    })
+  }
 
-  const updateSubstrateParam = (substrateIndex: number, paramKey: string, value: string) => {
-    const newSubstrates = [...experiment.substrates];
+  const updateSubstrateParam = (
+    substrateIndex: number,
+    paramKey: string,
+    value: string,
+  ) => {
+    const newSubstrates = [...experiment.substrates]
     newSubstrates[substrateIndex] = {
       ...newSubstrates[substrateIndex],
       parameterValues: {
         ...newSubstrates[substrateIndex].parameterValues,
         [paramKey]: value,
       },
-    };
-    onUpdate({ ...experiment, substrates: newSubstrates });
-  };
+    }
+    onUpdate({ ...experiment, substrates: newSubstrates })
+  }
 
   const applyHelperAssignment = () => {
-    if (selectedParamKeys.size === 0 || !helperValue) {return;}
-    const newSubstrates = [...experiment.substrates];
-    const keysToAssign = Array.from(selectedParamKeys);
+    if (selectedParamKeys.size === 0 || !helperValue) {
+      return
+    }
+    const newSubstrates = [...experiment.substrates]
+    const keysToAssign = Array.from(selectedParamKeys)
 
     keysToAssign.forEach((paramKey) => {
-      let assigned = 0;
+      let assigned = 0
       for (let i = 0; i < newSubstrates.length && assigned < helperCount; i++) {
-        const sub = newSubstrates[i];
-        const paramValues = sub.parameterValues || {};
-        if (!paramValues[paramKey] || paramValues[paramKey] === '') {
+        const sub = newSubstrates[i]
+        const paramValues = sub.parameterValues || {}
+        if (!paramValues[paramKey] || paramValues[paramKey] === "") {
           newSubstrates[i] = {
             ...newSubstrates[i],
-            parameterValues: { ...newSubstrates[i].parameterValues, [paramKey]: helperValue },
-          };
-          assigned++;
+            parameterValues: {
+              ...newSubstrates[i].parameterValues,
+              [paramKey]: helperValue,
+            },
+          }
+          assigned++
         }
       }
-    });
+    })
 
-    onUpdate({ ...experiment, substrates: newSubstrates });
-    setHelperValue('');
-    setHelperCount(1);
-  };
+    onUpdate({ ...experiment, substrates: newSubstrates })
+    setHelperValue("")
+    setHelperCount(1)
+  }
 
   return (
     <Stack gap="md">
       {/* Parameters marked for variation — act as selectable toggle buttons */}
       <Paper withBorder p="md" radius="md">
-        <Text size="sm" fw={600} mb="sm">Parameters marked for variation</Text>
-        <Text size="xs" c="dimmed" mb="sm">Select one or more to use with the bulk assign helper below.</Text>
+        <Text size="sm" fw={600} mb="sm">
+          Parameters marked for variation
+        </Text>
+        <Text size="xs" c="dimmed" mb="sm">
+          Select one or more to use with the bulk assign helper below.
+        </Text>
         <Group gap="xs">
           {variedParams.map((param) => {
-            const selected = selectedParamKeys.has(param.paramKey);
+            const selected = selectedParamKeys.has(param.paramKey)
             return (
               <Button
                 key={param.paramKey}
                 size="xs"
-                variant={selected ? 'filled' : 'outline'}
-                color={selected ? 'blue' : 'gray'}
+                variant={selected ? "filled" : "outline"}
+                color={selected ? "blue" : "gray"}
                 onClick={() => toggleParam(param.paramKey)}
               >
                 {param.layerName}: {param.paramName}
               </Button>
-            );
+            )
           })}
         </Group>
 
         {/* Inline bulk assign helper — always visible */}
         <Divider my="sm" />
-        <Text size="xs" fw={500} mb="xs">Bulk Assign Helper</Text>
+        <Text size="xs" fw={500} mb="xs">
+          Bulk Assign Helper
+        </Text>
         <Group gap="sm" align="flex-end">
           <TextInput
             label="Value"
@@ -657,40 +721,44 @@ function ParameterVariationTab({
           </Button>
         </Group>
         {selectedParamKeys.size === 0 && (
-          <Text size="xs" c="dimmed" mt={4}>Select at least one parameter above to assign.</Text>
+          <Text size="xs" c="dimmed" mt={4}>
+            Select at least one parameter above to assign.
+          </Text>
         )}
       </Paper>
 
       {/* Variation table */}
       <Paper withBorder p="md" radius="md">
-        <Text size="sm" fw={600} mb="md">Substrate Parameter Values</Text>
+        <Text size="sm" fw={600} mb="md">
+          Substrate Parameter Values
+        </Text>
 
         {experiment.substrates.length === 0 ? (
           <Text size="sm" c="dimmed" ta="center" py="md">
             No substrates. Create substrates in the Substrates tab.
           </Text>
         ) : (
-          <Box style={{ overflowX: 'auto' }}>
+          <Box style={{ overflowX: "auto" }}>
             <table
               style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '14px',
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "14px",
               }}
             >
               <thead>
                 <tr
                   style={{
-                    background: 'var(--mantine-color-gray-1)',
-                    borderBottom: '2px solid var(--mantine-color-gray-3)',
+                    background: "var(--mantine-color-gray-1)",
+                    borderBottom: "2px solid var(--mantine-color-gray-3)",
                   }}
                 >
                   <th
                     style={{
-                      padding: '12px 8px',
-                      textAlign: 'left',
+                      padding: "12px 8px",
+                      textAlign: "left",
                       fontWeight: 600,
-                      width: '80px',
+                      width: "80px",
                     }}
                   >
                     Substrate
@@ -699,12 +767,12 @@ function ParameterVariationTab({
                     <th
                       key={param.paramKey}
                       style={{
-                        padding: '12px 8px',
-                        textAlign: 'left',
+                        padding: "12px 8px",
+                        textAlign: "left",
                         fontWeight: 600,
-                        minWidth: '150px',
+                        minWidth: "150px",
                         background: selectedParamKeys.has(param.paramKey)
-                          ? 'var(--mantine-color-blue-0)'
+                          ? "var(--mantine-color-blue-0)"
                           : undefined,
                       }}
                     >
@@ -718,14 +786,14 @@ function ParameterVariationTab({
                   <tr
                     key={substrate.id}
                     style={{
-                      borderBottom: '1px solid var(--mantine-color-gray-2)',
+                      borderBottom: "1px solid var(--mantine-color-gray-2)",
                     }}
                   >
                     <td
                       style={{
-                        padding: '8px',
+                        padding: "8px",
                         fontWeight: 600,
-                        background: 'var(--mantine-color-gray-0)',
+                        background: "var(--mantine-color-gray-0)",
                       }}
                     >
                       {substrate.name}
@@ -734,20 +802,26 @@ function ParameterVariationTab({
                       <td
                         key={param.paramKey}
                         style={{
-                          padding: '8px',
+                          padding: "8px",
                           background: selectedParamKeys.has(param.paramKey)
-                            ? 'var(--mantine-color-blue-0)'
+                            ? "var(--mantine-color-blue-0)"
                             : undefined,
                         }}
                       >
                         <TextInput
                           size="xs"
                           placeholder="—"
-                          value={substrate.parameterValues?.[param.paramKey] || ''}
-                          onChange={(e) =>
-                            updateSubstrateParam(idx, param.paramKey, e.currentTarget.value)
+                          value={
+                            substrate.parameterValues?.[param.paramKey] || ""
                           }
-                          style={{ width: '100%' }}
+                          onChange={(e) =>
+                            updateSubstrateParam(
+                              idx,
+                              param.paramKey,
+                              e.currentTarget.value,
+                            )
+                          }
+                          style={{ width: "100%" }}
                         />
                       </td>
                     ))}
@@ -759,7 +833,7 @@ function ParameterVariationTab({
         )}
       </Paper>
     </Stack>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -770,56 +844,63 @@ function SubstratesTab({
   experiment,
   onUpdate,
 }: {
-  experiment: Experiment;
-  onUpdate: (exp: Experiment) => void;
+  experiment: Experiment
+  onUpdate: (exp: Experiment) => void
 }) {
-  const [includeDate, setIncludeDate] = useState(true);
-  const [includeExpName, setIncludeExpName] = useState(true);
-  const [includeUser, setIncludeUser] = useState(false);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editingName, setEditingName] = useState('');
+  const [includeDate, setIncludeDate] = useState(true)
+  const [includeExpName, setIncludeExpName] = useState(true)
+  const [includeUser, setIncludeUser] = useState(false)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null)
+  const [editingName, setEditingName] = useState("")
 
   const updateSubstrate = (index: number, substrate: Substrate) => {
-    const newSubstrates = [...experiment.substrates];
-    newSubstrates[index] = substrate;
-    onUpdate({ ...experiment, substrates: newSubstrates });
-  };
+    const newSubstrates = [...experiment.substrates]
+    newSubstrates[index] = substrate
+    onUpdate({ ...experiment, substrates: newSubstrates })
+  }
 
   const deleteSubstrate = (index: number) => {
-    const newSubstrates = experiment.substrates.filter((_, i) => i !== index);
-    onUpdate({ ...experiment, substrates: newSubstrates });
-  };
+    const newSubstrates = experiment.substrates.filter((_, i) => i !== index)
+    onUpdate({ ...experiment, substrates: newSubstrates })
+  }
 
   const handleRegenerateName = (index: number) => {
     const newNames = regenerateSubstrateNames(experiment.substrates, {
       date: experiment.date,
       experimentName: experiment.name,
-      userName: 'User',
+      userName: "User",
       includeDate,
       includeExpName,
       includeUser,
-    });
-    const newSubstrates = [...experiment.substrates];
-    newSubstrates[index] = newNames[index];
-    onUpdate({ ...experiment, substrates: newSubstrates });
-  };
+    })
+    const newSubstrates = [...experiment.substrates]
+    newSubstrates[index] = newNames[index]
+    onUpdate({ ...experiment, substrates: newSubstrates })
+  }
 
   const handleRegenerateAll = () => {
     const newSubstrates = regenerateSubstrateNames(experiment.substrates, {
       date: experiment.date,
       experimentName: experiment.name,
-      userName: 'User',
+      userName: "User",
       includeDate,
       includeExpName,
       includeUser,
-    });
-    onUpdate({ ...experiment, substrates: newSubstrates });
-  };
+    })
+    onUpdate({ ...experiment, substrates: newSubstrates })
+  }
 
   return (
     <Stack gap="md">
-      <Paper withBorder p="md" radius="md" style={{ background: 'var(--mantine-color-blue-0)' }}>
-        <Text size="sm" fw={500} mb="xs">Substrate Name Generator Options</Text>
+      <Paper
+        withBorder
+        p="md"
+        radius="md"
+        style={{ background: "var(--mantine-color-blue-0)" }}
+      >
+        <Text size="sm" fw={500} mb="xs">
+          Substrate Name Generator Options
+        </Text>
         <Group gap="lg">
           <Checkbox
             label="Include Date"
@@ -839,11 +920,7 @@ function SubstratesTab({
             onChange={(e) => setIncludeUser(e.currentTarget.checked)}
             size="sm"
           />
-          <Button
-            size="xs"
-            variant="light"
-            onClick={handleRegenerateAll}
-          >
+          <Button size="xs" variant="light" onClick={handleRegenerateAll}>
             Regenerate All Names
           </Button>
         </Group>
@@ -855,21 +932,37 @@ function SubstratesTab({
           description="Required to reach Ready status"
           value={experiment.numSubstrates}
           onChange={(v) => {
-            const newCount = Math.max(1, Number(v) || 1);
+            const newCount = Math.max(1, Number(v) || 1)
             const newSubstrates =
               newCount > experiment.substrates.length
-                ? [...experiment.substrates, ...generateSubstrates(newCount - experiment.substrates.length)]
-                : experiment.substrates.slice(0, newCount);
-            onUpdate({ ...experiment, numSubstrates: newCount, substrates: newSubstrates });
+                ? [
+                    ...experiment.substrates,
+                    ...generateSubstrates(
+                      newCount - experiment.substrates.length,
+                    ),
+                  ]
+                : experiment.substrates.slice(0, newCount)
+            onUpdate({
+              ...experiment,
+              numSubstrates: newCount,
+              substrates: newSubstrates,
+            })
           }}
           min={1}
           mb="md"
         />
 
         <Group justify="space-between" mb="sm">
-          <Text size="sm" fw={600}>Substrates ({experiment.substrates.length})</Text>
+          <Text size="sm" fw={600}>
+            Substrates ({experiment.substrates.length})
+          </Text>
           <Text size="xs" c="dimmed">
-            {Math.ceil(Math.sqrt(experiment.numSubstrates))}×{Math.ceil(experiment.numSubstrates / Math.ceil(Math.sqrt(experiment.numSubstrates)))} grid
+            {Math.ceil(Math.sqrt(experiment.numSubstrates))}×
+            {Math.ceil(
+              experiment.numSubstrates /
+                Math.ceil(Math.sqrt(experiment.numSubstrates)),
+            )}{" "}
+            grid
           </Text>
         </Group>
 
@@ -878,104 +971,141 @@ function SubstratesTab({
             No substrates. Update the count in General to create them.
           </Text>
         ) : (
-          <Box style={{ overflowX: 'auto' }}>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '14px',
-            }}>
+          <Box style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: "14px",
+              }}
+            >
               <thead>
-                <tr style={{
-                  background: 'var(--mantine-color-gray-1)',
-                  borderBottom: '2px solid var(--mantine-color-gray-3)',
-                }}>
-                  <th style={{
-                    padding: '12px 8px',
-                    textAlign: 'left',
-                    fontWeight: 600,
-                    width: '60px',
-                  }}>#</th>
-                  <th style={{
-                    padding: '12px 8px',
-                    textAlign: 'left',
-                    fontWeight: 600,
-                  }}>Name</th>
-                  <th style={{
-                    padding: '12px 8px',
-                    textAlign: 'right',
-                    fontWeight: 600,
-                    width: '120px',
-                  }}>Actions</th>
+                <tr
+                  style={{
+                    background: "var(--mantine-color-gray-1)",
+                    borderBottom: "2px solid var(--mantine-color-gray-3)",
+                  }}
+                >
+                  <th
+                    style={{
+                      padding: "12px 8px",
+                      textAlign: "left",
+                      fontWeight: 600,
+                      width: "60px",
+                    }}
+                  >
+                    #
+                  </th>
+                  <th
+                    style={{
+                      padding: "12px 8px",
+                      textAlign: "left",
+                      fontWeight: 600,
+                    }}
+                  >
+                    Name
+                  </th>
+                  <th
+                    style={{
+                      padding: "12px 8px",
+                      textAlign: "right",
+                      fontWeight: 600,
+                      width: "120px",
+                    }}
+                  >
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {experiment.substrates.map((substrate, idx) => (
-                  <tr key={substrate.id} style={{
-                    borderBottom: '1px solid var(--mantine-color-gray-2)',
-                    background: idx % 2 === 0 ? 'transparent' : 'var(--mantine-color-gray-0)',
-                  }}>
-                    <td style={{
-                      padding: '12px 8px',
-                      textAlign: 'center',
-                      fontWeight: 500,
-                      color: 'var(--mantine-color-gray-7)',
-                    }}>
+                  <tr
+                    key={substrate.id}
+                    style={{
+                      borderBottom: "1px solid var(--mantine-color-gray-2)",
+                      background:
+                        idx % 2 === 0
+                          ? "transparent"
+                          : "var(--mantine-color-gray-0)",
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: "12px 8px",
+                        textAlign: "center",
+                        fontWeight: 500,
+                        color: "var(--mantine-color-gray-7)",
+                      }}
+                    >
                       {idx + 1}
                     </td>
-                    <td style={{
-                      padding: '12px 8px',
-                    }}>
+                    <td
+                      style={{
+                        padding: "12px 8px",
+                      }}
+                    >
                       {editingIndex === idx ? (
                         <TextInput
                           size="xs"
                           value={editingName}
-                          onChange={(e) => setEditingName(e.currentTarget.value)}
+                          onChange={(e) =>
+                            setEditingName(e.currentTarget.value)
+                          }
                           onBlur={() => {
                             if (editingName.trim()) {
-                              updateSubstrate(idx, { ...substrate, name: editingName });
+                              updateSubstrate(idx, {
+                                ...substrate,
+                                name: editingName,
+                              })
                             }
-                            setEditingIndex(null);
+                            setEditingIndex(null)
                           }}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' && editingName.trim()) {
-                              updateSubstrate(idx, { ...substrate, name: editingName });
-                              setEditingIndex(null);
+                            if (e.key === "Enter" && editingName.trim()) {
+                              updateSubstrate(idx, {
+                                ...substrate,
+                                name: editingName,
+                              })
+                              setEditingIndex(null)
                             }
-                            if (e.key === 'Escape') {
-                              setEditingIndex(null);
+                            if (e.key === "Escape") {
+                              setEditingIndex(null)
                             }
                           }}
                           autoFocus
-                          style={{ width: '100%' }}
+                          style={{ width: "100%" }}
                         />
                       ) : (
                         <Text
                           size="sm"
                           onClick={() => {
-                            setEditingIndex(idx);
-                            setEditingName(substrate.name);
+                            setEditingIndex(idx)
+                            setEditingName(substrate.name)
                           }}
                           style={{
-                            cursor: 'pointer',
-                            padding: '4px 8px',
-                            borderRadius: '4px',
-                            transition: 'background 0.2s',
+                            cursor: "pointer",
+                            padding: "4px 8px",
+                            borderRadius: "4px",
+                            transition: "background 0.2s",
                           }}
                           onMouseEnter={(e) => {
-                            e.currentTarget.style.background = 'var(--mantine-color-gray-1)';
+                            e.currentTarget.style.background =
+                              "var(--mantine-color-gray-1)"
                           }}
                           onMouseLeave={(e) => {
-                            e.currentTarget.style.background = 'transparent';
+                            e.currentTarget.style.background = "transparent"
                           }}
                         >
                           {substrate.name}
                         </Text>
                       )}
                     </td>
-                    <td style={{
-                      padding: '12px 8px',
-                      textAlign: 'right',
-                    }}>
+                    <td
+                      style={{
+                        padding: "12px 8px",
+                        textAlign: "right",
+                      }}
+                    >
                       <Group gap="4" justify="flex-end">
                         <Tooltip label="Regenerate name">
                           <ActionIcon
@@ -1007,7 +1137,7 @@ function SubstratesTab({
         )}
       </Paper>
     </Stack>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1019,39 +1149,51 @@ function ExperimentDetail({
   materials,
   solutions,
 }: {
-  experiment: Experiment;
-  onUpdate: (exp: Experiment) => void;
-  onClose: () => void;
-  materials: { id: string; name: string }[];
-  solutions: { id: string; name: string }[];
+  experiment: Experiment
+  onUpdate: (exp: Experiment) => void
+  onClose: () => void
+  materials: { id: string; name: string }[]
+  solutions: { id: string; name: string }[]
 }) {
   const updateLayer = (index: number, layer: ExperimentLayer) => {
-    const newLayers = [...experiment.layers];
-    newLayers[index] = layer;
-    onUpdate({ ...experiment, layers: newLayers });
-  };
+    const newLayers = [...experiment.layers]
+    newLayers[index] = layer
+    onUpdate({ ...experiment, layers: newLayers })
+  }
 
   const deleteLayer = (index: number) => {
-    const newLayers = experiment.layers.filter((_, i) => i !== index);
-    onUpdate({ ...experiment, layers: newLayers });
-  };
+    const newLayers = experiment.layers.filter((_, i) => i !== index)
+    onUpdate({ ...experiment, layers: newLayers })
+  }
 
   const addLayer = () => {
-    const newLayers = [...experiment.layers, newLayer(experiment.layers.length)];
-    onUpdate({ ...experiment, layers: newLayers });
-  };
+    const newLayers = [...experiment.layers, newLayer(experiment.layers.length)]
+    onUpdate({ ...experiment, layers: newLayers })
+  }
 
-  const status = getExperimentStatus(experiment);
-  const missingFields = getExperimentMissingFields(experiment);
-  const statusColor = status === 'finished' ? 'green' : status === 'ready' ? 'yellow' : 'red';
-  const statusLabel = status === 'finished' ? 'Finished' : status === 'ready' ? 'Ready' : 'Incomplete';
+  const status = getExperimentStatus(experiment)
+  const missingFields = getExperimentMissingFields(experiment)
+  const statusColor =
+    status === "finished" ? "green" : status === "ready" ? "yellow" : "red"
+  const statusLabel =
+    status === "finished"
+      ? "Finished"
+      : status === "ready"
+        ? "Ready"
+        : "Incomplete"
 
   return (
-    <Box style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       {/* Header */}
-      <Group justify="space-between" p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+      <Group
+        justify="space-between"
+        p="md"
+        style={{
+          borderBottom: "1px solid var(--mantine-color-default-border)",
+        }}
+      >
         <Group gap="sm">
-          <Title order={4}>{experiment.name || 'Untitled Experiment'}</Title>
+          <Title order={4}>{experiment.name || "Untitled Experiment"}</Title>
           <Badge color={statusColor} size="sm">
             {statusLabel}
           </Badge>
@@ -1064,25 +1206,40 @@ function ExperimentDetail({
       <ScrollArea style={{ flex: 1 }} p="md">
         <Tabs defaultValue="general">
           <Tabs.List mb="md">
-            <Tabs.Tab value="general" leftSection={<IconInfoCircle size={14} />}>
+            <Tabs.Tab
+              value="general"
+              leftSection={<IconInfoCircle size={14} />}
+            >
               General
             </Tabs.Tab>
             <Tabs.Tab value="substrates" leftSection={<IconStack2 size={14} />}>
               Substrates ({experiment.substrates.length})
             </Tabs.Tab>
-            <Tabs.Tab value="layerstack" leftSection={<IconLayersLinked size={14} />}>
+            <Tabs.Tab
+              value="layerstack"
+              leftSection={<IconLayersLinked size={14} />}
+            >
               Layer Stack
             </Tabs.Tab>
-            <Tabs.Tab value="layers" leftSection={<IconLayersLinked size={14} />}>
+            <Tabs.Tab
+              value="layers"
+              leftSection={<IconLayersLinked size={14} />}
+            >
               Assign Parameters ({experiment.layers.length})
             </Tabs.Tab>
             {getVariedParameters(experiment).length > 0 && (
-              <Tabs.Tab value="paramvariation" leftSection={<IconStack2 size={14} />}>
+              <Tabs.Tab
+                value="paramvariation"
+                leftSection={<IconStack2 size={14} />}
+              >
                 Parameter Variation
               </Tabs.Tab>
             )}
             {experiment.buildDevices && (
-              <Tabs.Tab value="devicelayout" leftSection={<IconStack2 size={14} />}>
+              <Tabs.Tab
+                value="devicelayout"
+                leftSection={<IconStack2 size={14} />}
+              >
                 Device Layout
               </Tabs.Tab>
             )}
@@ -1091,19 +1248,29 @@ function ExperimentDetail({
           <Tabs.Panel value="general">
             <Stack gap="md">
               <Paper withBorder p="md" radius="md">
-                <Text size="sm" fw={600} mb="sm">Experiment Information</Text>
-                
+                <Text size="sm" fw={600} mb="sm">
+                  Experiment Information
+                </Text>
+
                 <BufferedTextInput
                   label="Experiment Name"
                   description="Required to reach Ready status"
                   value={experiment.name}
                   onCommit={(v) => onUpdate({ ...experiment, name: v })}
                   mb="sm"
-                  error={missingFields.includes('name') ? 'Name is required' : undefined}
-                  styles={missingFields.includes('name') ? { input: { borderColor: 'var(--mantine-color-red-5)' } } : undefined}
+                  error={
+                    missingFields.includes("name")
+                      ? "Name is required"
+                      : undefined
+                  }
+                  styles={
+                    missingFields.includes("name")
+                      ? { input: { borderColor: "var(--mantine-color-red-5)" } }
+                      : undefined
+                  }
                   required
                 />
-                
+
                 <BufferedTextarea
                   label="Description"
                   placeholder="Describe the objective of this experiment..."
@@ -1112,30 +1279,51 @@ function ExperimentDetail({
                   mb="sm"
                   minRows={2}
                 />
-                
+
                 <SimpleGrid cols={2} spacing="sm">
                   <TextInput
                     label="Fabrication Date"
                     type="date"
                     description="Required to reach Ready status"
                     value={experiment.date}
-                    onChange={(e) => onUpdate({ ...experiment, date: e.currentTarget.value })}
-                    error={missingFields.includes('date') ? 'Date is required' : undefined}
-                    styles={missingFields.includes('date') ? { input: { borderColor: 'var(--mantine-color-red-5)' } } : undefined}
+                    onChange={(e) =>
+                      onUpdate({ ...experiment, date: e.currentTarget.value })
+                    }
+                    error={
+                      missingFields.includes("date")
+                        ? "Date is required"
+                        : undefined
+                    }
+                    styles={
+                      missingFields.includes("date")
+                        ? {
+                            input: {
+                              borderColor: "var(--mantine-color-red-5)",
+                            },
+                          }
+                        : undefined
+                    }
                     required
                   />
                   <TextInput
                     label="End Date"
                     type="date"
                     placeholder="Optional"
-                    value={experiment.endDate ?? ''}
-                    onChange={(e) => onUpdate({ ...experiment, endDate: e.currentTarget.value || undefined })}
+                    value={experiment.endDate ?? ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        ...experiment,
+                        endDate: e.currentTarget.value || undefined,
+                      })
+                    }
                   />
                 </SimpleGrid>
               </Paper>
 
               <Paper withBorder p="md" radius="md">
-                <Text size="sm" fw={600} mb="sm">Substrate & Device Configuration</Text>
+                <Text size="sm" fw={600} mb="sm">
+                  Substrate & Device Configuration
+                </Text>
               </Paper>
 
               {missingFields.length > 0 && (
@@ -1144,23 +1332,34 @@ function ExperimentDetail({
                   p="md"
                   radius="md"
                   style={{
-                    background: 'var(--mantine-color-red-0)',
-                    borderColor: 'var(--mantine-color-red-3)',
+                    background: "var(--mantine-color-red-0)",
+                    borderColor: "var(--mantine-color-red-3)",
                   }}
                 >
                   <Group gap="xs" mb="xs">
-                    <IconInfoCircle size={16} color="var(--mantine-color-red-6)" />
-                    <Text size="sm" fw={600} c="red.7">Required to reach Ready status</Text>
+                    <IconInfoCircle
+                      size={16}
+                      color="var(--mantine-color-red-6)"
+                    />
+                    <Text size="sm" fw={600} c="red.7">
+                      Required to reach Ready status
+                    </Text>
                   </Group>
                   <Stack gap={4}>
-                    {missingFields.includes('name') && (
-                      <Text size="xs" c="red.6">• Experiment name is missing</Text>
+                    {missingFields.includes("name") && (
+                      <Text size="xs" c="red.6">
+                        • Experiment name is missing
+                      </Text>
                     )}
-                    {missingFields.includes('date') && (
-                      <Text size="xs" c="red.6">• Fabrication date is missing</Text>
+                    {missingFields.includes("date") && (
+                      <Text size="xs" c="red.6">
+                        • Fabrication date is missing
+                      </Text>
                     )}
-                    {missingFields.includes('numSubstrates') && (
-                      <Text size="xs" c="red.6">• Number of substrates must be at least 1</Text>
+                    {missingFields.includes("numSubstrates") && (
+                      <Text size="xs" c="red.6">
+                        • Number of substrates must be at least 1
+                      </Text>
                     )}
                   </Stack>
                 </Paper>
@@ -1173,33 +1372,47 @@ function ExperimentDetail({
               {/* Left column: Device config */}
               <Stack gap="md">
                 <Paper withBorder p="md" radius="md">
-                  <Text size="sm" fw={600} mb="sm">Architecture & Substrate</Text>
-                  
+                  <Text size="sm" fw={600} mb="sm">
+                    Architecture & Substrate
+                  </Text>
+
                   <Select
                     label="Architecture"
                     data={[
-                      { value: 'n-i-p', label: 'n-i-p (Regular)' },
-                      { value: 'p-i-n', label: 'p-i-n (Inverted)' },
-                      { value: 'n-i-p-n', label: 'n-i-p-n (Tandem)' },
-                      { value: 'p-i-n-p', label: 'p-i-n-p (Tandem)' },
-                      { value: 'custom', label: 'Custom' },
+                      { value: "n-i-p", label: "n-i-p (Regular)" },
+                      { value: "p-i-n", label: "p-i-n (Inverted)" },
+                      { value: "n-i-p-n", label: "n-i-p-n (Tandem)" },
+                      { value: "p-i-n-p", label: "p-i-n-p (Tandem)" },
+                      { value: "custom", label: "Custom" },
                     ]}
                     value={experiment.architecture}
-                    onChange={(v) => onUpdate({ ...experiment, architecture: (v as DeviceArchitecture) ?? 'n-i-p' })}
+                    onChange={(v) =>
+                      onUpdate({
+                        ...experiment,
+                        architecture: (v as DeviceArchitecture) ?? "n-i-p",
+                      })
+                    }
                     mb="sm"
                   />
-                  
+
                   <BufferedTextInput
                     label="Substrate Material"
                     value={experiment.substrateMaterial}
-                    onCommit={(v) => onUpdate({ ...experiment, substrateMaterial: v })}
+                    onCommit={(v) =>
+                      onUpdate({ ...experiment, substrateMaterial: v })
+                    }
                     mb="sm"
                   />
 
                   <Checkbox
                     label="Build devices"
                     checked={experiment.buildDevices}
-                    onChange={(e) => onUpdate({ ...experiment, buildDevices: e.currentTarget.checked })}
+                    onChange={(e) =>
+                      onUpdate({
+                        ...experiment,
+                        buildDevices: e.currentTarget.checked,
+                      })
+                    }
                     mt="sm"
                   />
                 </Paper>
@@ -1212,14 +1425,21 @@ function ExperimentDetail({
                   layers={experiment.layers}
                   architecture={experiment.architecture}
                 />
-                
+
                 <Paper withBorder p="md" radius="md">
-                  <Text size="sm" fw={600} mb="sm">Stack Configuration</Text>
-                  <Text size="xs" c="dimmed" style={{ fontFamily: 'monospace' }}>
+                  <Text size="sm" fw={600} mb="sm">
+                    Stack Configuration
+                  </Text>
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    style={{ fontFamily: "monospace" }}
+                  >
                     {experiment.substrateMaterial}
-                    {experiment.layers.length > 0 && ' / '}
-                    {experiment.layers.map((l) => l.name).join(' / ')}
-                    {experiment.architecture !== 'custom' && ` : ${experiment.architecture}`}
+                    {experiment.layers.length > 0 && " / "}
+                    {experiment.layers.map((l) => l.name).join(" / ")}
+                    {experiment.architecture !== "custom" &&
+                      ` : ${experiment.architecture}`}
                   </Text>
                 </Paper>
               </Stack>
@@ -1239,7 +1459,7 @@ function ExperimentDetail({
                   solutions={solutions}
                 />
               ))}
-              
+
               <Button
                 variant="light"
                 leftSection={<IconPlus size={16} />}
@@ -1247,12 +1467,18 @@ function ExperimentDetail({
               >
                 Add Layer
               </Button>
-              
+
               {experiment.layers.length === 0 && (
-                <Paper withBorder p="lg" ta="center" style={{ background: 'var(--mantine-color-gray-0)' }}>
+                <Paper
+                  withBorder
+                  p="lg"
+                  ta="center"
+                  style={{ background: "var(--mantine-color-gray-0)" }}
+                >
                   <IconStack2 size={40} color="var(--mantine-color-gray-5)" />
                   <Text size="sm" c="dimmed" mt="sm">
-                    No layers yet. Add your first layer to start building the device stack.
+                    No layers yet. Add your first layer to start building the
+                    device stack.
                   </Text>
                 </Paper>
               )}
@@ -1260,20 +1486,27 @@ function ExperimentDetail({
           </Tabs.Panel>
 
           <Tabs.Panel value="paramvariation">
-            <ParameterVariationTab experiment={experiment} onUpdate={onUpdate} />
+            <ParameterVariationTab
+              experiment={experiment}
+              onUpdate={onUpdate}
+            />
           </Tabs.Panel>
 
           <Tabs.Panel value="devicelayout">
             <Stack gap="md">
               <Paper withBorder p="md" radius="md">
-                <Text size="sm" fw={600} mb="sm">Device Layout Configuration</Text>
-                
+                <Text size="sm" fw={600} mb="sm">
+                  Device Layout Configuration
+                </Text>
+
                 <SimpleGrid cols={2} spacing="sm" mb="md">
                   <BufferedNumberInput
                     label="Substrate Width"
                     suffix=" cm"
                     value={experiment.substrateWidth}
-                    onCommit={(v) => onUpdate({ ...experiment, substrateWidth: v })}
+                    onCommit={(v) =>
+                      onUpdate({ ...experiment, substrateWidth: v })
+                    }
                     min={0}
                     step={0.1}
                     decimalScale={2}
@@ -1282,13 +1515,15 @@ function ExperimentDetail({
                     label="Substrate Length"
                     suffix=" cm"
                     value={experiment.substrateLength}
-                    onCommit={(v) => onUpdate({ ...experiment, substrateLength: v })}
+                    onCommit={(v) =>
+                      onUpdate({ ...experiment, substrateLength: v })
+                    }
                     min={0}
                     step={0.1}
                     decimalScale={2}
                   />
                 </SimpleGrid>
-                
+
                 <SimpleGrid cols={2} spacing="sm" mb="md">
                   <BufferedNumberInput
                     label="Device Area"
@@ -1302,14 +1537,18 @@ function ExperimentDetail({
                   <BufferedNumberInput
                     label="Devices per Substrate"
                     value={experiment.devicesPerSubstrate}
-                    onCommit={(v) => onUpdate({ ...experiment, devicesPerSubstrate: v })}
+                    onCommit={(v) =>
+                      onUpdate({ ...experiment, devicesPerSubstrate: v })
+                    }
                     min={0}
                   />
                 </SimpleGrid>
               </Paper>
 
               <Paper withBorder p="md" radius="md">
-                <Text size="sm" fw={600} mb="sm">Device Layout Image</Text>
+                <Text size="sm" fw={600} mb="sm">
+                  Device Layout Image
+                </Text>
                 <FileInput
                   label="Upload device layout image (JPG, PNG)"
                   placeholder="Select image file"
@@ -1317,27 +1556,29 @@ function ExperimentDetail({
                   leftSection={<IconUpload size={14} />}
                   onChange={(file) => {
                     if (file) {
-                      const reader = new FileReader();
+                      const reader = new FileReader()
                       reader.onload = (e) => {
-                        const base64 = e.target?.result as string;
-                        onUpdate({ ...experiment, deviceLayoutImage: base64 });
-                      };
-                      reader.readAsDataURL(file);
+                        const base64 = e.target?.result as string
+                        onUpdate({ ...experiment, deviceLayoutImage: base64 })
+                      }
+                      reader.readAsDataURL(file)
                     }
                   }}
                 />
-                
+
                 {experiment.deviceLayoutImage && (
                   <Box mt="md">
-                    <Text size="sm" fw={600} mb="xs">Layout Preview:</Text>
+                    <Text size="sm" fw={600} mb="xs">
+                      Layout Preview:
+                    </Text>
                     <img
                       src={experiment.deviceLayoutImage}
                       alt="Device layout"
                       style={{
-                        maxWidth: '100%',
-                        maxHeight: '400px',
-                        borderRadius: '4px',
-                        border: '1px solid var(--mantine-color-gray-3)',
+                        maxWidth: "100%",
+                        maxHeight: "400px",
+                        borderRadius: "4px",
+                        border: "1px solid var(--mantine-color-gray-3)",
                       }}
                     />
                   </Box>
@@ -1352,7 +1593,7 @@ function ExperimentDetail({
         </Tabs>
       </ScrollArea>
     </Box>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1366,15 +1607,21 @@ function ExperimentListItem({
   onDelete,
   collectionColor,
 }: {
-  experiment: Experiment;
-  isSelected: boolean;
-  onSelect: () => void;
-  onDelete: () => void;
-  collectionColor?: string;
+  experiment: Experiment
+  isSelected: boolean
+  onSelect: () => void
+  onDelete: () => void
+  collectionColor?: string
 }) {
-  const status = getExperimentStatus(experiment);
-  const statusColor = status === 'finished' ? 'green' : status === 'ready' ? 'yellow' : 'red';
-  const statusLabel = status === 'finished' ? 'Finished' : status === 'ready' ? 'Ready' : 'Incomplete';
+  const status = getExperimentStatus(experiment)
+  const statusColor =
+    status === "finished" ? "green" : status === "ready" ? "yellow" : "red"
+  const statusLabel =
+    status === "finished"
+      ? "Finished"
+      : status === "ready"
+        ? "Ready"
+        : "Incomplete"
 
   return (
     <Paper
@@ -1382,10 +1629,12 @@ function ExperimentListItem({
       p="sm"
       radius="md"
       style={{
-        cursor: 'pointer',
-        background: isSelected ? 'var(--mantine-color-blue-0)' : undefined,
-        borderColor: isSelected ? 'var(--mantine-color-blue-4)' : undefined,
-        borderLeft: collectionColor ? `4px solid ${collectionColor}` : undefined,
+        cursor: "pointer",
+        background: isSelected ? "var(--mantine-color-blue-0)" : undefined,
+        borderColor: isSelected ? "var(--mantine-color-blue-4)" : undefined,
+        borderLeft: collectionColor
+          ? `4px solid ${collectionColor}`
+          : undefined,
       }}
       onClick={onSelect}
     >
@@ -1393,7 +1642,7 @@ function ExperimentListItem({
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group gap="xs" mb={4}>
             <Text size="sm" fw={600} truncate>
-              {experiment.name || 'Untitled'}
+              {experiment.name || "Untitled"}
             </Text>
             <Badge size="xs" color={statusColor} variant="dot">
               {statusLabel}
@@ -1401,26 +1650,32 @@ function ExperimentListItem({
           </Group>
           <Group gap="xs">
             <Text size="xs" c="dimmed">
-              {experiment.date || 'No date'}
+              {experiment.date || "No date"}
             </Text>
-            <Text size="xs" c="dimmed">•</Text>
             <Text size="xs" c="dimmed">
-              {experiment.layers.length} layer{experiment.layers.length !== 1 ? 's' : ''}
+              •
+            </Text>
+            <Text size="xs" c="dimmed">
+              {experiment.layers.length} layer
+              {experiment.layers.length !== 1 ? "s" : ""}
             </Text>
           </Group>
         </Box>
-        
+
         <ActionIcon
           size="sm"
           variant="subtle"
           color="red"
-          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
         >
           <IconTrash size={14} />
         </ActionIcon>
       </Group>
     </Paper>
-  );
+  )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1438,82 +1693,115 @@ export function ExperimentsPage() {
     pendingCollectionLink,
     setPendingCollectionLink,
     setActiveEntity,
-  } = useAppContext();
-  const { getEntityColor, isEntityVisible } = useEntityCollection();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  } = useAppContext()
+  const { getEntityColor, isEntityVisible } = useEntityCollection()
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const selectExperiment = useCallback((id: string | null) => {
-    setSelectedId(id);
-    setActiveEntity(id ? { kind: 'experiment', id } : null);
-  }, [setActiveEntity]);
+  const selectExperiment = useCallback(
+    (id: string | null) => {
+      setSelectedId(id)
+      setActiveEntity(id ? { kind: "experiment", id } : null)
+    },
+    [setActiveEntity],
+  )
 
   // Auto-create experiment + link to collection when navigated from action bubble
   useEffect(() => {
-    if (!pendingCollectionLink || pendingCollectionLink.kind !== 'experiment') {return;}
-    const { collectionId, planeId } = pendingCollectionLink;
-    setPendingCollectionLink(null);
+    if (!pendingCollectionLink || pendingCollectionLink.kind !== "experiment") {
+      return
+    }
+    const { collectionId, planeId } = pendingCollectionLink
+    setPendingCollectionLink(null)
 
-    const exp = newExperiment();
-    setExperiments((prev) => [...prev, exp]);
-    selectExperiment(exp.id);
+    const exp = newExperiment()
+    setExperiments((prev) => [...prev, exp])
+    selectExperiment(exp.id)
 
     // Link back to collection
-    const plane = planes.find((p) => p.id === planeId);
+    const plane = planes.find((p) => p.id === planeId)
     if (plane) {
-      const col = plane.elements.find((e) => e.id === collectionId);
-      if (col && col.type === 'collection') {
-        const updated = { ...col, refs: [...col.refs, { kind: 'experiment' as const, id: exp.id }] };
-        updateElement(planeId, updated);
+      const col = plane.elements.find((e) => e.id === collectionId)
+      if (col && col.type === "collection") {
+        const updated = {
+          ...col,
+          refs: [...col.refs, { kind: "experiment" as const, id: exp.id }],
+        }
+        updateElement(planeId, updated)
       }
     }
-  }, [pendingCollectionLink, setPendingCollectionLink, setExperiments, planes, updateElement, selectExperiment]);
+  }, [
+    pendingCollectionLink,
+    setPendingCollectionLink,
+    setExperiments,
+    planes,
+    updateElement,
+    selectExperiment,
+  ])
 
-  const selectedExperiment = experiments.find((e) => e.id === selectedId);
+  const selectedExperiment = experiments.find((e) => e.id === selectedId)
 
   const updateExperiment = (exp: Experiment) => {
-    setExperiments((prev) => prev.map((e) => (e.id === exp.id ? exp : e)));
-  };
+    setExperiments((prev) => prev.map((e) => (e.id === exp.id ? exp : e)))
+  }
 
   const deleteExperiment = (id: string) => {
-    setExperiments((prev) => prev.filter((e) => e.id !== id));
-    if (selectedId === id) {selectExperiment(null);}
-  };
+    setExperiments((prev) => prev.filter((e) => e.id !== id))
+    if (selectedId === id) {
+      selectExperiment(null)
+    }
+  }
 
   const createExperiment = () => {
-    const exp = newExperiment();
-    setExperiments((prev) => [...prev, exp]);
-    selectExperiment(exp.id);
-  };
+    const exp = newExperiment()
+    setExperiments((prev) => [...prev, exp])
+    selectExperiment(exp.id)
+  }
 
   // Filter by visibility (collection context)
-  const visibleExperiments = experiments.filter((e) => isEntityVisible('experiment', e.id));
+  const visibleExperiments = experiments.filter((e) =>
+    isEntityVisible("experiment", e.id),
+  )
 
   // Material and solution lists for dropdowns
-  const materialOptions = materials.map((m) => ({ id: m.id, name: m.name }));
-  const solutionOptions = solutions.map((s) => ({ id: s.id, name: s.name }));
+  const materialOptions = materials.map((m) => ({ id: m.id, name: m.name }))
+  const solutionOptions = solutions.map((s) => ({ id: s.id, name: s.name }))
 
   return (
-    <Box style={{ display: 'flex', height: 'calc(100vh - 60px)' }}>
+    <Box style={{ display: "flex", height: "calc(100vh - 60px)" }}>
       {/* Sidebar: Experiment List */}
       <Box
         style={{
           width: 300,
-          borderRight: '1px solid var(--mantine-color-default-border)',
-          display: 'flex',
-          flexDirection: 'column',
+          borderRight: "1px solid var(--mantine-color-default-border)",
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        <Group justify="space-between" p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+        <Group
+          justify="space-between"
+          p="md"
+          style={{
+            borderBottom: "1px solid var(--mantine-color-default-border)",
+          }}
+        >
           <Title order={5}>Experiments</Title>
-          <Button size="xs" leftSection={<IconPlus size={14} />} onClick={createExperiment}>
+          <Button
+            size="xs"
+            leftSection={<IconPlus size={14} />}
+            onClick={createExperiment}
+          >
             New
           </Button>
         </Group>
-        
+
         <ScrollArea style={{ flex: 1 }} p="sm">
           <Stack gap="sm">
             {visibleExperiments.length === 0 ? (
-              <Paper p="lg" ta="center" style={{ background: 'var(--mantine-color-gray-0)' }}>
+              <Paper
+                p="lg"
+                ta="center"
+                style={{ background: "var(--mantine-color-gray-0)" }}
+              >
                 <IconFlask size={32} color="var(--mantine-color-gray-5)" />
                 <Text size="sm" c="dimmed" mt="sm">
                   No experiments yet
@@ -1527,7 +1815,9 @@ export function ExperimentsPage() {
                   isSelected={selectedId === exp.id}
                   onSelect={() => selectExperiment(exp.id)}
                   onDelete={() => deleteExperiment(exp.id)}
-                  collectionColor={getEntityColor('experiment', exp.id) ?? undefined}
+                  collectionColor={
+                    getEntityColor("experiment", exp.id) ?? undefined
+                  }
                 />
               ))
             )}
@@ -1536,7 +1826,7 @@ export function ExperimentsPage() {
       </Box>
 
       {/* Main: Experiment Detail */}
-      <Box style={{ flex: 1, background: 'var(--mantine-color-gray-0)' }}>
+      <Box style={{ flex: 1, background: "var(--mantine-color-gray-0)" }}>
         {selectedExperiment ? (
           <ExperimentDetail
             experiment={selectedExperiment}
@@ -1548,11 +1838,11 @@ export function ExperimentsPage() {
         ) : (
           <Box
             style={{
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
+              height: "100%",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
             <IconFlask size={64} color="var(--mantine-color-gray-4)" />
@@ -1566,5 +1856,5 @@ export function ExperimentsPage() {
         )}
       </Box>
     </Box>
-  );
+  )
 }
