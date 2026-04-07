@@ -1,9 +1,10 @@
-import { AppShell, Group, Text, useMantineColorScheme, ActionIcon, Stack, Tooltip, rem, Menu, UnstyledButton, ColorSwatch } from '@mantine/core';
-import { IconSun, IconMoon, IconChevronDown, IconX } from '@tabler/icons-react';
+import { AppShell, Group, Text, useMantineColorScheme, ActionIcon, Stack, Tooltip, rem, Menu, UnstyledButton, ColorSwatch, Avatar } from '@mantine/core';
+import { IconSun, IconMoon, IconChevronDown, IconX, IconSettings, IconLogout } from '@tabler/icons-react';
 import { useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from '@tanstack/react-router';
 import { type CanvasCollectionElement, useAppContext } from '../store/AppContext';
 import { pageIcons } from './AppLayout.icons';
+import useAuth from '@/hooks/useAuth';
 
 // Neutral grayish-blue for default selections
 const DEFAULT_ACCENT = '#94a3b8';
@@ -26,6 +27,10 @@ export function AppLayout() {
   const { planes, activeCollectionId, setActiveCollectionId, activePlaneId, setActivePlaneId, experiments, materials, solutions, activeEntity } = useAppContext();
 
   const currentPage = pages.find((p) => location.pathname.startsWith(p.value))?.value ?? pages[0].value;
+  const { user, logout } = useAuth();
+  const initials = user?.full_name
+    ? user.full_name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+    : (user?.email?.[0] ?? '?').toUpperCase();
 
 
   // Find the active collection element (if any)
@@ -172,14 +177,46 @@ export function AppLayout() {
               </>
             )}
           </Group>
-          <ActionIcon
-            variant="default"
-            size="lg"
-            onClick={() => toggleColorScheme()}
-            aria-label="Toggle color scheme"
-          >
-            {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
-          </ActionIcon>
+          <Group gap="xs" align="center">
+            <ActionIcon
+              variant="default"
+              size="lg"
+              onClick={() => toggleColorScheme()}
+              aria-label="Toggle color scheme"
+            >
+              {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+            </ActionIcon>
+
+            <Menu shadow="md" width={240} position="bottom-end">
+              <Menu.Target>
+                <UnstyledButton style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Avatar size="sm" radius="xl">{initials}</Avatar>
+                  <Stack gap={0} visibleFrom="sm">
+                    <Text size="sm" fw={500} lh={1.2}>{user?.full_name || user?.email || 'Loading…'}</Text>
+                    {user?.full_name && <Text size="xs" c="dimmed" lh={1.2}>{user.email}</Text>}
+                  </Stack>
+                  <IconChevronDown size={12} style={{ color: 'var(--mantine-color-dimmed)' }} />
+                </UnstyledButton>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>{user?.email}</Menu.Label>
+                <Menu.Item
+                  leftSection={<IconSettings size={14} />}
+                  onClick={() => navigate({ to: '/settings' as any })}
+                >
+                  User settings
+                </Menu.Item>
+                <Menu.Divider />
+                <Menu.Item
+                  color="red"
+                  leftSection={<IconLogout size={14} />}
+                  onClick={logout}
+                >
+                  Log out
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          </Group>
         </Group>
       </AppShell.Header>
 
