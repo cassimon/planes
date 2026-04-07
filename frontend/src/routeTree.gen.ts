@@ -14,10 +14,18 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LayoutRouteImport } from './routes/_layout'
+import { Route as GuiRouteImport } from './routes/_gui'
 import { Route as LayoutIndexRouteImport } from './routes/_layout/index'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutItemsRouteImport } from './routes/_layout/items'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
+import { Route as GuiSolutionsRouteImport } from './routes/_gui/solutions'
+import { Route as GuiResultsRouteImport } from './routes/_gui/results'
+import { Route as GuiOrganizationRouteImport } from './routes/_gui/organization'
+import { Route as GuiMaterialsRouteImport } from './routes/_gui/materials'
+import { Route as GuiExportRouteImport } from './routes/_gui/export'
+import { Route as GuiExperimentsRouteImport } from './routes/_gui/experiments'
+import { Route as GuiAnalysisRouteImport } from './routes/_gui/analysis'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -43,6 +51,10 @@ const LayoutRoute = LayoutRouteImport.update({
   id: '/_layout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuiRoute = GuiRouteImport.update({
+  id: '/_gui',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LayoutIndexRoute = LayoutIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -63,34 +75,91 @@ const LayoutAdminRoute = LayoutAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => LayoutRoute,
 } as any)
+const GuiSolutionsRoute = GuiSolutionsRouteImport.update({
+  id: '/solutions',
+  path: '/solutions',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiResultsRoute = GuiResultsRouteImport.update({
+  id: '/results',
+  path: '/results',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiOrganizationRoute = GuiOrganizationRouteImport.update({
+  id: '/organization',
+  path: '/organization',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiMaterialsRoute = GuiMaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiExportRoute = GuiExportRouteImport.update({
+  id: '/export',
+  path: '/export',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiExperimentsRoute = GuiExperimentsRouteImport.update({
+  id: '/experiments',
+  path: '/experiments',
+  getParentRoute: () => GuiRoute,
+} as any)
+const GuiAnalysisRoute = GuiAnalysisRouteImport.update({
+  id: '/analysis',
+  path: '/analysis',
+  getParentRoute: () => GuiRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
+  '/': typeof LayoutIndexRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/analysis': typeof GuiAnalysisRoute
+  '/experiments': typeof GuiExperimentsRoute
+  '/export': typeof GuiExportRoute
+  '/materials': typeof GuiMaterialsRoute
+  '/organization': typeof GuiOrganizationRoute
+  '/results': typeof GuiResultsRoute
+  '/solutions': typeof GuiSolutionsRoute
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
-  '/': typeof LayoutIndexRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof LayoutIndexRoute
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/analysis': typeof GuiAnalysisRoute
+  '/experiments': typeof GuiExperimentsRoute
+  '/export': typeof GuiExportRoute
+  '/materials': typeof GuiMaterialsRoute
+  '/organization': typeof GuiOrganizationRoute
+  '/results': typeof GuiResultsRoute
+  '/solutions': typeof GuiSolutionsRoute
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
-  '/': typeof LayoutIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/_gui': typeof GuiRouteWithChildren
   '/_layout': typeof LayoutRouteWithChildren
   '/login': typeof LoginRoute
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/_gui/analysis': typeof GuiAnalysisRoute
+  '/_gui/experiments': typeof GuiExperimentsRoute
+  '/_gui/export': typeof GuiExportRoute
+  '/_gui/materials': typeof GuiMaterialsRoute
+  '/_gui/organization': typeof GuiOrganizationRoute
+  '/_gui/results': typeof GuiResultsRoute
+  '/_gui/solutions': typeof GuiSolutionsRoute
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -99,31 +168,53 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/'
     | '/login'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/analysis'
+    | '/experiments'
+    | '/export'
+    | '/materials'
+    | '/organization'
+    | '/results'
+    | '/solutions'
     | '/admin'
     | '/items'
     | '/settings'
-    | '/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/login'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/analysis'
+    | '/experiments'
+    | '/export'
+    | '/materials'
+    | '/organization'
+    | '/results'
+    | '/solutions'
     | '/admin'
     | '/items'
     | '/settings'
-    | '/'
   id:
     | '__root__'
+    | '/_gui'
     | '/_layout'
     | '/login'
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/_gui/analysis'
+    | '/_gui/experiments'
+    | '/_gui/export'
+    | '/_gui/materials'
+    | '/_gui/organization'
+    | '/_gui/results'
+    | '/_gui/solutions'
     | '/_layout/admin'
     | '/_layout/items'
     | '/_layout/settings'
@@ -131,6 +222,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  GuiRoute: typeof GuiRouteWithChildren
   LayoutRoute: typeof LayoutRouteWithChildren
   LoginRoute: typeof LoginRoute
   RecoverPasswordRoute: typeof RecoverPasswordRoute
@@ -171,8 +263,15 @@ declare module '@tanstack/react-router' {
     '/_layout': {
       id: '/_layout'
       path: ''
-      fullPath: ''
+      fullPath: '/'
       preLoaderRoute: typeof LayoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_gui': {
+      id: '/_gui'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof GuiRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_layout/': {
@@ -203,8 +302,79 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutAdminRouteImport
       parentRoute: typeof LayoutRoute
     }
+    '/_gui/solutions': {
+      id: '/_gui/solutions'
+      path: '/solutions'
+      fullPath: '/solutions'
+      preLoaderRoute: typeof GuiSolutionsRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/results': {
+      id: '/_gui/results'
+      path: '/results'
+      fullPath: '/results'
+      preLoaderRoute: typeof GuiResultsRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/organization': {
+      id: '/_gui/organization'
+      path: '/organization'
+      fullPath: '/organization'
+      preLoaderRoute: typeof GuiOrganizationRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/materials': {
+      id: '/_gui/materials'
+      path: '/materials'
+      fullPath: '/materials'
+      preLoaderRoute: typeof GuiMaterialsRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/export': {
+      id: '/_gui/export'
+      path: '/export'
+      fullPath: '/export'
+      preLoaderRoute: typeof GuiExportRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/experiments': {
+      id: '/_gui/experiments'
+      path: '/experiments'
+      fullPath: '/experiments'
+      preLoaderRoute: typeof GuiExperimentsRouteImport
+      parentRoute: typeof GuiRoute
+    }
+    '/_gui/analysis': {
+      id: '/_gui/analysis'
+      path: '/analysis'
+      fullPath: '/analysis'
+      preLoaderRoute: typeof GuiAnalysisRouteImport
+      parentRoute: typeof GuiRoute
+    }
   }
 }
+
+interface GuiRouteChildren {
+  GuiAnalysisRoute: typeof GuiAnalysisRoute
+  GuiExperimentsRoute: typeof GuiExperimentsRoute
+  GuiExportRoute: typeof GuiExportRoute
+  GuiMaterialsRoute: typeof GuiMaterialsRoute
+  GuiOrganizationRoute: typeof GuiOrganizationRoute
+  GuiResultsRoute: typeof GuiResultsRoute
+  GuiSolutionsRoute: typeof GuiSolutionsRoute
+}
+
+const GuiRouteChildren: GuiRouteChildren = {
+  GuiAnalysisRoute: GuiAnalysisRoute,
+  GuiExperimentsRoute: GuiExperimentsRoute,
+  GuiExportRoute: GuiExportRoute,
+  GuiMaterialsRoute: GuiMaterialsRoute,
+  GuiOrganizationRoute: GuiOrganizationRoute,
+  GuiResultsRoute: GuiResultsRoute,
+  GuiSolutionsRoute: GuiSolutionsRoute,
+}
+
+const GuiRouteWithChildren = GuiRoute._addFileChildren(GuiRouteChildren)
 
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
@@ -224,6 +394,7 @@ const LayoutRouteWithChildren =
   LayoutRoute._addFileChildren(LayoutRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
+  GuiRoute: GuiRouteWithChildren,
   LayoutRoute: LayoutRouteWithChildren,
   LoginRoute: LoginRoute,
   RecoverPasswordRoute: RecoverPasswordRoute,
