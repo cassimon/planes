@@ -89,7 +89,7 @@ export function AppLayout() {
 
   // Find the active plane from context (set by OrganizationPage tab selection)
   const activePlane = useMemo(() => {
-    return planes.find((p) => p.id === activePlaneId) || planes[0]
+    return planes.find((p) => p.id === activePlaneId) || null
   }, [activePlaneId, planes])
 
   // All collection elements in the active plane
@@ -175,7 +175,7 @@ export function AppLayout() {
               style={{ display: "flex", alignItems: "center" }}
             >
               <Text fw={600} size="lg">
-                {activePlane?.name ?? "—"}
+                {activePlane?.name ?? "General"}
               </Text>
             </UnstyledButton>
             {/* Plane dropdown chevron only */}
@@ -195,6 +195,13 @@ export function AppLayout() {
                 </UnstyledButton>
               </Menu.Target>
               <Menu.Dropdown>
+                <Menu.Item
+                  fw={!activePlaneId ? 700 : undefined}
+                  onClick={() => setActivePlaneId(null)}
+                >
+                  General
+                </Menu.Item>
+                <Menu.Divider />
                 {planes.map((p) => (
                   <Menu.Item
                     key={p.id}
@@ -209,28 +216,30 @@ export function AppLayout() {
 
             {/* Removed path separator */}
 
-            {/* Collection name — no click */}
-            <Text
-              fw={600}
-              size="lg"
-              c={activeCollection ? undefined : "dimmed"}
-              style={
-                activeCollection
-                  ? { borderLeft: `3px solid ${accentColor}`, paddingLeft: 8 }
-                  : undefined
-              }
-            >
-              {activeCollection?.name ?? "No Collection"}
-            </Text>
-            {/* Collection dropdown chevron only */}
-            <Menu shadow="md" width={240}>
-              <Menu.Target>
-                <UnstyledButton
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    padding: "0 2px",
-                  }}
+            {/* Collection name — only shown when a specific plane is selected */}
+            {activePlane && (
+              <>
+                <Text
+                  fw={600}
+                  size="lg"
+                  c={activeCollection ? undefined : "dimmed"}
+                  style={
+                    activeCollection
+                      ? { borderLeft: `3px solid ${accentColor}`, paddingLeft: 8 }
+                      : undefined
+                  }
+                >
+                  {activeCollection?.name ?? "No Collection"}
+                </Text>
+                {/* Collection dropdown chevron only */}
+                <Menu shadow="md" width={240}>
+                  <Menu.Target>
+                    <UnstyledButton
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        padding: "0 2px",
+                      }}
                 >
                   <IconChevronDown
                     size={14}
@@ -267,6 +276,8 @@ export function AppLayout() {
                 )}
               </Menu.Dropdown>
             </Menu>
+              </>
+            )}
 
             {/* Active entity segment */}
             {activeEntity && entityName && (

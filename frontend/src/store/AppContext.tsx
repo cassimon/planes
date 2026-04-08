@@ -599,6 +599,25 @@ type AppContextValue = {
     merged: CanvasCollectionElement,
   ) => void
 
+  /**
+   * Copy collection refs from one element to a new collection in a target plane.
+   * The original element and its refs remain unchanged.
+   */
+  copyElementToPlane: (
+    sourceElement: CanvasCollectionElement,
+    targetPlaneId: string,
+  ) => void
+
+  /**
+   * Move collection refs from one element to a new collection in a target plane.
+   * The original element is deleted from its source plane.
+   */
+  moveElementToPlane: (
+    sourceElement: CanvasCollectionElement,
+    sourcePlaneId: string,
+    targetPlaneId: string,
+  ) => void
+
   // ── Selection ─────────────────────────────────────────────────────────────
   /** ID of the currently focused Collection canvas element, or null */
   activeCollectionId: string | null
@@ -860,6 +879,53 @@ export function AppProvider({
     [],
   )
 
+  const copyElementToPlane = useCallback(
+    (sourceElement: CanvasCollectionElement, targetPlaneId: string) => {
+      const copy: CanvasCollectionElement = {
+        ...sourceElement,
+        id: crypto.randomUUID(),
+        position: { x: 40, y: 40 },
+      }
+      setPlanes((prev) =>
+        prev.map((p) =>
+          p.id === targetPlaneId
+            ? { ...p, elements: [...p.elements, copy] }
+            : p,
+        ),
+      )
+    },
+    [],
+  )
+
+  const moveElementToPlane = useCallback(
+    (
+      sourceElement: CanvasCollectionElement,
+      sourcePlaneId: string,
+      targetPlaneId: string,
+    ) => {
+      const moved: CanvasCollectionElement = {
+        ...sourceElement,
+        id: crypto.randomUUID(),
+        position: { x: 40, y: 40 },
+      }
+      setPlanes((prev) =>
+        prev.map((p) => {
+          if (p.id === sourcePlaneId) {
+            return {
+              ...p,
+              elements: p.elements.filter((e) => e.id !== sourceElement.id),
+            }
+          }
+          if (p.id === targetPlaneId) {
+            return { ...p, elements: [...p.elements, moved] }
+          }
+          return p
+        }),
+      )
+    },
+    [],
+  )
+
   return (
     <AppContext.Provider
       value={{
@@ -882,6 +948,8 @@ export function AppProvider({
         updateElement,
         deleteElement,
         fuseCollections,
+        copyElementToPlane,
+        moveElementToPlane,
         activeCollectionId,
         setActiveCollectionId,
         activePlaneId,
@@ -909,19 +977,64 @@ export function useAppContext() {
 /**
  * Returns helpers for filtering entity lists and resolving collection colors
  * based on the currently active plane and collection selection.
+ *
+ * When activePlaneId is null ("General" view), all entities across all planes
+ * are visible. When a specific plane is selected, only entities referenced by
+ * collections on that plane are visible (plus un-referenced orphan entities).
  */
 export function useEntityCollection() {
   const { planes, activePlaneId, activeCollectionId } = useAppContext()
 
   const activePlane = useMemo(
-    () => planes.find((p) => p.id === activePlaneId) ?? planes[0] ?? null,
+    () => planes.find((p) => p.id === activePlaneId) ?? null,
     [planes, activePlaneId],
   )
+
+  /** Set of all entity keys ("kind:id") referenced by any collection on any plane */
+  const allReferencedEntities = useMemo(() => {
+    const set = new Set<string>()
+    for (const plane of planes) {
+      for (const el of plane.elements) {
+        if (el.type !== "collection") continue
+        const col = el as CanvasCollectionElement
+        for (const ref of col.refs) {
+          set.add(`${ref.kind}:${ref.id}`)
+        }
+      }
+    }
+    return set
+  }, [planes])
+
+  /** Set of entity keys referenced by collections on the active plane */
+  const planeReferencedEntities = useMemo(() => {
+    const set = new Set<string>()
+    if (!activePlane) return set
+    for (const el of activePlane.elements) {
+      if (el.type !== "collection") continue
+      const col = el as CanvasCollectionElement
+      for (const ref of col.refs) {
+        set.add(`${ref.kind}:${ref.id}`)
+      }
+    }
+    return set
+  }, [activePlane])
 
   // Map from "kind:id" → the first CanvasCollectionElement that owns it in the active plane
   const entityToCollection = useMemo(() => {
     const map = new Map<string, CanvasCollectionElement>()
     if (!activePlane) {
+      // General view: map across all planes
+      for (const plane of planes) {
+        for (const el of plane.elements) {
+          if (el.type !== "collection") continue
+          const col = el as CanvasCollectionElement
+          for (const ref of col.refs) {
+            if (!map.has(`${ref.kind}:${ref.id}`)) {
+              map.set(`${ref.kind}:${ref.id}`, col)
+            }
+          }
+        }
+      }
       return map
     }
     for (const el of activePlane.elements) {
@@ -936,7 +1049,7 @@ export function useEntityCollection() {
       }
     }
     return map
-  }, [activePlane])
+  }, [activePlane, planes])
 
   const activeCollection = useMemo(() => {
     if (!activeCollectionId || !activePlane) {
@@ -953,16 +1066,50 @@ export function useEntityCollection() {
     [entityToCollection],
   )
 
-  /** True when entity should be shown: all entities shown when no collection selected */
+  /**
+   * True when entity should be shown.
+   * - General view (no plane selected): all entities visible
+   * - Plane selected + no collection selected: entities on this plane + orphans (unreferenced by any plane)
+   * - Plane selected + collection selected: only entities in that collection
+   */
   const isEntityVisible = useCallback(
     (kind: CollectionRef["kind"], id: string): boolean => {
-      if (!activeCollection) {
+      // If a specific collection is selected, filter to its refs
+      if (activeCollection) {
+        return activeCollection.refs.some((r) => r.kind === kind && r.id === id)
+      }
+      // General view: show everything
+      if (!activePlane) {
         return true
       }
-      return activeCollection.refs.some((r) => r.kind === kind && r.id === id)
+      // Plane selected, no collection: show items on this plane + orphans
+      if (planeReferencedEntities.has(`${kind}:${id}`)) return true
+      // Orphan: not referenced by any collection on any plane
+      if (!allReferencedEntities.has(`${kind}:${id}`)) return true
+      return false
     },
-    [activeCollection],
+    [activeCollection, activePlane, planeReferencedEntities, allReferencedEntities],
   )
 
-  return { getEntityColor, isEntityVisible }
+  /**
+   * Returns the plane that owns an entity (for grouping in General view).
+   * Returns null if the entity is not referenced by any collection.
+   */
+  const getEntityPlane = useCallback(
+    (kind: CollectionRef["kind"], id: string): Plane | null => {
+      for (const plane of planes) {
+        for (const el of plane.elements) {
+          if (el.type !== "collection") continue
+          const col = el as CanvasCollectionElement
+          if (col.refs.some((r) => r.kind === kind && r.id === id)) {
+            return plane
+          }
+        }
+      }
+      return null
+    },
+    [planes],
+  )
+
+  return { getEntityColor, isEntityVisible, getEntityPlane, activePlane }
 }

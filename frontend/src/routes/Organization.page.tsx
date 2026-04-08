@@ -24,6 +24,7 @@ import {
   IconBox,
   IconChartBar,
   IconCheck,
+  IconCopy,
   IconDownload,
   IconFlask,
   IconFolderPlus,
@@ -31,6 +32,7 @@ import {
   IconItalic,
   IconLetterT,
   IconMinus,
+  IconArrowRight,
   IconNote,
   IconPlayerPlay,
   IconPlus,
@@ -823,6 +825,7 @@ function CollectionEl({
     finalPos: Vec2,
     originPos: Vec2,
     didMove: boolean,
+    droppedOnPlaneId?: string,
   ) => void
   onStartDivide: () => void
 }) {
@@ -832,12 +835,12 @@ function CollectionEl({
   const [editingName, setEditingName] = useState(false)
   const [nameBuffer, setNameBuffer] = useState(el.name)
   const dragStart = useRef<{ mouse: Vec2; origin: Vec2 } | null>(null)
+  /** Screen-space position of the element while dragging (for fixed overlay) */
+  const [dragScreenPos, setDragScreenPos] = useState<Vec2 | null>(null)
   const finalPosRef = useRef<Vec2>(el.position)
   const didMove = useRef(false)
+  const lastPointerEvent = useRef<{ clientX: number; clientY: number } | null>(null)
   const isActive = activeCollectionId === el.id
-
-  if (process.env.NODE_ENV !== "production") {
-  }
 
   const startDrag = (ev: ReactPointerEvent<HTMLDivElement>) => {
     setDragging(true)
@@ -863,15 +866,32 @@ function CollectionEl({
       y: snapToGrid(dragStart.current.origin.y + dy),
     }
     finalPosRef.current = newPos
+    lastPointerEvent.current = { clientX: ev.clientX, clientY: ev.clientY }
+    // Track screen position for the fixed-position drag overlay
+    setDragScreenPos({ x: ev.clientX - 70, y: ev.clientY - 20 })
     onDragPositionUpdate(newPos)
     onUpdate({ ...el, position: newPos })
   }
 
   const stopDrag = () => {
     const origin = dragStart.current?.origin ?? el.position
-    onDropped(el.id, finalPosRef.current, origin, didMove.current)
+    // Detect if dropped on a plane tab
+    let droppedOnPlaneId: string | undefined
+    if (lastPointerEvent.current) {
+      const tabEl = document.elementFromPoint(
+        lastPointerEvent.current.clientX,
+        lastPointerEvent.current.clientY,
+      )
+      const planeTab = tabEl?.closest("[data-plane-tab-id]") as HTMLElement | null
+      if (planeTab) {
+        droppedOnPlaneId = planeTab.dataset.planeTabId
+      }
+    }
+    onDropped(el.id, finalPosRef.current, origin, didMove.current, droppedOnPlaneId)
     setDragging(false)
+    setDragScreenPos(null)
     dragStart.current = null
+    lastPointerEvent.current = null
   }
 
   const commitName = () => {
@@ -933,15 +953,29 @@ function CollectionEl({
     )
   }
 
-  return (
-    <Box
-      style={{
+  // When dragging, render using fixed positioning so the element appears above
+  // the toolbar and plane tabs instead of being clipped by overflow:hidden.
+  const boxStyle: React.CSSProperties = dragging && dragScreenPos
+    ? {
+        position: "fixed",
+        left: dragScreenPos.x,
+        top: dragScreenPos.y,
+        cursor: "grabbing",
+        userSelect: "none",
+        zIndex: 10000,
+        pointerEvents: "auto",
+      }
+    : {
         position: "absolute",
         left: el.position.x + pan.x,
         top: el.position.y + pan.y,
-        cursor: dragging ? "grabbing" : "pointer",
+        cursor: "pointer",
         userSelect: "none",
-      }}
+      }
+
+  return (
+    <Box
+      style={boxStyle}
       onPointerDown={startDrag}
       onPointerMove={onPointerMove}
       onPointerUp={stopDrag}
@@ -1770,6 +1804,9 @@ function PlaneCanvas({ plane }: { plane: Plane }) {
     updatePlane,
     setActiveCollectionId,
     activeCollectionId,
+    planes,
+    copyElementToPlane,
+    moveElementToPlane,
   } = useAppContext()
 
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1832,11 +1869,18 @@ function PlaneCanvas({ plane }: { plane: Plane }) {
     setFuseCandidate(target ? { srcId, dstId: target.id } : null)
   }
 
+  // ── Transfer-to-plane dialog state ──────────────────────────────────────
+  const [transferDialog, setTransferDialog] = useState<{
+    element: CanvasCollectionElement
+    targetPlaneId: string
+  } | null>(null)
+
   const handleDrop = (
     srcId: string,
     _finalPos: Vec2,
     originPos: Vec2,
     didMove: boolean,
+    droppedOnPlaneId?: string,
   ) => {
     const candidate = fuseCandidateRef.current
     if (candidate && candidate.srcId === srcId) {
@@ -1859,6 +1903,35 @@ function PlaneCanvas({ plane }: { plane: Plane }) {
       }
     }
     setFuseCandidate(null)
+
+    // If dropped on a different plane tab, offer copy/move
+    if (droppedOnPlaneId && droppedOnPlaneId !== plane.id) {
+      const src = plane.elements.find((e) => e.id === srcId) as
+        | CanvasCollectionElement
+        | undefined
+      if (src) {
+        // Snap back to original position
+        updateElement(plane.id, { ...src, position: originPos })
+        setTransferDialog({
+          element: { ...src, position: originPos },
+          targetPlaneId: droppedOnPlaneId,
+        })
+        return
+      }
+    }
+
+    // If the element was dragged (moved) but didn't land on a collection or tab,
+    // check if it was dragged out of the canvas bounds (e.g. onto toolbar) — snap back
+    if (didMove && _finalPos.y < -40) {
+      const src = plane.elements.find((e) => e.id === srcId) as
+        | CanvasCollectionElement
+        | undefined
+      if (src) {
+        updateElement(plane.id, { ...src, position: originPos })
+        return
+      }
+    }
+
     if (!didMove) {
       setActiveCollectionId(activeCollectionId === srcId ? null : srcId)
     }
@@ -2659,6 +2732,59 @@ function PlaneCanvas({ plane }: { plane: Plane }) {
           onConfirm={handleConfirmDivide}
         />
       )}
+
+      {/* ── Transfer-to-plane dialog ──────────────────────────────────────────── */}
+      <Modal
+        opened={!!transferDialog}
+        onClose={() => setTransferDialog(null)}
+        title="Transfer to Plane"
+        size="sm"
+        centered
+      >
+        {transferDialog && (() => {
+          const targetPlane = planes.find((p) => p.id === transferDialog.targetPlaneId)
+          return (
+            <Stack gap="md">
+              <Text size="sm">
+                Move or copy <Text span fw={600}>"{transferDialog.element.name}"</Text>{" "}
+                ({transferDialog.element.refs.length} item{transferDialog.element.refs.length !== 1 ? "s" : ""}){" "}
+                to <Text span fw={600}>"{targetPlane?.name ?? "Unknown"}"</Text>?
+              </Text>
+              <Group justify="flex-end" gap="sm">
+                <Button variant="default" onClick={() => setTransferDialog(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  leftSection={<IconCopy size={16} />}
+                  variant="light"
+                  onClick={() => {
+                    copyElementToPlane(
+                      transferDialog.element,
+                      transferDialog.targetPlaneId,
+                    )
+                    setTransferDialog(null)
+                  }}
+                >
+                  Copy
+                </Button>
+                <Button
+                  leftSection={<IconArrowRight size={16} />}
+                  onClick={() => {
+                    moveElementToPlane(
+                      transferDialog.element,
+                      plane.id,
+                      transferDialog.targetPlaneId,
+                    )
+                    setTransferDialog(null)
+                  }}
+                >
+                  Move
+                </Button>
+              </Group>
+            </Stack>
+          )
+        })()}
+      </Modal>
     </Box>
   )
 }
@@ -2736,6 +2862,125 @@ function PlaneTabLabel({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Welcome / General plane overview
+// ─────────────────────────────────────────────────────────────────────────────
+
+function WelcomePlaneView() {
+  const {
+    planes,
+    addPlane,
+    setActivePlaneId,
+  } = useAppContext()
+
+  /** Count items referenced by collections on a given plane */
+  const getPlaneItemCounts = (plane: Plane) => {
+    const matIds = new Set<string>()
+    const solIds = new Set<string>()
+    const expIds = new Set<string>()
+    for (const el of plane.elements) {
+      if (el.type !== "collection") continue
+      const col = el as CanvasCollectionElement
+      for (const ref of col.refs) {
+        if (ref.kind === "material") matIds.add(ref.id)
+        else if (ref.kind === "solution") solIds.add(ref.id)
+        else if (ref.kind === "experiment") expIds.add(ref.id)
+      }
+    }
+    return {
+      materials: matIds.size,
+      solutions: solIds.size,
+      experiments: expIds.size,
+      collections: plane.elements.filter((e) => e.type === "collection").length,
+    }
+  }
+
+  const handleAddPlane = () => {
+    const p = addPlane(`Plane ${planes.length + 1}`)
+    setActivePlaneId(p.id)
+  }
+
+  return (
+    <Box p="xl">
+      <Text size="xl" fw={700} mb="lg">
+        Planes Overview
+      </Text>
+      <Group gap="md" wrap="wrap" mb="lg">
+        {planes.map((plane) => {
+          const counts = getPlaneItemCounts(plane)
+          return (
+            <Paper
+              key={plane.id}
+              withBorder
+              shadow="sm"
+              p="md"
+              style={{
+                width: 220,
+                cursor: "pointer",
+                transition: "box-shadow 150ms ease",
+              }}
+              onClick={() => setActivePlaneId(plane.id)}
+            >
+              <Text fw={600} size="md" mb="xs">
+                {plane.name}
+              </Text>
+              <Stack gap={4}>
+                <Group gap={6}>
+                  <IconBox size={14} color="var(--mantine-color-teal-6)" />
+                  <Text size="xs" c="dimmed">
+                    {counts.materials} material{counts.materials !== 1 ? "s" : ""}
+                  </Text>
+                </Group>
+                <Group gap={6}>
+                  <IconFlask size={14} color="var(--mantine-color-blue-6)" />
+                  <Text size="xs" c="dimmed">
+                    {counts.solutions} solution{counts.solutions !== 1 ? "s" : ""}
+                  </Text>
+                </Group>
+                <Group gap={6}>
+                  <IconPlayerPlay size={14} color="var(--mantine-color-grape-6)" />
+                  <Text size="xs" c="dimmed">
+                    {counts.experiments} experiment{counts.experiments !== 1 ? "s" : ""}
+                  </Text>
+                </Group>
+                <Group gap={6}>
+                  <IconFolderPlus size={14} color="var(--mantine-color-gray-6)" />
+                  <Text size="xs" c="dimmed">
+                    {counts.collections} collection{counts.collections !== 1 ? "s" : ""}
+                  </Text>
+                </Group>
+              </Stack>
+            </Paper>
+          )
+        })}
+        {/* Add plane card */}
+        <Paper
+          withBorder
+          shadow="sm"
+          p="md"
+          style={{
+            width: 220,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 140,
+            border: "2px dashed var(--mantine-color-gray-4)",
+          }}
+          onClick={handleAddPlane}
+        >
+          <Stack align="center" gap={4}>
+            <IconPlus size={24} color="var(--mantine-color-gray-5)" />
+            <Text size="sm" c="dimmed">
+              Add Plane
+            </Text>
+          </Stack>
+        </Paper>
+      </Group>
+    </Box>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Organization page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2749,15 +2994,12 @@ export function OrganizationPage() {
     setActivePlaneId,
   } = useAppContext()
 
-  // Ensure activePlaneId always points to a valid plane
+  // Do NOT auto-select a plane — null means "General" view
+  // Only reset if the *selected* plane was deleted
   useEffect(() => {
-    if (
-      (!activePlaneId || !planes.find((p) => p.id === activePlaneId)) &&
-      planes.length > 0
-    ) {
-      setActivePlaneId(planes[0].id)
+    if (activePlaneId && !planes.find((p) => p.id === activePlaneId)) {
+      setActivePlaneId(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planes, activePlaneId, setActivePlaneId])
 
   const handleAddPlane = () => {
@@ -2777,14 +3019,11 @@ export function OrganizationPage() {
       onConfirm: () => {
         deletePlane(id)
         if (activePlaneId === id) {
-          const remaining = planes.filter((p) => p.id !== id)
-          setActivePlaneId(remaining[remaining.length - 1]?.id ?? null)
+          setActivePlaneId(null) // Go back to General view
         }
       },
     })
   }
-
-  const activePlane = planes.find((p) => p.id === activePlaneId)
 
   return (
     <Box
@@ -2796,9 +3035,11 @@ export function OrganizationPage() {
       }}
     >
       <Tabs
-        value={activePlaneId ?? ""}
+        value={activePlaneId ?? "__general__"}
         onChange={(v) => {
-          if (v) {
+          if (v === "__general__") {
+            setActivePlaneId(null)
+          } else if (v) {
             setActivePlaneId(v)
           }
         }}
@@ -2818,8 +3059,11 @@ export function OrganizationPage() {
         >
           <ScrollArea type="never" style={{ flex: 1 }}>
             <Tabs.List style={{ flexWrap: "nowrap", borderBottom: "none" }}>
+              <Tabs.Tab value="__general__">
+                <Text size="sm">General</Text>
+              </Tabs.Tab>
               {planes.map((p) => (
-                <Tabs.Tab value={p.id} key={p.id}>
+                <Tabs.Tab value={p.id} key={p.id} data-plane-tab-id={p.id}>
                   <PlaneTabLabel
                     plane={p}
                     onRename={(name) => updatePlane({ ...p, name })}
@@ -2851,6 +3095,9 @@ export function OrganizationPage() {
             borderTop: "1px solid var(--mantine-color-default-border)",
           }}
         >
+          <Tabs.Panel key="__general__" value="__general__" style={{ height: "100%", overflow: "auto" }}>
+            <WelcomePlaneView />
+          </Tabs.Panel>
           {planes.map((p) => (
             <Tabs.Panel key={p.id} value={p.id} style={{ height: "100%" }}>
               <PlaneCanvas plane={p} />
@@ -2858,15 +3105,6 @@ export function OrganizationPage() {
           ))}
         </Box>
       </Tabs>
-
-      {!activePlane && (
-        <Stack align="center" justify="center" style={{ flex: 1 }}>
-          <Text c="dimmed">No planes yet.</Text>
-          <Button leftSection={<IconPlus size={14} />} onClick={handleAddPlane}>
-            Add Plane
-          </Button>
-        </Stack>
-      )}
     </Box>
   )
 }

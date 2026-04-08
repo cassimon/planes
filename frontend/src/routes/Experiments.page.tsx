@@ -1777,7 +1777,7 @@ export function ExperimentsPage() {
     activeCollectionId,
     activePlaneId,
   } = useAppContext()
-  const { getEntityColor, isEntityVisible } = useEntityCollection()
+  const { getEntityColor, isEntityVisible, getEntityPlane } = useEntityCollection()
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const selectExperiment = useCallback(
@@ -1903,6 +1903,61 @@ export function ExperimentsPage() {
                   No experiments yet
                 </Text>
               </Paper>
+            ) : !activePlaneId ? (
+              // General mode: group by plane
+              (() => {
+                const groups = new Map<string, { planeName: string; items: typeof visibleExperiments }>()
+                const orphans: typeof visibleExperiments = []
+                for (const exp of visibleExperiments) {
+                  const plane = getEntityPlane("experiment", exp.id)
+                  if (plane) {
+                    const group = groups.get(plane.id)
+                    if (group) {
+                      group.items.push(exp)
+                    } else {
+                      groups.set(plane.id, { planeName: plane.name, items: [exp] })
+                    }
+                  } else {
+                    orphans.push(exp)
+                  }
+                }
+                const sections: React.ReactNode[] = []
+                for (const [planeId, { planeName, items }] of groups) {
+                  sections.push(
+                    <Text key={`plane-header-${planeId}`} size="xs" fw={700} c="dimmed" tt="uppercase" mt="xs">
+                      {planeName}
+                    </Text>
+                  )
+                  sections.push(...items.map((exp) => (
+                    <ExperimentListItem
+                      key={exp.id}
+                      experiment={exp}
+                      isSelected={selectedId === exp.id}
+                      onSelect={() => selectExperiment(exp.id)}
+                      onDelete={() => deleteExperiment(exp.id)}
+                      collectionColor={getEntityColor("experiment", exp.id) ?? undefined}
+                    />
+                  )))
+                }
+                if (orphans.length > 0) {
+                  sections.push(
+                    <Text key="plane-header-orphan" size="xs" fw={700} c="dimmed" tt="uppercase" mt="xs">
+                      Unassigned
+                    </Text>
+                  )
+                  sections.push(...orphans.map((exp) => (
+                    <ExperimentListItem
+                      key={exp.id}
+                      experiment={exp}
+                      isSelected={selectedId === exp.id}
+                      onSelect={() => selectExperiment(exp.id)}
+                      onDelete={() => deleteExperiment(exp.id)}
+                      collectionColor={getEntityColor("experiment", exp.id) ?? undefined}
+                    />
+                  )))
+                }
+                return sections
+              })()
             ) : (
               visibleExperiments.map((exp) => (
                 <ExperimentListItem

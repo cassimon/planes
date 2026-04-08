@@ -81,7 +81,7 @@ export function MaterialsPage() {
     activePlaneId,
     setActiveEntity,
   } = useAppContext()
-  const { getEntityColor, isEntityVisible } = useEntityCollection()
+  const { getEntityColor, isEntityVisible, getEntityPlane } = useEntityCollection()
   const [sort, setSort] = useState<SortState>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editBuffer, setEditBuffer] = useState<Material | null>(null)
@@ -217,6 +217,112 @@ export function MaterialsPage() {
     })
   }
 
+  const renderMaterialRow = (material: Material) => {
+    const isEditing = editingId === material.id
+    return (
+      <Table.Tr
+        key={material.id}
+        bg={
+          selected.has(material.id)
+            ? "var(--mantine-color-blue-light)"
+            : undefined
+        }
+        onClick={() => selectMaterial(material.id)}
+        style={{ cursor: "pointer" }}
+      >
+        <Table.Td
+          style={{
+            padding: 0,
+            width: 6,
+            minWidth: 6,
+            background:
+              getEntityColor("material", material.id) ?? "transparent",
+          }}
+        />
+        <Table.Td>
+          <input
+            type="checkbox"
+            checked={selected.has(material.id)}
+            onChange={() => toggleSelect(material.id)}
+          />
+        </Table.Td>
+        {COLUMNS.map((col) => (
+          <Table.Td key={col.key}>
+            {isEditing && editBuffer ? (
+              <TextInput
+                size="xs"
+                value={editBuffer[col.key]}
+                onChange={(e) =>
+                  setEditBuffer((prev) =>
+                    prev
+                      ? { ...prev, [col.key]: e.currentTarget.value }
+                      : prev,
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitEdit()
+                  }
+                  if (e.key === "Escape") {
+                    cancelEdit(material.id)
+                  }
+                }}
+                autoFocus={col.key === "type"}
+              />
+            ) : (
+              <Text size="sm">
+                {material[col.key] || (
+                  <Text span c="dimmed" size="sm">
+                    —
+                  </Text>
+                )}
+              </Text>
+            )}
+          </Table.Td>
+        ))}
+        <Table.Td>
+          <Group gap={4} justify="center">
+            {isEditing ? (
+              <>
+                <Tooltip label="Save">
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color="green"
+                    onClick={commitEdit}
+                  >
+                    <IconCheck size={14} />
+                  </ActionIcon>
+                </Tooltip>
+                <Tooltip label="Cancel">
+                  <ActionIcon
+                    size="sm"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() => cancelEdit(material.id)}
+                  >
+                    <IconX size={14} />
+                  </ActionIcon>
+                </Tooltip>
+              </>
+            ) : (
+              <Tooltip label="Edit">
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="blue"
+                  onClick={() => startEdit(material)}
+                >
+                  <IconPencil size={14} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
+        </Table.Td>
+      </Table.Tr>
+    )
+  }
+
   return (
     <Container fluid>
       <Group justify="space-between" mb="md" mt="md">
@@ -296,112 +402,49 @@ export function MaterialsPage() {
                 </Table.Td>
               </Table.Tr>
             )}
-            {sorted.map((material) => {
-              const isEditing = editingId === material.id
-              return (
-                <Table.Tr
-                  key={material.id}
-                  bg={
-                    selected.has(material.id)
-                      ? "var(--mantine-color-blue-light)"
-                      : undefined
+            {(() => {
+              // In General mode (no plane selected), group by plane with subheadings
+              if (!activePlaneId) {
+                const groups = new Map<string, { planeName: string; items: typeof sorted }>()
+                const orphans: typeof sorted = []
+                for (const material of sorted) {
+                  const plane = getEntityPlane("material", material.id)
+                  if (plane) {
+                    const group = groups.get(plane.id)
+                    if (group) {
+                      group.items.push(material)
+                    } else {
+                      groups.set(plane.id, { planeName: plane.name, items: [material] })
+                    }
+                  } else {
+                    orphans.push(material)
                   }
-                  onClick={() => selectMaterial(material.id)}
-                  style={{ cursor: "pointer" }}
-                >
-                  <Table.Td
-                    style={{
-                      padding: 0,
-                      width: 6,
-                      minWidth: 6,
-                      background:
-                        getEntityColor("material", material.id) ??
-                        "transparent",
-                    }}
-                  />
-                  <Table.Td>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(material.id)}
-                      onChange={() => toggleSelect(material.id)}
-                    />
-                  </Table.Td>
-                  {COLUMNS.map((col) => (
-                    <Table.Td key={col.key}>
-                      {isEditing && editBuffer ? (
-                        <TextInput
-                          size="xs"
-                          value={editBuffer[col.key]}
-                          onChange={(e) =>
-                            setEditBuffer((prev) =>
-                              prev
-                                ? { ...prev, [col.key]: e.currentTarget.value }
-                                : prev,
-                            )
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              commitEdit()
-                            }
-                            if (e.key === "Escape") {
-                              cancelEdit(material.id)
-                            }
-                          }}
-                          autoFocus={col.key === "type"}
-                        />
-                      ) : (
-                        <Text size="sm">
-                          {material[col.key] || (
-                            <Text span c="dimmed" size="sm">
-                              —
-                            </Text>
-                          )}
-                        </Text>
-                      )}
-                    </Table.Td>
-                  ))}
-                  <Table.Td>
-                    <Group gap={4} justify="center">
-                      {isEditing ? (
-                        <>
-                          <Tooltip label="Save">
-                            <ActionIcon
-                              size="sm"
-                              variant="subtle"
-                              color="green"
-                              onClick={commitEdit}
-                            >
-                              <IconCheck size={14} />
-                            </ActionIcon>
-                          </Tooltip>
-                          <Tooltip label="Cancel">
-                            <ActionIcon
-                              size="sm"
-                              variant="subtle"
-                              color="gray"
-                              onClick={() => cancelEdit(material.id)}
-                            >
-                              <IconX size={14} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </>
-                      ) : (
-                        <Tooltip label="Edit">
-                          <ActionIcon
-                            size="sm"
-                            variant="subtle"
-                            color="blue"
-                            onClick={() => startEdit(material)}
-                          >
-                            <IconPencil size={14} />
-                          </ActionIcon>
-                        </Tooltip>
-                      )}
-                    </Group>
-                  </Table.Td>
-                </Table.Tr>
-              )
-            })}
+                }
+                const sections: React.ReactNode[] = []
+                for (const [planeId, { planeName, items }] of groups) {
+                  sections.push(
+                    <Table.Tr key={`plane-header-${planeId}`}>
+                      <Table.Td colSpan={COLUMNS.length + 3} style={{ background: "var(--mantine-color-gray-1)", padding: "4px 12px" }}>
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">{planeName}</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                  sections.push(...items.map((material) => renderMaterialRow(material)))
+                }
+                if (orphans.length > 0) {
+                  sections.push(
+                    <Table.Tr key="plane-header-orphan">
+                      <Table.Td colSpan={COLUMNS.length + 3} style={{ background: "var(--mantine-color-gray-1)", padding: "4px 12px" }}>
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">Unassigned</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                  )
+                  sections.push(...orphans.map((material) => renderMaterialRow(material)))
+                }
+                return sections
+              }
+              return sorted.map((material) => renderMaterialRow(material))
+            })()}
           </Table.Tbody>
         </Table>
       </ScrollArea>

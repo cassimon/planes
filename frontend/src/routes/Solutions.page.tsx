@@ -448,7 +448,7 @@ export function SolutionsPage() {
     activePlaneId,
     setActiveEntity,
   } = useAppContext()
-  const { getEntityColor, isEntityVisible } = useEntityCollection()
+  const { getEntityColor, isEntityVisible, getEntityPlane } = useEntityCollection()
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
     null,
   )
@@ -572,21 +572,81 @@ export function SolutionsPage() {
       )}
 
       <Stack gap={0}>
-        {visibleSolutions.map((solution) => (
-          <SolutionCard
-            key={solution.id}
-            solution={solution}
-            onUpdate={updateSolution}
-            onDelete={() => deleteSolution(solution.id)}
-            materialOptions={materialOptions}
-            getMaterialName={getMaterialName}
-            collectionColor={
-              getEntityColor("solution", solution.id) ?? undefined
+        {(() => {
+          if (!activePlaneId) {
+            // General mode: group by plane
+            const groups = new Map<string, { planeName: string; items: typeof visibleSolutions }>()
+            const orphans: typeof visibleSolutions = []
+            for (const solution of visibleSolutions) {
+              const plane = getEntityPlane("solution", solution.id)
+              if (plane) {
+                const group = groups.get(plane.id)
+                if (group) {
+                  group.items.push(solution)
+                } else {
+                  groups.set(plane.id, { planeName: plane.name, items: [solution] })
+                }
+              } else {
+                orphans.push(solution)
+              }
             }
-            isSelected={selectedSolutionId === solution.id}
-            onSelect={selectSolution}
-          />
-        ))}
+            const sections: React.ReactNode[] = []
+            for (const [planeId, { planeName, items }] of groups) {
+              sections.push(
+                <Text key={`plane-header-${planeId}`} size="xs" fw={700} c="dimmed" tt="uppercase" mt="md" mb={4} px={4}>
+                  {planeName}
+                </Text>
+              )
+              sections.push(...items.map((solution) => (
+                <SolutionCard
+                  key={solution.id}
+                  solution={solution}
+                  onUpdate={updateSolution}
+                  onDelete={() => deleteSolution(solution.id)}
+                  materialOptions={materialOptions}
+                  getMaterialName={getMaterialName}
+                  collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+                  isSelected={selectedSolutionId === solution.id}
+                  onSelect={selectSolution}
+                />
+              )))
+            }
+            if (orphans.length > 0) {
+              sections.push(
+                <Text key="plane-header-orphan" size="xs" fw={700} c="dimmed" tt="uppercase" mt="md" mb={4} px={4}>
+                  Unassigned
+                </Text>
+              )
+              sections.push(...orphans.map((solution) => (
+                <SolutionCard
+                  key={solution.id}
+                  solution={solution}
+                  onUpdate={updateSolution}
+                  onDelete={() => deleteSolution(solution.id)}
+                  materialOptions={materialOptions}
+                  getMaterialName={getMaterialName}
+                  collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+                  isSelected={selectedSolutionId === solution.id}
+                  onSelect={selectSolution}
+                />
+              )))
+            }
+            return sections
+          }
+          return visibleSolutions.map((solution) => (
+            <SolutionCard
+              key={solution.id}
+              solution={solution}
+              onUpdate={updateSolution}
+              onDelete={() => deleteSolution(solution.id)}
+              materialOptions={materialOptions}
+              getMaterialName={getMaterialName}
+              collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+              isSelected={selectedSolutionId === solution.id}
+              onSelect={selectSolution}
+            />
+          ))
+        })()}
       </Stack>
     </Container>
   )
