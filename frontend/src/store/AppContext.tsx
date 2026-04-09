@@ -11,7 +11,6 @@ import {
 import {
   type AppSnapshot,
   type BackendAdapter,
-  HttpBackend,
   InMemoryBackend,
 } from "./backend"
 
@@ -756,28 +755,15 @@ const AppContext = createContext<AppContextValue | null>(null)
 const DEFAULT_BACKEND = new InMemoryBackend({ planes: [newPlane("Plane 1")] })
 
 /** Auto-save interval in milliseconds */
-const SAVE_INTERVAL_MS = 30_000
-const SAVE_DEBOUNCE_MS = 2_500
+const SAVE_INTERVAL_MS = 5_000
 
 export function AppProvider({
   children,
-  backend: providedBackend,
+  backend = DEFAULT_BACKEND,
 }: {
   children: ReactNode
   backend?: BackendAdapter
 }) {
-  // Use HttpBackend by default if user is authenticated, fall back to InMemory
-  const getToken = useCallback(() => localStorage.getItem("access_token"), [])
-  
-  const defaultBackend = useMemo(() => {
-    const token = getToken()
-    if (token) {
-      return new HttpBackend()
-    }
-    return DEFAULT_BACKEND
-  }, [getToken])
-  
-  const backend = providedBackend ?? defaultBackend
   const [materials, setMaterials] = useState<Material[]>([])
   const [solutions, setSolutions] = useState<Solution[]>([])
   const [experiments, setExperiments] = useState<Experiment[]>([])
@@ -807,51 +793,15 @@ export function AppProvider({
     planes,
   })
   stateRef.current = { materials, solutions, experiments, results, planes }
-  const dirtyRef = useRef(false)
-  const saveTimeoutRef = useRef<number | null>(null)
-  const hydratedRef = useRef(false)
-
-  const persistDirtyState = useCallback(async () => {
-    if (!loaded || !dirtyRef.current) {
-      console.log("[AppContext] persistDirtyState skipped: loaded=", loaded, "dirty=", dirtyRef.current)
-      return
-    }
-    dirtyRef.current = false
-    console.log("[AppContext] persistDirtyState: saving state...")
-    await backend.save(stateRef.current)
-    console.log("[AppContext] persistDirtyState: save complete")
-  }, [backend, loaded])
-
-  const scheduleSave = useCallback(() => {
-    if (!loaded) {
-      return
-    }
-    dirtyRef.current = true
-    console.log("[AppContext] scheduleSave: marked dirty, debouncing...")
-    if (saveTimeoutRef.current !== null) {
-      window.clearTimeout(saveTimeoutRef.current)
-    }
-    saveTimeoutRef.current = window.setTimeout(() => {
-      void persistDirtyState()
-    }, SAVE_DEBOUNCE_MS)
-  }, [loaded, persistDirtyState])
 
   // ── Load persisted state on mount ──────────────────────────────────────────
 
   useEffect(() => {
     let cancelled = false
-    console.log("[AppContext] loading state from backend...", backend.constructor.name)
     backend.load().then((snapshot) => {
       if (cancelled) {
         return
       }
-      console.log("[AppContext] loaded snapshot:",
-        "materials:", snapshot.materials.length,
-        "solutions:", snapshot.solutions.length,
-        "experiments:", snapshot.experiments.length,
-        "results:", snapshot.results.length,
-        "planes:", snapshot.planes.length,
-      )
       if (snapshot.materials.length > 0) {
         setMaterials(snapshot.materials)
       }
@@ -874,56 +824,27 @@ export function AppProvider({
     }
   }, [backend])
 
-  // ── Save trigger on data changes (debounced) ───────────────────────────────
-
-  useEffect(() => {
-    if (!loaded) {
-      return
-    }
-    if (!hydratedRef.current) {
-      hydratedRef.current = true
-      return
-    }
-    scheduleSave()
-  }, [
-    loaded,
-    materials,
-    solutions,
-    experiments,
-    results,
-    planes,
-    scheduleSave,
-  ])
-
-  // ── Periodic safety flush + unload flush ───────────────────────────────────
+  // ── Auto-save at interval + on unload ──────────────────────────────────────
 
   useEffect(() => {
     if (!loaded) {
       return
     }
 
-    const flushIfDirty = () => {
-      void persistDirtyState()
-    }
+    const save = () => backend.save(stateRef.current)
 
-    const interval = window.setInterval(flushIfDirty, SAVE_INTERVAL_MS)
+    const interval = setInterval(save, SAVE_INTERVAL_MS)
     const handleUnload = () => {
-      dirtyRef.current = true
-      void persistDirtyState()
+      save()
     }
     window.addEventListener("beforeunload", handleUnload)
 
     return () => {
-      window.clearInterval(interval)
+      clearInterval(interval)
       window.removeEventListener("beforeunload", handleUnload)
-      if (saveTimeoutRef.current !== null) {
-        window.clearTimeout(saveTimeoutRef.current)
-      }
-      // Only persist on unmount if there are unsaved changes
-      // (flushSave already clears dirtyRef, so this is a no-op after logout)
-      void persistDirtyState()
+      save() // save on unmount
     }
-  }, [loaded, persistDirtyState])
+  }, [backend, loaded])
 
   // ── Plane mutations ────────────────────────────────────────────────────────
 
@@ -1129,12 +1050,7 @@ export function AppProvider({
         setPendingCollectionLink,
         activeEntity,
         setActiveEntity,
-        flushSave: async () => {
-          console.log("[AppContext] flushSave called (e.g. before logout)")
-          dirtyRef.current = true
-          await persistDirtyState()
-          console.log("[AppContext] flushSave complete")
-        },
+        flushSave: () => backend.save(stateRef.current),
       }}
     >
       {children}

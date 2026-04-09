@@ -148,9 +148,6 @@ class Material(MaterialBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
     )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
-    )
     solution_components: list["SolutionComponent"] = Relationship(
         back_populates="material", cascade_delete=True
     )
@@ -213,9 +210,6 @@ class Solution(SolutionBase, table=True):
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
-    )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
     )
     components: list[SolutionComponent] = Relationship(
         back_populates="solution", cascade_delete=True
@@ -310,9 +304,6 @@ class Experiment(ExperimentBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
     )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
-    )
     substrates: list[Substrate] = Relationship(
         back_populates="experiment", cascade_delete=True
     )
@@ -405,9 +396,6 @@ class ExperimentResults(ExperimentResultsBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
     )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
-    )
     measurement_files: list[MeasurementFile] = Relationship(
         back_populates="results", cascade_delete=True
     )
@@ -454,9 +442,6 @@ class CanvasElement(CanvasElementBase, table=True):
     plane_id: uuid.UUID = Field(
         foreign_key="plane.id", nullable=False, ondelete="CASCADE"
     )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
-    )
     plane: Optional["Plane"] = Relationship(back_populates="elements")
 
 
@@ -485,9 +470,6 @@ class Plane(PlaneBase, table=True):
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
-    )
-    frontend_data: dict[str, Any] | None = Field(
-        default=None, sa_column=Column(JSONB, nullable=True)
     )
     elements: list[CanvasElement] = Relationship(
         back_populates="plane", cascade_delete=True
@@ -525,15 +507,6 @@ class UserState(SQLModel, table=True):
 class UserStatePublic(SQLModel):
     data: dict[str, Any]
     updated_at: datetime | None = None
-
-
-class BulkStateResponse(SQLModel):
-    """Full application state for bulk loading."""
-    materials: list[MaterialPublic]
-    solutions: list[SolutionPublic]
-    experiments: list[ExperimentPublic]
-    results: list[ExperimentResultsPublic]
-    planes: list[PlanePublic]
 
 
 # Generic message
