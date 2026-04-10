@@ -20,10 +20,10 @@ docker compose exec backend bash      # all commands below run inside here
 
 ---
 
-## Step 1 — Verify `.env` is safe
+## Step 1 — Verify `.env` and auth file are safe
 
 ```bash
-# Print NOMAD-related variables
+# Print NOMAD-related variables from .env
 env | grep NOMAD
 ```
 
@@ -31,8 +31,6 @@ env | grep NOMAD
 
 ```
 NOMAD_URL=https://nomad-lab.eu/prod/v1/test/api/v1
-NOMAD_USERNAME=
-NOMAD_PASSWORD=
 NOMAD_USE_GLOBAL_AUTH=true
 NOMAD_MOCK_MODE=true          # ← must be "true"
 ```
@@ -40,7 +38,16 @@ NOMAD_MOCK_MODE=true          # ← must be "true"
 Check:
 - `NOMAD_URL` contains `/test/` (not the production URL).
 - `NOMAD_MOCK_MODE` is `true`.
-- `NOMAD_USERNAME` / `NOMAD_PASSWORD` are empty (no credentials = extra safety).
+- `NOMAD_USERNAME` and `NOMAD_PASSWORD` are **not** in `.env` (they come from the auth file).
+- Empty/missing credentials in `.env` with mock mode off = `nomad_enabled` stays `False` (extra safety).
+
+Verify the auth file location:
+
+```bash
+ls -la ../sensitive\\ config/.nomad_auth
+# Or check the file (should be empty/placeholder if not yet configured):
+cat ../sensitive\\ config/.nomad_auth
+```
 
 ---
 
@@ -136,14 +143,28 @@ No traffic leaves the container.
 
 Only do this when steps 1–4 pass and you are ready.
 
+**Add credentials to the auth file** (not to `.env`):
+
 ```bash
-# In .env:
-NOMAD_MOCK_MODE=false
-NOMAD_USERNAME=your_nomad_test_account@example.com
-NOMAD_PASSWORD=your_password
+# Edit the auth file (one level above the project root):
+vi ../sensitive\\ config/.nomad_auth
 ```
 
-Restart the backend so it picks up the new env vars:
+Add your NOMAD test account credentials:
+
+```
+username=your_nomad_test_account@example.com
+password=your_password
+```
+
+Then update `.env`:
+
+```bash
+# In .env, disable mock mode:
+NOMAD_MOCK_MODE=false
+```
+
+Restart the backend so it picks up the new credentials from the auth file:
 
 ```bash
 docker compose restart backend
@@ -156,6 +177,8 @@ docker compose exec backend python -c "
 from app.core.config import settings
 assert '/test/' in settings.NOMAD_URL
 assert not settings.NOMAD_MOCK_MODE
+print('Loaded credentials from auth file')
+print('nomad_enabled:', settings.nomad_enabled)
 print('Ready for REAL test-server upload')
 "
 ```
@@ -171,6 +194,7 @@ This is the **test** deployment — uploads there can be freely deleted.
 |-------|-------------|
 | `NOMAD_MOCK_MODE=true` | Replaces all HTTP with logged no-ops |
 | `NOMAD_URL` default | Points to `/test/` deployment |
-| `NOMAD_USERNAME=` (empty) | `nomad_enabled` → `False`, upload endpoint refuses |
+| Auth file outside repo | Credentials kept out of git (safe from accidental commits) |
+| Credentials not in `.env` | `nomad_enabled` stays `False` until auth file is populated |
 | Test suite group E | Proves `httpx.Client` is never constructed in mock mode |
 | Test suite group A+D | Proves all constructed URLs contain `/test/` |
