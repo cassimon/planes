@@ -390,6 +390,15 @@ export type DeviceGroup = {
   matchScore?: number
 }
 
+/** NOMAD upload information */
+export type NomadUploadInfo = {
+  upload_id?: string
+  entry_ids?: string[]
+  upload_time?: string
+  status?: string
+  mainfile?: string
+}
+
 /** All results data for an experiment */
 export type ExperimentResults = {
   id: string
@@ -404,6 +413,8 @@ export type ExperimentResults = {
   matchingStrategy: "fuzzy" | "sequential" | "manual"
   /** Last updated timestamp */
   updatedAt: string
+  /** NOMAD upload information (if uploaded) */
+  nomad?: NomadUploadInfo
 }
 
 export function newMeasurementFile(fileName: string): MeasurementFile {

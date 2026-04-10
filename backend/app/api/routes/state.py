@@ -330,7 +330,20 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
     for r_data in incoming_results:
         rid = _uuid_or_gen(r_data.get("id"))
         exp_id_str = r_data.get("experimentId") or r_data.get("experiment_id")
-        exp_id = _uuid_or_gen(exp_id_str)
+        if not exp_id_str:
+            logger.warning("Skipping result with no experiment_id")
+            continue
+        try:
+            exp_id = _uuid.UUID(exp_id_str)
+        except (ValueError, AttributeError):
+            logger.warning(f"Skipping result with invalid experiment_id: {exp_id_str}")
+            continue
+        
+        # Only create result if the experiment exists in the incoming data
+        if exp_id not in incoming_exp_ids:
+            logger.warning(f"Skipping result for non-existent experiment: {exp_id}")
+            continue
+            
         incoming_res_ids.add(rid)
         if rid in existing_res:
             res = existing_res[rid]

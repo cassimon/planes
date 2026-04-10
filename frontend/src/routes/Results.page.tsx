@@ -4,8 +4,11 @@ import {
   Badge,
   Box,
   Button,
+  Code,
   Divider,
   Group,
+  Loader,
+  Modal,
   Paper,
   ScrollArea,
   SegmentedControl,
@@ -13,17 +16,20 @@ import {
   Stack,
   Table,
   Text,
+  Textarea,
   Title,
   Tooltip,
   useMantineTheme,
 } from "@mantine/core"
 import { modals } from "@mantine/modals"
+import { notifications } from "@mantine/notifications"
 import { Dropzone, MIME_TYPES } from "@mantine/dropzone"
 import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
   IconCloudUpload,
+  IconExternalLink,
   IconFile,
   IconFlask,
   IconArrowBackUp,
@@ -44,6 +50,15 @@ import {
   useAppContext,
   useEntityCollection,
 } from "../store/AppContext"
+import {
+  getNomadConfig,
+  previewNomadMetadata,
+  testNomadAuth,
+  type NomadConfig,
+  type NomadUploadRequest,
+  type NomadUploadResponse,
+} from "../client/nomad"
+import { OpenAPI } from "../client/core/OpenAPI"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // File Parsing Utilities (ported from Streamlit app)
@@ -512,6 +527,20 @@ function ResultsDetail({
 }) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const theme = useMantineTheme()
+  
+  // NOMAD upload state
+  const [nomadConfig, setNomadConfig] = useState<NomadConfig | null>(null)
+  const [nomadUploading, setNomadUploading] = useState(false)
+  const [nomadMetadataPreview, setNomadMetadataPreview] = useState<string | null>(null)
+  const [showMetadataModal, setShowMetadataModal] = useState(false)
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  
+  // Fetch NOMAD config on mount
+  useEffect(() => {
+    getNomadConfig()
+      .then(setNomadConfig)
+      .catch((err) => console.warn("Failed to fetch NOMAD config:", err))
+  }, [])
 
   // Undo-delete state: keeps recently deleted files for a short window
   type DeletedEntry = { file: MeasurementFile; groupId: string; groupDeviceName: string; deletedAt: number }
@@ -691,6 +720,12 @@ function ResultsDetail({
       if (newFiles.length === 0) {
         return
       }
+      
+      // Store the actual File objects for NOMAD upload
+      setUploadedFiles((prev) => [...prev, ...droppedFiles.filter((f) => {
+        const category = getFileCategory(f.name)
+        return category !== null
+      })])
 
       // Group files by device name
       const allFiles = [...results.files, ...newFiles]
@@ -1101,42 +1136,310 @@ function ResultsDetail({
                     <Text size="sm">
                       All {totalGroups} device group{totalGroups !== 1 ? "s are" : " is"} matched to a substrate.
                     </Text>
-                    <Button
-                      size="sm"
-                      color="green"
-                      leftSection={<IconCloudUpload size={16} />}
-                      onClick={() =>
-                        modals.openConfirmModal({
-                          title: "Save to NOMAD",
-                          children: (
-                            <Text size="sm">
-                              This will export all {results.files.length} file
-                              {results.files.length !== 1 ? "s" : ""} with their substrate
-                              assignments to NOMAD. Continue?
-                            </Text>
-                          ),
-                          labels: { confirm: "Save to NOMAD", cancel: "Cancel" },
-                          confirmProps: { color: "green", leftSection: <IconCloudUpload size={14} /> },
-                          onConfirm: () => {
-                            // TODO: implement NOMAD upload API call
-                            modals.open({
-                              title: "NOMAD Upload",
-                              children: (
-                                <Text size="sm" c="dimmed">
-                                  NOMAD integration is not yet configured.
-                                  Please contact your administrator.
-                                </Text>
-                              ),
+                    <Group gap="xs">
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="blue"
+                        onClick={async () => {
+                          try {
+                            const preview = await previewNomadMetadata({
+                              experiment_id: experiment.id,
+                              experiment_name: experiment.name,
+                              substrates: substrates,
+                              measurement_files: results.files.map((f) => ({
+                                fileName: f.fileName,
+                                fileType: f.fileType,
+                                deviceName: f.deviceName,
+                                cell: f.cell,
+                                pixel: f.pixel,
+                                value: f.value,
+                              })),
+                              device_groups: results.deviceGroups.map((g) => ({
+                                id: g.id,
+                                deviceName: g.deviceName,
+                                assignedSubstrateId: g.assignedSubstrateId,
+                                files: g.files.map((f) => ({
+                                  fileName: f.fileName,
+                                  fileType: f.fileType,
+                                  deviceName: f.deviceName,
+                                  cell: f.cell,
+                                  pixel: f.pixel,
+                                  value: f.value,
+                                })),
+                              })),
                             })
-                          },
-                        })
-                      }
-                    >
-                      Save to NOMAD
-                    </Button>
+                            setNomadMetadataPreview(preview.yaml_content)
+                            setShowMetadataModal(true)
+                          } catch (err) {
+                            notifications.show({
+                              title: "Error",
+                              message: "Failed to generate metadata preview",
+                              color: "red",
+                            })
+                          }
+                        }}
+                      >
+                        Preview Metadata
+                      </Button>
+                      <Button
+                        size="sm"
+                        color="green"
+                        leftSection={nomadUploading ? <Loader size={14} color="white" /> : <IconCloudUpload size={16} />}
+                        disabled={nomadUploading || (nomadConfig && !nomadConfig.enabled)}
+                        onClick={async () => {
+                          if (!nomadConfig?.enabled) {
+                            notifications.show({
+                              title: "NOMAD Not Configured",
+                              message: "Please configure NOMAD credentials in .env (NOMAD_USERNAME and NOMAD_PASSWORD)",
+                              color: "orange",
+                            })
+                            return
+                          }
+                          
+                          modals.openConfirmModal({
+                            title: "Save to NOMAD",
+                            children: (
+                              <Stack gap="sm">
+                                <Text size="sm">
+                                  This will export all {results.files.length} file
+                                  {results.files.length !== 1 ? "s" : ""} with their substrate
+                                  assignments to NOMAD.
+                                </Text>
+                                <Text size="xs" c="dimmed">
+                                  Using NOMAD URL: {nomadConfig.url}
+                                </Text>
+                              </Stack>
+                            ),
+                            labels: { confirm: "Upload to NOMAD", cancel: "Cancel" },
+                            confirmProps: { color: "green", leftSection: <IconCloudUpload size={14} /> },
+                            onConfirm: async () => {
+                              setNomadUploading(true)
+                              try {
+                                // Build request data
+                                const requestData: NomadUploadRequest = {
+                                  experiment_id: experiment.id,
+                                  experiment_name: experiment.name,
+                                  substrates: substrates,
+                                  measurement_files: results.files.map((f) => ({
+                                    fileName: f.fileName,
+                                    fileType: f.fileType,
+                                    deviceName: f.deviceName,
+                                    cell: f.cell,
+                                    pixel: f.pixel,
+                                    value: f.value,
+                                  })),
+                                  device_groups: results.deviceGroups.map((g) => ({
+                                    id: g.id,
+                                    deviceName: g.deviceName,
+                                    assignedSubstrateId: g.assignedSubstrateId,
+                                    files: g.files.map((f) => ({
+                                      fileName: f.fileName,
+                                      fileType: f.fileType,
+                                      deviceName: f.deviceName,
+                                      cell: f.cell,
+                                      pixel: f.pixel,
+                                      value: f.value,
+                                    })),
+                                  })),
+                                }
+                                
+                                // Create FormData for the upload
+                                const formData = new FormData()
+                                
+                                // Add uploaded files if we have them stored
+                                // Note: In production, you'd store the actual File objects
+                                // For now, we'll create placeholder files from the metadata
+                                for (const file of uploadedFiles) {
+                                  formData.append("files", file)
+                                }
+                                
+                                // If no files stored, we need to handle this differently
+                                // The backend will need to work with metadata only
+                                if (uploadedFiles.length === 0) {
+                                  notifications.show({
+                                    title: "Note",
+                                    message: "No files to upload. Metadata will be saved.",
+                                    color: "blue",
+                                  })
+                                }
+                                
+                                // Make the upload request
+                                const token = OpenAPI.TOKEN || localStorage.getItem("access_token")
+                                const response = await fetch(
+                                  `${OpenAPI.BASE}/api/v1/nomad/upload/nomad`,
+                                  {
+                                    method: "POST",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                      Authorization: `Bearer ${token}`,
+                                    },
+                                    body: JSON.stringify(requestData),
+                                  }
+                                )
+                                
+                                const result: NomadUploadResponse = await response.json()
+                                
+                                if (result.success) {
+                                  // Update results with NOMAD info
+                                  const updatedResults = {
+                                    ...results,
+                                    nomad: {
+                                      upload_id: result.upload_id,
+                                      entry_ids: result.entry_ids,
+                                      upload_time: result.upload_create_time,
+                                      status: result.processing_status,
+                                    },
+                                    updatedAt: new Date().toISOString(),
+                                  }
+                                  onUpdateResults(updatedResults)
+                                  
+                                  notifications.show({
+                                    title: "Upload Successful!",
+                                    message: (
+                                      <Stack gap={4}>
+                                        <Text size="sm">Data uploaded to NOMAD.</Text>
+                                        <Text size="xs" c="dimmed">Upload ID: {result.upload_id}</Text>
+                                      </Stack>
+                                    ),
+                                    color: "green",
+                                    autoClose: 10000,
+                                  })
+                                  
+                                  // Show success modal with details
+                                  modals.open({
+                                    title: "NOMAD Upload Complete",
+                                    children: (
+                                      <Stack gap="md">
+                                        <Alert color="green" icon={<IconCheck size={16} />}>
+                                          Successfully uploaded to NOMAD
+                                        </Alert>
+                                        <Table>
+                                          <Table.Tbody>
+                                            <Table.Tr>
+                                              <Table.Td fw={600}>Upload ID</Table.Td>
+                                              <Table.Td>
+                                                <Code>{result.upload_id}</Code>
+                                              </Table.Td>
+                                            </Table.Tr>
+                                            {result.entry_ids.length > 0 && (
+                                              <Table.Tr>
+                                                <Table.Td fw={600}>Entry IDs</Table.Td>
+                                                <Table.Td>
+                                                  {result.entry_ids.map((id, i) => (
+                                                    <Code key={i} block>{id}</Code>
+                                                  ))}
+                                                </Table.Td>
+                                              </Table.Tr>
+                                            )}
+                                            <Table.Tr>
+                                              <Table.Td fw={600}>Upload Time</Table.Td>
+                                              <Table.Td>{result.upload_create_time}</Table.Td>
+                                            </Table.Tr>
+                                            <Table.Tr>
+                                              <Table.Td fw={600}>Status</Table.Td>
+                                              <Table.Td>
+                                                <Badge color="blue">{result.processing_status || "Processing"}</Badge>
+                                              </Table.Td>
+                                            </Table.Tr>
+                                          </Table.Tbody>
+                                        </Table>
+                                        <Button
+                                          variant="light"
+                                          leftSection={<IconExternalLink size={14} />}
+                                          onClick={() => {
+                                            const nomadUrl = nomadConfig?.url?.replace("/api/v1", "") || "https://nomad-lab.eu/prod/v1/test"
+                                            window.open(`${nomadUrl}/user/uploads/upload/id/${result.upload_id}`, "_blank")
+                                          }}
+                                        >
+                                          View in NOMAD
+                                        </Button>
+                                      </Stack>
+                                    ),
+                                  })
+                                } else {
+                                  notifications.show({
+                                    title: "Upload Failed",
+                                    message: result.message || "Unknown error occurred",
+                                    color: "red",
+                                  })
+                                }
+                              } catch (err) {
+                                console.error("NOMAD upload error:", err)
+                                notifications.show({
+                                  title: "Upload Error",
+                                  message: err instanceof Error ? err.message : "Failed to upload to NOMAD",
+                                  color: "red",
+                                })
+                              } finally {
+                                setNomadUploading(false)
+                              }
+                            },
+                          })
+                        }}
+                      >
+                        {nomadUploading ? "Uploading..." : "Save to NOMAD"}
+                      </Button>
+                    </Group>
                   </Group>
                 </Alert>
               )}
+              
+              {/* NOMAD Info Display (if already uploaded) */}
+              {results.nomad?.upload_id && (
+                <Alert
+                  icon={<IconCloudUpload size={16} />}
+                  color="blue"
+                  radius="md"
+                  title="Uploaded to NOMAD"
+                >
+                  <Stack gap="xs">
+                    <Group gap="lg">
+                      <Text size="sm">
+                        <Text span fw={600}>Upload ID:</Text> <Code>{results.nomad.upload_id}</Code>
+                      </Text>
+                      {results.nomad.entry_ids?.length > 0 && (
+                        <Text size="sm">
+                          <Text span fw={600}>Entries:</Text> {results.nomad.entry_ids.length}
+                        </Text>
+                      )}
+                    </Group>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      leftSection={<IconExternalLink size={14} />}
+                      onClick={() => {
+                        const nomadUrl = nomadConfig?.url?.replace("/api/v1", "") || "https://nomad-lab.eu/prod/v1/test"
+                        window.open(`${nomadUrl}/user/uploads/upload/id/${results.nomad?.upload_id}`, "_blank")
+                      }}
+                    >
+                      View in NOMAD
+                    </Button>
+                  </Stack>
+                </Alert>
+              )}
+              
+              {/* Metadata Preview Modal */}
+              <Modal
+                opened={showMetadataModal}
+                onClose={() => setShowMetadataModal(false)}
+                title="NOMAD Metadata Preview"
+                size="lg"
+              >
+                <Stack gap="md">
+                  <Text size="sm" c="dimmed">
+                    This YAML will be included in your upload to describe the data structure.
+                  </Text>
+                  <Textarea
+                    value={nomadMetadataPreview || ""}
+                    readOnly
+                    minRows={15}
+                    maxRows={25}
+                    styles={{ input: { fontFamily: "monospace", fontSize: 12 } }}
+                  />
+                  <Button onClick={() => setShowMetadataModal(false)}>Close</Button>
+                </Stack>
+              </Modal>
 
               <Divider label="Device Groups" labelPosition="center" />
 

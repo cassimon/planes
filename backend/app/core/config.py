@@ -94,6 +94,23 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
 
+    # NOMAD Configuration
+    NOMAD_URL: str = "https://nomad-lab.eu/prod/v1/test/api/v1"
+    NOMAD_USERNAME: str | None = None
+    NOMAD_PASSWORD: str | None = None
+    NOMAD_USE_GLOBAL_AUTH: bool = True
+    NOMAD_MOCK_MODE: bool = False
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def nomad_enabled(self) -> bool:
+        """Check if NOMAD is configured with global auth credentials."""
+        return bool(
+            self.NOMAD_USE_GLOBAL_AUTH
+            and self.NOMAD_USERNAME
+            and self.NOMAD_PASSWORD
+        )
+
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":
             message = (
