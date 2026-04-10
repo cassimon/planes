@@ -67,7 +67,7 @@ def get_nomad_token(username: str | None = None, password: str | None = None) ->
     use_password = password or settings.NOMAD_PASSWORD
     
     if not use_username or not use_password:
-        raise NomadAuthError("NOMAD credentials not configured. Set NOMAD_USERNAME and NOMAD_PASSWORD in .env")
+        raise NomadAuthError("NOMAD credentials not configured. Add username/password to the NOMAD auth file (../sensitive config/.nomad_auth)")
     
     # NOMAD uses OAuth2 password grant
     auth_url = settings.NOMAD_URL.replace("/api/v1", "/api/v1/auth/token")

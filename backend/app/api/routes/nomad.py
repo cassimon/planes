@@ -227,7 +227,7 @@ async def upload_to_nomad_endpoint(
     if not settings.nomad_enabled:
         return NomadUploadResponse(
             success=False,
-            message="NOMAD integration is not configured. Set NOMAD_USERNAME and NOMAD_PASSWORD in .env",
+            message="NOMAD integration is not configured. Add credentials to the NOMAD auth file (../sensitive config/.nomad_auth)",
         )
     
     try:
