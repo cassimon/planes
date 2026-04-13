@@ -2240,6 +2240,17 @@ export function ResultsPage() {
     return status === "ready" || status === "finished"
   })
 
+  useEffect(() => {
+    if (
+      selectedExperimentId &&
+      !visibleExperiments.some(
+        (experiment) => experiment.id === selectedExperimentId,
+      )
+    ) {
+      selectExperiment(null)
+    }
+  }, [selectedExperimentId, visibleExperiments])
+
   return (
     <Box style={{ display: "flex", height: "calc(100vh - 60px)" }}>
       {/* Main: Results Detail */}

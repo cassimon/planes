@@ -98,13 +98,29 @@ export function MaterialsPage() {
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
-    setActiveEntity(id ? { kind: "material", id } : null)
   }
 
   const startEdit = (m: Material) => {
     setEditingId(m.id)
     setEditBuffer({ ...m })
   }
+
+  useEffect(() => {
+    if (!editingId) {
+      setActiveEntity(null)
+      return
+    }
+
+    const editingMaterial = materials.find((m) => m.id === editingId)
+    if (!editingMaterial || !isEntityVisible("material", editingId)) {
+      setEditingId(null)
+      setEditBuffer(null)
+      setActiveEntity(null)
+      return
+    }
+
+    setActiveEntity({ kind: "material", id: editingId })
+  }, [editingId, isEntityVisible, materials, setActiveEntity])
 
   // Auto-create material + link to collection when navigated from action bubble
   // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount
@@ -304,11 +320,12 @@ export function MaterialsPage() {
               <TextInput
                 size="xs"
                 value={editBuffer[col.key]}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const value = e.currentTarget.value
                   setEditBuffer((prev) =>
-                    prev ? { ...prev, [col.key]: e.currentTarget.value } : prev,
+                    prev ? { ...prev, [col.key]: value } : prev,
                   )
-                }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     commitEdit()

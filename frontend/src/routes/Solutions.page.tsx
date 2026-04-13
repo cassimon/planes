@@ -297,7 +297,8 @@ type SolutionCardProps = {
   solutionColorMap?: Map<string, string>
   collectionColor?: string
   isSelected?: boolean
-  onSelect?: (id: string) => void
+  onSelect?: (id: string | null) => void
+  onEditingChange?: (id: string, isEditing: boolean) => void
 }
 
 function SolutionCard({
@@ -311,15 +312,25 @@ function SolutionCard({
   materialColorMap,
   solutionColorMap,
   collectionColor,
-  isSelected: _isSelected,
+  isSelected,
   onSelect,
+  onEditingChange,
 }: SolutionCardProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(isSelected ?? false)
+
+  useEffect(() => {
+    setOpen(Boolean(isSelected))
+  }, [isSelected])
 
   const handleToggleOpen = (newOpen: boolean) => {
+    if (!newOpen) {
+      setEditingName(false)
+      setEditingComponentId(null)
+      setComponentBuffer(null)
+    }
     setOpen(newOpen)
-    if (newOpen && onSelect) {
-      onSelect(solution.id)
+    if (onSelect) {
+      onSelect(newOpen ? solution.id : null)
     }
   }
   const [editingName, setEditingName] = useState(false)
@@ -329,6 +340,14 @@ function SolutionCard({
   )
   const [componentBuffer, setComponentBuffer] =
     useState<SolutionComponent | null>(null)
+
+  useEffect(() => {
+    onEditingChange?.(solution.id, editingName || editingComponentId !== null)
+
+    return () => {
+      onEditingChange?.(solution.id, false)
+    }
+  }, [editingComponentId, editingName, onEditingChange, solution.id])
 
   const commitName = () => {
     onUpdate({ ...solution, name: nameBuffer.trim() || solution.name })
@@ -579,11 +598,29 @@ export function SolutionsPage() {
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
     null,
   )
+  const [editingSolutionId, setEditingSolutionId] = useState<string | null>(
+    null,
+  )
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
-    setActiveEntity(id ? { kind: "solution", id } : null)
   }
+
+  useEffect(() => {
+    if (!editingSolutionId) {
+      setActiveEntity(null)
+      return
+    }
+
+    const editingSolution = solutions.find((s) => s.id === editingSolutionId)
+    if (!editingSolution || !isEntityVisible("solution", editingSolutionId)) {
+      setEditingSolutionId(null)
+      setActiveEntity(null)
+      return
+    }
+
+    setActiveEntity({ kind: "solution", id: editingSolutionId })
+  }, [editingSolutionId, isEntityVisible, setActiveEntity, solutions])
 
   const materialOptions = useMemo(
     () =>
@@ -638,6 +675,24 @@ export function SolutionsPage() {
   const visibleSolutions = solutions.filter((s) =>
     isEntityVisible("solution", s.id),
   )
+
+  useEffect(() => {
+    if (
+      selectedSolutionId &&
+      !visibleSolutions.some((solution) => solution.id === selectedSolutionId)
+    ) {
+      selectSolution(null)
+    }
+  }, [selectedSolutionId, visibleSolutions])
+
+  const handleSolutionEditingChange = (id: string, isEditing: boolean) => {
+    setEditingSolutionId((current) => {
+      if (isEditing) {
+        return id
+      }
+      return current === id ? null : current
+    })
+  }
 
   const addSolution = () => {
     const s = newSolution()
@@ -816,6 +871,7 @@ export function SolutionsPage() {
                     }
                     isSelected={selectedSolutionId === solution.id}
                     onSelect={selectSolution}
+                    onEditingChange={handleSolutionEditingChange}
                   />
                 )),
               )
@@ -853,6 +909,7 @@ export function SolutionsPage() {
                     }
                     isSelected={selectedSolutionId === solution.id}
                     onSelect={selectSolution}
+                    onEditingChange={handleSolutionEditingChange}
                   />
                 )),
               )
@@ -876,6 +933,7 @@ export function SolutionsPage() {
               }
               isSelected={selectedSolutionId === solution.id}
               onSelect={selectSolution}
+              onEditingChange={handleSolutionEditingChange}
             />
           ))
         })()}

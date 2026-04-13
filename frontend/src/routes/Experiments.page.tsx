@@ -2099,6 +2099,15 @@ export function ExperimentsPage() {
     isEntityVisible("experiment", e.id),
   )
 
+  useEffect(() => {
+    if (
+      selectedId &&
+      !visibleExperiments.some((experiment) => experiment.id === selectedId)
+    ) {
+      selectExperiment(null)
+    }
+  }, [selectedId, selectExperiment, visibleExperiments])
+
   // Material and solution lists for dropdowns
   const materialOptions = materials.map((m) => ({ id: m.id, name: m.name }))
   const solutionOptions = solutions.map((s) => ({ id: s.id, name: s.name }))

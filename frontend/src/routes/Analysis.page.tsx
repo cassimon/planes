@@ -644,7 +644,7 @@ const GRID_SIZE = 20 // snap grid size
 const MIN_WIDGET_SIZE = 200
 
 export function AnalysisPage() {
-  const { experiments, setActiveEntity } = useAppContext()
+  const { experiments } = useAppContext()
   const [selectedExperimentId, setSelectedExperimentId] = useState<
     string | null
   >(null)
@@ -700,7 +700,6 @@ export function AnalysisPage() {
 
   const selectExperiment = (id: string | null) => {
     setSelectedExperimentId(id)
-    setActiveEntity(id ? { kind: "experiment", id } : null)
   }
 
   const selectedExperiment = experiments.find(

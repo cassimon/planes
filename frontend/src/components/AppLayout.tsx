@@ -21,7 +21,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import useAuth from "@/hooks/useAuth"
 import {
   type CanvasCollectionElement,
@@ -57,6 +57,7 @@ export function AppLayout() {
     materials,
     solutions,
     activeEntity,
+    setActiveEntity,
     flushSave,
   } = useAppContext()
 
@@ -104,6 +105,28 @@ export function AppLayout() {
 
   // Accent color: collection color if selected, otherwise neutral
   const accentColor = activeCollection?.color || DEFAULT_ACCENT
+
+  const activeEntityMatchesPage = useMemo(() => {
+    if (!activeEntity) {
+      return false
+    }
+    if (activeEntity.kind === "material") {
+      return location.pathname.startsWith("/materials")
+    }
+    if (activeEntity.kind === "solution") {
+      return location.pathname.startsWith("/solutions")
+    }
+    return (
+      location.pathname.startsWith("/experiments") ||
+      location.pathname.startsWith("/results")
+    )
+  }, [activeEntity, location.pathname])
+
+  useEffect(() => {
+    if (activeEntity && !activeEntityMatchesPage) {
+      setActiveEntity(null)
+    }
+  }, [activeEntity, activeEntityMatchesPage, setActiveEntity])
 
   // Resolve the active entity's display name and icon
   const { entityName, EntityIcon } = useMemo(() => {
@@ -288,7 +311,7 @@ export function AppLayout() {
             )}
 
             {/* Active entity segment */}
-            {activeEntity && entityName && (
+            {activeEntityMatchesPage && activeEntity && entityName && (
               <>
                 {/* Removed path separator */}
                 {EntityIcon && (
