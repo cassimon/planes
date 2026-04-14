@@ -296,6 +296,8 @@ function ProcessParamInput({
   onChange,
   placeholder,
   unit,
+  initialParam,
+  sourceSuggestions = [],
   type = "text",
 }: {
   label: string
@@ -303,26 +305,47 @@ function ProcessParamInput({
   onChange: (param: ProcessParam | undefined) => void
   placeholder?: string
   unit?: string
-  type?: "text" | "number" | "date"
+  initialParam?: ProcessParam
+  sourceSuggestions?: Array<{ label: string; param: ProcessParam }>
+  type?: "text" | "number" | "datetime-local"
 }) {
   const hasValue = param && param.value !== ""
   const [expanded, setExpanded] = useState(hasValue)
 
   if (!expanded) {
     return (
-      <Button
-        variant="subtle"
-        size="xs"
-        color="gray"
-        leftSection={<IconPlus size={12} />}
-        onClick={() => {
-          setExpanded(true)
-          onChange({ value: "", mode: "constant" })
-        }}
-        style={{ justifyContent: "flex-start" }}
-      >
-        Add {label}
-      </Button>
+      <Group gap={4} align="flex-start" wrap="wrap">
+        <Button
+          variant="subtle"
+          size="xs"
+          color="#70a970"
+          leftSection={<IconPlus size={12} />}
+          onClick={() => {
+            setExpanded(true)
+            onChange(initialParam ?? { value: "", mode: "constant" })
+          }}
+          style={{ justifyContent: "flex-start" }}
+        >
+          Add {label}
+        </Button>
+
+        {sourceSuggestions.map((source) => (
+          <Button
+            key={`${source.label}:${source.param.mode}:${source.param.value}`}
+            variant="subtle"
+            size="xs"
+            color="green"
+            leftSection={<IconPlus size={12} />}
+            onClick={() => {
+              setExpanded(true)
+              onChange({ ...source.param })
+            }}
+            style={{ justifyContent: "flex-start" }}
+          >
+            as {source.label}
+          </Button>
+        ))}
+      </Group>
     )
   }
 
@@ -362,10 +385,10 @@ function ProcessParamInput({
             style={{ flex: 1 }}
             disabled={param?.mode === "variation"}
           />
-        ) : type === "date" ? (
+        ) : type === "datetime-local" ? (
           <BufferedTextInput
             size="xs"
-            type="date"
+            type="datetime-local"
             value={param?.value ?? ""}
             onCommit={(v) => onChange({ ...param!, value: v })}
             style={{ flex: 1 }}
@@ -418,6 +441,7 @@ function ProcessParamInput({
 function LayerCard({
   layer,
   index,
+  priorLayers,
   onUpdate,
   onDelete,
   materials,
@@ -425,12 +449,92 @@ function LayerCard({
 }: {
   layer: ExperimentLayer
   index: number
+  priorLayers: ExperimentLayer[]
   onUpdate: (layer: ExperimentLayer) => void
   onDelete: () => void
   materials: { id: string; name: string }[]
   solutions: { id: string; name: string }[]
 }) {
   const [expanded, setExpanded] = useState(true)
+  const ABSOLUTE_TIME_KEYS: ProcessParameterKey[] = [
+    "depositionStartTime",
+    "annealingStartTime",
+  ]
+
+  const isAbsoluteTimeKey = (key: ProcessParameterKey) =>
+    ABSOLUTE_TIME_KEYS.includes(key)
+
+  const extractDatePart = (value: string): string | null => {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    return match ? match[1] : null
+  }
+
+  const getDefaultAbsoluteTimeParam = (key: ProcessParameterKey): ProcessParam => {
+    const lastLayer = priorLayers[priorLayers.length - 1]
+    const otherKey =
+      key === "depositionStartTime" ? "annealingStartTime" : "depositionStartTime"
+
+    let datePart: string | null = null
+    if (lastLayer) {
+      datePart =
+        (lastLayer[key]?.value && extractDatePart(lastLayer[key]!.value)) ||
+        (lastLayer[otherKey]?.value && extractDatePart(lastLayer[otherKey]!.value)) ||
+        null
+    }
+
+    if (!datePart) {
+      for (let i = priorLayers.length - 1; i >= 0 && !datePart; i--) {
+        const src = priorLayers[i]
+        datePart =
+          (src[key]?.value && extractDatePart(src[key]!.value)) ||
+          (src[otherKey]?.value && extractDatePart(src[otherKey]!.value)) ||
+          null
+      }
+    }
+
+    const baseDate = datePart ?? new Date().toISOString().slice(0, 10)
+    return { value: `${baseDate}T09:00`, mode: "constant" }
+  }
+
+  const abbreviateLayerName = (name: string, maxLength = 14) => {
+    const trimmed = name.trim()
+    if (!trimmed) {
+      return "Unnamed"
+    }
+    return trimmed.length <= maxLength
+      ? trimmed
+      : `${trimmed.slice(0, maxLength - 1)}…`
+  }
+
+  const getSourceSuggestions = (key: ProcessParameterKey) => {
+    if (isAbsoluteTimeKey(key)) {
+      return []
+    }
+
+    const seen = new Set<string>()
+    const suggestions: Array<{ label: string; param: ProcessParam }> = []
+
+    // Walk backwards so recent layers win; duplicate values collapse to latest.
+    for (let i = priorLayers.length - 1; i >= 0; i--) {
+      const srcLayer = priorLayers[i]
+      const srcParam = srcLayer[key]
+      if (!srcParam || srcParam.value === "") {
+        continue
+      }
+
+      const signature = `${srcParam.mode}::${srcParam.value}`
+      if (seen.has(signature)) {
+        continue
+      }
+      seen.add(signature)
+      suggestions.push({
+        label: abbreviateLayerName(srcLayer.name || `Layer ${i + 1}`),
+        param: { ...srcParam },
+      })
+    }
+
+    return suggestions
+  }
 
   const updateParam =
     (key: ProcessParameterKey) => (param: ProcessParam | undefined) => {
@@ -575,6 +679,12 @@ function LayerCard({
                   onChange={updateParam(key)}
                   placeholder={placeholder}
                   unit={unit}
+                  initialParam={
+                    isAbsoluteTimeKey(key)
+                      ? getDefaultAbsoluteTimeParam(key)
+                      : undefined
+                  }
+                  sourceSuggestions={getSourceSuggestions(key)}
                   type={type}
                 />
               ),
@@ -1709,6 +1819,7 @@ function ExperimentDetail({
                   key={layer.id}
                   layer={layer}
                   index={idx}
+                  priorLayers={experiment.layers.slice(0, idx)}
                   onUpdate={(l) => updateLayer(idx, l)}
                   onDelete={() => deleteLayer(idx)}
                   materials={materials}

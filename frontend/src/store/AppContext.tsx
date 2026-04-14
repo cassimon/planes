@@ -97,7 +97,7 @@ export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
   label: string
   placeholder?: string
   unit?: string
-  type?: "text" | "number" | "date"
+  type?: "text" | "number" | "datetime-local"
 }> = [
   {
     key: "depositionMethod",
@@ -106,8 +106,8 @@ export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
   },
   {
     key: "depositionStartTime",
-    label: "Deposition Start Time (Absolute Time)",
-    type: "date",
+    label: "Deposition Start Time",
+    type: "datetime-local",
   },
   {
     key: "substrateTemp",
@@ -140,8 +140,8 @@ export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
   },
   {
     key: "annealingStartTime",
-    label: "Annealing Start Time (Absolute Time)",
-    type: "date",
+    label: "Annealing Start Time",
+    type: "datetime-local",
   },
   {
     key: "annealingTime",
