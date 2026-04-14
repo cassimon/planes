@@ -34,7 +34,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
@@ -687,6 +687,7 @@ export function SolutionsPage() {
   const [editingSolutionId, setEditingSolutionId] = useState<string | null>(
     null,
   )
+  const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
@@ -802,6 +803,13 @@ export function SolutionsPage() {
     if (!pendingCollectionLink || pendingCollectionLink.kind !== "solution") {
       return
     }
+    if (
+      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
+    ) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
+
     const { collectionId, planeId } = pendingCollectionLink
     setPendingCollectionLink(null)
 

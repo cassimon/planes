@@ -763,12 +763,14 @@ type AppContextValue = {
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    requestId: string
   } | null
   setPendingCollectionLink: (
     v: {
       collectionId: string
       planeId: string
       kind: CollectionRef["kind"]
+      requestId: string
     } | null,
   ) => void
 
@@ -825,6 +827,7 @@ export function AppProvider({
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    requestId: string
   } | null>(null)
   const [activeEntity, setActiveEntity] = useState<{
     kind: "experiment" | "material" | "solution"

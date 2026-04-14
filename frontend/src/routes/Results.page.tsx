@@ -2104,6 +2104,7 @@ export function ResultsPage() {
   )
   const experimentResults =
     results.find((r) => r.experimentId === selectedExperimentId) ?? null
+  const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   // When arriving from a collection's "Add Results" action, preselect the
   // linked experiment to make result linking explicit and predictable.
@@ -2111,6 +2112,12 @@ export function ResultsPage() {
     if (!pendingCollectionLink || pendingCollectionLink.kind !== "result") {
       return
     }
+    if (
+      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
+    ) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
     const { collectionId, planeId } = pendingCollectionLink
     setPendingCollectionLink(null)

@@ -953,7 +953,12 @@ function CollectionEl({
   }
 
   const handleBubbleClick = (kind: CollectionRef["kind"]) => {
-    setPendingCollectionLink({ collectionId: el.id, planeId, kind })
+    setPendingCollectionLink({
+      collectionId: el.id,
+      planeId,
+      kind,
+      requestId: crypto.randomUUID(),
+    })
     navigate({ to: routeForKind[kind] })
   }
 

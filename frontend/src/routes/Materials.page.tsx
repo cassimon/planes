@@ -26,7 +26,7 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
@@ -96,6 +96,7 @@ export function MaterialsPage() {
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(
     null,
   )
+  const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
@@ -129,6 +130,13 @@ export function MaterialsPage() {
     if (!pendingCollectionLink || pendingCollectionLink.kind !== "material") {
       return
     }
+    if (
+      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
+    ) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
+
     const { collectionId, planeId } = pendingCollectionLink
     setPendingCollectionLink(null)
 

@@ -2002,6 +2002,7 @@ export function ExperimentsPage() {
   const { getEntityColor, isEntityVisible, getEntityPlane } =
     useEntityCollection()
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectExperiment = useCallback(
     (id: string | null) => {
@@ -2016,6 +2017,13 @@ export function ExperimentsPage() {
     if (!pendingCollectionLink || pendingCollectionLink.kind !== "experiment") {
       return
     }
+    if (
+      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
+    ) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
+
     const { collectionId, planeId } = pendingCollectionLink
     setPendingCollectionLink(null)
 
