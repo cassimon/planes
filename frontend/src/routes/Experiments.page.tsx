@@ -53,7 +53,9 @@ import {
   newExperiment,
   newLayer,
   type ParamMode,
+  PROCESS_PARAMETER_DEFINITIONS,
   type ProcessParam,
+  type ProcessParameterKey,
   regenerateSubstrateNames,
   type Substrate,
   useAppContext,
@@ -300,7 +302,7 @@ function ProcessParamInput({
   onChange: (param: ProcessParam | undefined) => void
   placeholder?: string
   unit?: string
-  type?: "text" | "number"
+  type?: "text" | "number" | "date"
 }) {
   const hasValue = param && param.value !== ""
   const [expanded, setExpanded] = useState(hasValue)
@@ -356,6 +358,15 @@ function ProcessParamInput({
               onChange({ ...param!, value: String(val ?? "") })
             }
             placeholder={placeholder}
+            style={{ flex: 1 }}
+            disabled={param?.mode === "variation"}
+          />
+        ) : type === "date" ? (
+          <BufferedTextInput
+            size="xs"
+            type="date"
+            value={param?.value ?? ""}
+            onCommit={(v) => onChange({ ...param!, value: v })}
             style={{ flex: 1 }}
             disabled={param?.mode === "variation"}
           />
@@ -421,21 +432,14 @@ function LayerCard({
   const [expanded, setExpanded] = useState(true)
 
   const updateParam =
-    (key: keyof ExperimentLayer) => (param: ProcessParam | undefined) => {
+    (key: ProcessParameterKey) => (param: ProcessParam | undefined) => {
       onUpdate({ ...layer, [key]: param })
     }
 
   // Count filled optional parameters
-  const filledParams = [
-    layer.depositionMethod,
-    layer.substrateTemp,
-    layer.depositionAtmosphere,
-    layer.solutionVolume,
-    layer.dryingMethod,
-    layer.annealingTime,
-    layer.annealingTemp,
-    layer.annealingAtmosphere,
-  ].filter((p) => p?.value).length
+  const filledParams = PROCESS_PARAMETER_DEFINITIONS.filter(
+    ({ key }) => layer[key]?.value,
+  ).length
 
   return (
     <Card withBorder radius="md" p={0} style={{ overflow: "visible" }}>
@@ -561,62 +565,19 @@ function LayerCard({
 
           {/* Suggested parameters - show add buttons for missing ones */}
           <SimpleGrid cols={2} spacing="sm">
-            <ProcessParamInput
-              label="Deposition Method"
-              param={layer.depositionMethod}
-              onChange={updateParam("depositionMethod")}
-              placeholder="e.g. Spin coating"
-            />
-            <ProcessParamInput
-              label="Substrate Temperature"
-              param={layer.substrateTemp}
-              onChange={updateParam("substrateTemp")}
-              placeholder="e.g. 25"
-              unit="°C"
-              type="number"
-            />
-            <ProcessParamInput
-              label="Deposition Atmosphere"
-              param={layer.depositionAtmosphere}
-              onChange={updateParam("depositionAtmosphere")}
-              placeholder="e.g. N2 glovebox"
-            />
-            <ProcessParamInput
-              label="Solution Volume"
-              param={layer.solutionVolume}
-              onChange={updateParam("solutionVolume")}
-              placeholder="e.g. 50"
-              unit="µL"
-              type="number"
-            />
-            <ProcessParamInput
-              label="Drying/Quenching"
-              param={layer.dryingMethod}
-              onChange={updateParam("dryingMethod")}
-              placeholder="e.g. Antisolvent drip"
-            />
-            <ProcessParamInput
-              label="Annealing Time"
-              param={layer.annealingTime}
-              onChange={updateParam("annealingTime")}
-              placeholder="e.g. 10"
-              unit="min"
-              type="number"
-            />
-            <ProcessParamInput
-              label="Annealing Temperature"
-              param={layer.annealingTemp}
-              onChange={updateParam("annealingTemp")}
-              placeholder="e.g. 100"
-              unit="°C"
-              type="number"
-            />
-            <ProcessParamInput
-              label="Annealing Atmosphere"
-              param={layer.annealingAtmosphere}
-              onChange={updateParam("annealingAtmosphere")}
-              placeholder="e.g. Air"
-            />
+            {PROCESS_PARAMETER_DEFINITIONS.map(
+              ({ key, label, placeholder, unit, type = "text" }) => (
+                <ProcessParamInput
+                  key={key}
+                  label={label}
+                  param={layer[key]}
+                  onChange={updateParam(key)}
+                  placeholder={placeholder}
+                  unit={unit}
+                  type={type}
+                />
+              ),
+            )}
           </SimpleGrid>
 
           <BufferedTextarea
@@ -1355,16 +1316,9 @@ function ExperimentDetail({
             >
               Assign Parameters ({
                 experiment.layers.reduce((total, layer) => {
-                  const layerParams = [
-                    layer.depositionMethod,
-                    layer.substrateTemp,
-                    layer.depositionAtmosphere,
-                    layer.solutionVolume,
-                    layer.dryingMethod,
-                    layer.annealingTime,
-                    layer.annealingTemp,
-                    layer.annealingAtmosphere,
-                  ].filter((p) => p?.value).length
+                  const layerParams = PROCESS_PARAMETER_DEFINITIONS.filter(
+                    ({ key }) => layer[key]?.value,
+                  ).length
                   return total + layerParams
                 }, 0)
               })

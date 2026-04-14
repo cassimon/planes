@@ -56,6 +56,19 @@ export type ProcessParam = {
   // variationValues stored separately when needed
 }
 
+export type ProcessParameterKey =
+  | "depositionMethod"
+  | "depositionStartTime"
+  | "substrateTemp"
+  | "depositionAtmosphere"
+  | "depositionParameters"
+  | "solutionVolume"
+  | "dryingMethod"
+  | "annealingStartTime"
+  | "annealingTime"
+  | "annealingTemp"
+  | "annealingAtmosphere"
+
 /** Deposition/processing layer in an experiment */
 export type ExperimentLayer = {
   id: string
@@ -66,15 +79,90 @@ export type ExperimentLayer = {
   solutionId?: string // reference to Solution
   // Process parameters - all optional, encourage adding over requiring
   depositionMethod?: ProcessParam
+  depositionStartTime?: ProcessParam
   substrateTemp?: ProcessParam
   depositionAtmosphere?: ProcessParam
+  depositionParameters?: ProcessParam
   solutionVolume?: ProcessParam
   dryingMethod?: ProcessParam
+  annealingStartTime?: ProcessParam
   annealingTime?: ProcessParam
   annealingTemp?: ProcessParam
   annealingAtmosphere?: ProcessParam
   notes?: string
 }
+
+export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
+  key: ProcessParameterKey
+  label: string
+  placeholder?: string
+  unit?: string
+  type?: "text" | "number" | "date"
+}> = [
+  {
+    key: "depositionMethod",
+    label: "Deposition Method",
+    placeholder: "e.g. Spin coating",
+  },
+  {
+    key: "depositionStartTime",
+    label: "Deposition Start Time (Absolute Time)",
+    type: "date",
+  },
+  {
+    key: "substrateTemp",
+    label: "Substrate Temperature",
+    placeholder: "e.g. 25",
+    unit: "°C",
+    type: "number",
+  },
+  {
+    key: "depositionAtmosphere",
+    label: "Deposition Atmosphere",
+    placeholder: "e.g. N2 glovebox",
+  },
+  {
+    key: "depositionParameters",
+    label: "Deposition Parameters (spin / blade coating speed etc.)",
+    placeholder: "e.g. 4000 rpm for 30 s",
+  },
+  {
+    key: "solutionVolume",
+    label: "Solution Volume",
+    placeholder: "e.g. 50",
+    unit: "µL",
+    type: "number",
+  },
+  {
+    key: "dryingMethod",
+    label: "Drying/Quenching",
+    placeholder: "e.g. Antisolvent drip",
+  },
+  {
+    key: "annealingStartTime",
+    label: "Annealing Start Time (Absolute Time)",
+    type: "date",
+  },
+  {
+    key: "annealingTime",
+    label: "Annealing Time",
+    placeholder: "e.g. 10",
+    unit: "min",
+    type: "number",
+  },
+  {
+    key: "annealingTemp",
+    label: "Annealing Temperature",
+    placeholder: "e.g. 100",
+    unit: "°C",
+    type: "number",
+  },
+  {
+    key: "annealingAtmosphere",
+    label: "Annealing Atmosphere",
+    placeholder: "e.g. Air",
+  },
+] as const
 
 /** Architecture type for solar cell devices */
 export type DeviceArchitecture =
@@ -162,28 +250,16 @@ export function getVariedParameters(exp: Experiment): Array<{
     paramName: string
     paramKey: string
   }> = []
-  const PARAM_KEYS = [
-    "depositionMethod",
-    "substrateTemp",
-    "depositionAtmosphere",
-    "solutionVolume",
-    "dryingMethod",
-    "annealingTime",
-    "annealingTemp",
-    "annealingAtmosphere",
-  ] as const
 
   exp.layers.forEach((layer) => {
-    PARAM_KEYS.forEach((paramKey) => {
-      const param = layer[paramKey as keyof typeof layer] as
-        | ProcessParam
-        | undefined
+    PROCESS_PARAMETER_DEFINITIONS.forEach(({ key, label }) => {
+      const param = layer[key]
       if (param && param.mode === "variation") {
         varied.push({
           layerId: layer.id,
           layerName: layer.name,
-          paramName: paramKey.replace(/([A-Z])/g, " $1").trim(),
-          paramKey: `${layer.id}:${paramKey}`,
+          paramName: label,
+          paramKey: `${layer.id}:${key}`,
         })
       }
     })
