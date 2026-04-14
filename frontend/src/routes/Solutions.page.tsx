@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Collapse,
+  ColorSwatch,
   Container,
   Divider,
   Group,
@@ -14,6 +15,7 @@ import {
   rem,
   ScrollArea,
   SegmentedControl,
+  Select,
   Stack,
   Table,
   Text,
@@ -26,13 +28,15 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconCopy,
   IconInfoCircle,
   IconPencil,
   IconPlus,
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
   newComponent,
@@ -42,7 +46,35 @@ import {
   useAppContext,
   useEntityCollection,
 } from "../store/AppContext"
-import { DependencyBlockModal } from "../components/DependencyBlockModal"
+
+function toDateTimeLocalValue(isoValue: string | undefined): string {
+  if (!isoValue) {
+    return ""
+  }
+  const d = new Date(isoValue)
+  if (Number.isNaN(d.getTime())) {
+    return ""
+  }
+
+  const pad2 = (n: number) => String(n).padStart(2, "0")
+  const year = d.getFullYear()
+  const month = pad2(d.getMonth() + 1)
+  const day = pad2(d.getDate())
+  const hour = pad2(d.getHours())
+  const minute = pad2(d.getMinutes())
+  return `${year}-${month}-${day}T${hour}:${minute}`
+}
+
+function fromDateTimeLocalValue(localValue: string): string | null {
+  if (!localValue) {
+    return null
+  }
+  const d = new Date(localValue)
+  if (Number.isNaN(d.getTime())) {
+    return null
+  }
+  return d.toISOString()
+}
 
 // ── Component row (material/solution + amount + unit) ─────────────────────────
 
@@ -61,6 +93,8 @@ type ComponentRowProps = {
   materialOptions: { value: string; label: string }[]
   /** Solution options (already filtered to exclude self-reference) */
   solutionOptions: { value: string; label: string }[]
+  materialColorMap?: Map<string, string>
+  solutionColorMap?: Map<string, string>
 }
 
 function ComponentRow({
@@ -75,10 +109,14 @@ function ComponentRow({
   onBufferChange,
   materialOptions,
   solutionOptions,
+  materialColorMap,
+  solutionColorMap,
 }: ComponentRowProps) {
   // Derive which type is being edited from the buffer state
   const editType: "material" | "solution" =
-    editing && buffer && buffer.solutionId !== undefined ? "solution" : "material"
+    editing && buffer && buffer.solutionId !== undefined
+      ? "solution"
+      : "material"
 
   return (
     <Table.Tr>
@@ -90,9 +128,17 @@ function ComponentRow({
               value={editType}
               onChange={(t) => {
                 if (t === "material") {
-                  onBufferChange({ ...buffer, materialId: buffer.materialId ?? "", solutionId: undefined })
+                  onBufferChange({
+                    ...buffer,
+                    materialId: buffer.materialId ?? "",
+                    solutionId: undefined,
+                  })
                 } else {
-                  onBufferChange({ ...buffer, solutionId: buffer.solutionId ?? "", materialId: undefined })
+                  onBufferChange({
+                    ...buffer,
+                    solutionId: buffer.solutionId ?? "",
+                    materialId: undefined,
+                  })
                 }
               }}
               data={[
@@ -101,28 +147,64 @@ function ComponentRow({
               ]}
             />
             {editType === "material" ? (
-              <NativeSelect
+              <Select
                 size="xs"
-                value={buffer.materialId ?? ""}
-                onChange={(e) =>
-                  onBufferChange({ ...buffer, materialId: e.currentTarget.value, solutionId: undefined })
+                value={buffer.materialId || null}
+                onChange={(v) =>
+                  onBufferChange({
+                    ...buffer,
+                    materialId: v ?? "",
+                    solutionId: undefined,
+                  })
                 }
-                data={[
-                  { value: "", label: "— select material —" },
-                  ...materialOptions,
-                ]}
+                data={materialOptions}
+                placeholder="— select material —"
+                clearable
+                searchable
+                renderOption={({ option }) => {
+                  const color = materialColorMap?.get(option.value)
+                  return (
+                    <Group gap={6} wrap="nowrap">
+                      <ColorSwatch
+                        color={color ?? "transparent"}
+                        size={12}
+                        withShadow={false}
+                        style={{ opacity: color ? 1 : 0, flexShrink: 0 }}
+                      />
+                      <Text size="xs">{option.label}</Text>
+                    </Group>
+                  )
+                }}
               />
             ) : (
-              <NativeSelect
+              <Select
                 size="xs"
-                value={buffer.solutionId ?? ""}
-                onChange={(e) =>
-                  onBufferChange({ ...buffer, solutionId: e.currentTarget.value, materialId: undefined })
+                value={buffer.solutionId || null}
+                onChange={(v) =>
+                  onBufferChange({
+                    ...buffer,
+                    solutionId: v ?? "",
+                    materialId: undefined,
+                  })
                 }
-                data={[
-                  { value: "", label: "— select solution —" },
-                  ...solutionOptions,
-                ]}
+                data={solutionOptions}
+                placeholder="— select solution —"
+                clearable
+                searchable
+                renderOption={({ option }) => {
+                  const color = solutionColorMap?.get(option.value)
+                  return (
+                    <Group gap={6} wrap="nowrap">
+                      <ColorSwatch
+                        color={color ?? "transparent"}
+                        size={12}
+                        withShadow={false}
+                        style={{ opacity: color ? 1 : 0, flexShrink: 0 }}
+                      />
+                      <Text size="xs">{option.label}</Text>
+                    </Group>
+                  )
+                }}
               />
             )}
           </Stack>
@@ -236,43 +318,77 @@ type SolutionCardProps = {
   solution: Solution
   onUpdate: (s: Solution) => void
   onDelete: () => void
+  onCopy: () => void
   materialOptions: { value: string; label: string }[]
   getMaterialName: (id: string) => string
   /** All solutions (used to build solution-as-component options) */
   allSolutionOptions: { value: string; label: string }[]
   getSolutionName: (id: string) => string
+  materialColorMap?: Map<string, string>
+  solutionColorMap?: Map<string, string>
   collectionColor?: string
   isSelected?: boolean
-  onSelect?: (id: string) => void
+  onSelect?: (id: string | null) => void
+  onEditingChange?: (id: string, isEditing: boolean) => void
 }
 
 function SolutionCard({
   solution,
   onUpdate,
   onDelete,
+  onCopy,
   materialOptions,
   getMaterialName,
   allSolutionOptions,
   getSolutionName,
+  materialColorMap,
+  solutionColorMap,
   collectionColor,
-  isSelected: _isSelected,
+  isSelected,
   onSelect,
+  onEditingChange,
 }: SolutionCardProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(isSelected ?? false)
+
+  useEffect(() => {
+    setOpen(Boolean(isSelected))
+  }, [isSelected])
 
   const handleToggleOpen = (newOpen: boolean) => {
+    if (!newOpen) {
+      setEditingName(false)
+      setEditingComponentId(null)
+      setComponentBuffer(null)
+    }
     setOpen(newOpen)
-    if (newOpen && onSelect) {
-      onSelect(solution.id)
+    if (onSelect) {
+      onSelect(newOpen ? solution.id : null)
     }
   }
   const [editingName, setEditingName] = useState(false)
   const [nameBuffer, setNameBuffer] = useState(solution.name)
+  const [handlingBuffer, setHandlingBuffer] = useState(solution.handling ?? "")
+  const [creationTimeBuffer, setCreationTimeBuffer] = useState(
+    toDateTimeLocalValue(solution.creationTime),
+  )
   const [editingComponentId, setEditingComponentId] = useState<string | null>(
     null,
   )
   const [componentBuffer, setComponentBuffer] =
     useState<SolutionComponent | null>(null)
+
+  useEffect(() => {
+    onEditingChange?.(solution.id, editingName || editingComponentId !== null)
+
+    return () => {
+      onEditingChange?.(solution.id, false)
+    }
+  }, [editingComponentId, editingName, onEditingChange, solution.id])
+
+  useEffect(() => {
+    setHandlingBuffer(solution.handling ?? "")
+    setCreationTimeBuffer(toDateTimeLocalValue(solution.creationTime))
+  }, [solution.creationTime, solution.handling])
 
   const commitName = () => {
     onUpdate({ ...solution, name: nameBuffer.trim() || solution.name })
@@ -285,6 +401,25 @@ function SolutionCard({
     onUpdate(updated)
     setEditingComponentId(c.id)
     setComponentBuffer(c)
+  }
+
+  const commitHandling = () => {
+    if ((solution.handling ?? "") === handlingBuffer) {
+      return
+    }
+    onUpdate({ ...solution, handling: handlingBuffer })
+  }
+
+  const commitCreationTime = () => {
+    const parsed = fromDateTimeLocalValue(creationTimeBuffer)
+    if (!parsed) {
+      setCreationTimeBuffer(toDateTimeLocalValue(solution.creationTime))
+      return
+    }
+    if (parsed === solution.creationTime) {
+      return
+    }
+    onUpdate({ ...solution, creationTime: parsed })
   }
 
   const commitComponent = () => {
@@ -303,7 +438,12 @@ function SolutionCard({
 
   const cancelComponent = (id: string) => {
     const original = solution.components.find((c) => c.id === id)
-    if (original && !original.materialId && !original.solutionId && !original.amount) {
+    if (
+      original &&
+      !original.materialId &&
+      !original.solutionId &&
+      !original.amount
+    ) {
       onUpdate({
         ...solution,
         components: solution.components.filter((c) => c.id !== id),
@@ -412,6 +552,11 @@ function SolutionCard({
           </Badge>
         </Group>
 
+        <Tooltip label="Duplicate solution">
+          <ActionIcon size="sm" variant="subtle" color="teal" onClick={onCopy}>
+            <IconCopy size={14} />
+          </ActionIcon>
+        </Tooltip>
         <Tooltip label="Delete solution">
           <ActionIcon size="sm" variant="subtle" color="red" onClick={onDelete}>
             <IconTrash size={14} />
@@ -421,6 +566,34 @@ function SolutionCard({
 
       <Collapse in={open}>
         <Divider my="sm" />
+        <Group grow mb="xs" align="end">
+          <TextInput
+            label="Handling"
+            size="xs"
+            value={handlingBuffer}
+            onChange={(e) => setHandlingBuffer(e.currentTarget.value)}
+            onBlur={commitHandling}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitHandling()
+              }
+            }}
+            placeholder="e.g. Store under nitrogen"
+          />
+          <TextInput
+            label="Creation Time"
+            size="xs"
+            type="datetime-local"
+            value={creationTimeBuffer}
+            onChange={(e) => setCreationTimeBuffer(e.currentTarget.value)}
+            onBlur={commitCreationTime}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitCreationTime()
+              }
+            }}
+          />
+        </Group>
         <ScrollArea>
           <Table withColumnBorders withTableBorder>
             <Table.Thead>
@@ -469,6 +642,8 @@ function SolutionCard({
                     onBufferChange={setComponentBuffer}
                     materialOptions={materialOptions}
                     solutionOptions={filteredSolutionOptions}
+                    materialColorMap={materialColorMap}
+                    solutionColorMap={solutionColorMap}
                   />
                 )
               })}
@@ -501,36 +676,92 @@ export function SolutionsPage() {
     results,
     planes,
     updateElement,
+    removeCollectionRefs,
     pendingCollectionLink,
     setPendingCollectionLink,
     activeCollectionId,
     activePlaneId,
     setActiveEntity,
   } = useAppContext()
-  const { getEntityColor, isEntityVisible, getEntityPlane } = useEntityCollection()
+  const {
+    getEntityColor,
+    isEntityVisible,
+    getEntityPlane,
+    getEntityCollection,
+    isEntityOnActivePlane,
+  } = useEntityCollection()
   const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
     null,
   )
+  const [editingSolutionId, setEditingSolutionId] = useState<string | null>(
+    null,
+  )
+  const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
-    setActiveEntity(id ? { kind: "solution", id } : null)
   }
 
-  const materialOptions = materials.map((m) => ({
-    value: m.id,
-    label: m.name || m.inventoryLabel || m.casNumber || m.id,
-  }))
+  useEffect(() => {
+    if (!editingSolutionId) {
+      setActiveEntity(null)
+      return
+    }
+
+    const editingSolution = solutions.find((s) => s.id === editingSolutionId)
+    if (!editingSolution || !isEntityVisible("solution", editingSolutionId)) {
+      setEditingSolutionId(null)
+      setActiveEntity(null)
+      return
+    }
+
+    setActiveEntity({ kind: "solution", id: editingSolutionId })
+  }, [editingSolutionId, isEntityVisible, setActiveEntity, solutions])
+
+  const materialOptions = useMemo(
+    () =>
+      materials
+        .filter((m) => isEntityOnActivePlane("material", m.id))
+        .map((m) => ({
+          value: m.id,
+          label: m.name || m.inventoryLabel || m.casNumber || m.id,
+        })),
+    [materials, isEntityOnActivePlane],
+  )
+
+  const materialColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const m of materials) {
+      const color = getEntityColor("material", m.id)
+      if (color) map.set(m.id, color)
+    }
+    return map
+  }, [materials, getEntityColor])
 
   const getMaterialName = (id: string) => {
     const m = materials.find((mat) => mat.id === id)
     return m ? m.name || m.inventoryLabel || m.casNumber || id : id
   }
 
-  const allSolutionOptions = solutions.map((s) => ({
-    value: s.id,
-    label: s.name || s.id,
-  }))
+  const allSolutionOptions = useMemo(
+    () =>
+      solutions
+        .filter((s) => isEntityOnActivePlane("solution", s.id))
+        .map((s) => ({
+          value: s.id,
+          label: s.name || s.id,
+        })),
+    [solutions, isEntityOnActivePlane],
+  )
+
+  const solutionColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const s of solutions) {
+      const color = getEntityColor("solution", s.id)
+      if (color) map.set(s.id, color)
+    }
+    return map
+  }, [solutions, getEntityColor])
 
   const getSolutionName = (id: string) => {
     const s = solutions.find((sol) => sol.id === id)
@@ -540,6 +771,24 @@ export function SolutionsPage() {
   const visibleSolutions = solutions.filter((s) =>
     isEntityVisible("solution", s.id),
   )
+
+  useEffect(() => {
+    if (
+      selectedSolutionId &&
+      !visibleSolutions.some((solution) => solution.id === selectedSolutionId)
+    ) {
+      selectSolution(null)
+    }
+  }, [selectedSolutionId, visibleSolutions])
+
+  const handleSolutionEditingChange = (id: string, isEditing: boolean) => {
+    setEditingSolutionId((current) => {
+      if (isEditing) {
+        return id
+      }
+      return current === id ? null : current
+    })
+  }
 
   const addSolution = () => {
     const s = newSolution()
@@ -563,6 +812,13 @@ export function SolutionsPage() {
     if (!pendingCollectionLink || pendingCollectionLink.kind !== "solution") {
       return
     }
+    if (
+      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
+    ) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
+
     const { collectionId, planeId } = pendingCollectionLink
     setPendingCollectionLink(null)
 
@@ -593,9 +849,36 @@ export function SolutionsPage() {
     setSolutions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)))
   }
 
+  const copySolution = (id: string) => {
+    const original = solutions.find((s) => s.id === id)
+    if (!original) return
+    const copied: Solution = {
+      ...original,
+      id: crypto.randomUUID(),
+      name: `Copy of ${original.name}`,
+      components: original.components.map((c) => ({
+        ...c,
+        id: crypto.randomUUID(),
+      })),
+    }
+    setSolutions((prev) => [...prev, copied])
+    const owner = getEntityCollection("solution", id)
+    if (owner) {
+      updateElement(owner.plane.id, {
+        ...owner.collection,
+        refs: [...owner.collection.refs, { kind: "solution" as const, id: copied.id }],
+      })
+    }
+  }
+
   const deleteSolution = (id: string) => {
     const sol = solutions.find((s) => s.id === id)
-    const dependents = getDependentLocations("solution", id, { solutions, experiments, results, planes })
+    const dependents = getDependentLocations("solution", id, {
+      solutions,
+      experiments,
+      results,
+      planes,
+    })
     if (dependents.length > 0) {
       modals.open({
         title: "Cannot delete solution",
@@ -619,6 +902,7 @@ export function SolutionsPage() {
       confirmProps: { color: "red" },
       onConfirm: () => {
         setSolutions((prev) => prev.filter((s) => s.id !== id))
+        removeCollectionRefs("solution", [id])
         if (id === selectedSolutionId) {
           selectSolution(null)
         }
@@ -658,7 +942,10 @@ export function SolutionsPage() {
         {(() => {
           if (!activePlaneId) {
             // General mode: group by plane
-            const groups = new Map<string, { planeName: string; items: typeof visibleSolutions }>()
+            const groups = new Map<
+              string,
+              { planeName: string; items: typeof visibleSolutions }
+            >()
             const orphans: typeof visibleSolutions = []
             for (const solution of visibleSolutions) {
               const plane = getEntityPlane("solution", solution.id)
@@ -667,7 +954,10 @@ export function SolutionsPage() {
                 if (group) {
                   group.items.push(solution)
                 } else {
-                  groups.set(plane.id, { planeName: plane.name, items: [solution] })
+                  groups.set(plane.id, {
+                    planeName: plane.name,
+                    items: [solution],
+                  })
                 }
               } else {
                 orphans.push(solution)
@@ -676,47 +966,81 @@ export function SolutionsPage() {
             const sections: React.ReactNode[] = []
             for (const [planeId, { planeName, items }] of groups) {
               sections.push(
-                <Text key={`plane-header-${planeId}`} size="xs" fw={700} c="dimmed" tt="uppercase" mt="md" mb={4} px={4}>
+                <Text
+                  key={`plane-header-${planeId}`}
+                  size="xs"
+                  fw={700}
+                  c="dimmed"
+                  tt="uppercase"
+                  mt="md"
+                  mb={4}
+                  px={4}
+                >
                   {planeName}
-                </Text>
+                </Text>,
               )
-              sections.push(...items.map((solution) => (
-                <SolutionCard
-                  key={solution.id}
-                  solution={solution}
-                  onUpdate={updateSolution}
-                  onDelete={() => deleteSolution(solution.id)}
-                  materialOptions={materialOptions}
-                  getMaterialName={getMaterialName}
-                  allSolutionOptions={allSolutionOptions}
-                  getSolutionName={getSolutionName}
-                  collectionColor={getEntityColor("solution", solution.id) ?? undefined}
-                  isSelected={selectedSolutionId === solution.id}
-                  onSelect={selectSolution}
-                />
-              )))
+              sections.push(
+                ...items.map((solution) => (
+                  <SolutionCard
+                    key={solution.id}
+                    solution={solution}
+                    onUpdate={updateSolution}
+                    onDelete={() => deleteSolution(solution.id)}
+                    onCopy={() => copySolution(solution.id)}
+                    materialOptions={materialOptions}
+                    getMaterialName={getMaterialName}
+                    allSolutionOptions={allSolutionOptions}
+                    getSolutionName={getSolutionName}
+                    materialColorMap={materialColorMap}
+                    solutionColorMap={solutionColorMap}
+                    collectionColor={
+                      getEntityColor("solution", solution.id) ?? undefined
+                    }
+                    isSelected={selectedSolutionId === solution.id}
+                    onSelect={selectSolution}
+                    onEditingChange={handleSolutionEditingChange}
+                  />
+                )),
+              )
             }
             if (orphans.length > 0) {
               sections.push(
-                <Text key="plane-header-orphan" size="xs" fw={700} c="dimmed" tt="uppercase" mt="md" mb={4} px={4}>
+                <Text
+                  key="plane-header-orphan"
+                  size="xs"
+                  fw={700}
+                  c="dimmed"
+                  tt="uppercase"
+                  mt="md"
+                  mb={4}
+                  px={4}
+                >
                   Unassigned
-                </Text>
+                </Text>,
               )
-              sections.push(...orphans.map((solution) => (
-                <SolutionCard
-                  key={solution.id}
-                  solution={solution}
-                  onUpdate={updateSolution}
-                  onDelete={() => deleteSolution(solution.id)}
-                  materialOptions={materialOptions}
-                  getMaterialName={getMaterialName}
-                  allSolutionOptions={allSolutionOptions}
-                  getSolutionName={getSolutionName}
-                  collectionColor={getEntityColor("solution", solution.id) ?? undefined}
-                  isSelected={selectedSolutionId === solution.id}
-                  onSelect={selectSolution}
-                />
-              )))
+              sections.push(
+                ...orphans.map((solution) => (
+                  <SolutionCard
+                    key={solution.id}
+                    solution={solution}
+                    onUpdate={updateSolution}
+                    onDelete={() => deleteSolution(solution.id)}
+                    onCopy={() => copySolution(solution.id)}
+                    materialOptions={materialOptions}
+                    getMaterialName={getMaterialName}
+                    allSolutionOptions={allSolutionOptions}
+                    getSolutionName={getSolutionName}
+                    materialColorMap={materialColorMap}
+                    solutionColorMap={solutionColorMap}
+                    collectionColor={
+                      getEntityColor("solution", solution.id) ?? undefined
+                    }
+                    isSelected={selectedSolutionId === solution.id}
+                    onSelect={selectSolution}
+                    onEditingChange={handleSolutionEditingChange}
+                  />
+                )),
+              )
             }
             return sections
           }
@@ -726,13 +1050,19 @@ export function SolutionsPage() {
               solution={solution}
               onUpdate={updateSolution}
               onDelete={() => deleteSolution(solution.id)}
+              onCopy={() => copySolution(solution.id)}
               materialOptions={materialOptions}
               getMaterialName={getMaterialName}
               allSolutionOptions={allSolutionOptions}
               getSolutionName={getSolutionName}
-              collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+              materialColorMap={materialColorMap}
+              solutionColorMap={solutionColorMap}
+              collectionColor={
+                getEntityColor("solution", solution.id) ?? undefined
+              }
               isSelected={selectedSolutionId === solution.id}
               onSelect={selectSolution}
+              onEditingChange={handleSolutionEditingChange}
             />
           ))
         })()}

@@ -1,5 +1,6 @@
 import secrets
 import warnings
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -22,6 +23,11 @@ def parse_cors(v: Any) -> list[str] | str:
         return v
     raise ValueError(v)
 
+
+# Default auth file: ../sensitive config/.nomad_auth (one level above project root)
+_DEFAULT_NOMAD_AUTH_FILE = str(
+    Path(__file__).parents[3].parent / "sensitive config" / ".nomad_auth"
+)
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -93,6 +99,46 @@ class Settings(BaseSettings):
     EMAIL_TEST_USER: EmailStr = "test@example.com"
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
+
+    # NOMAD Configuration
+    NOMAD_URL: str = "https://nomad-lab.eu/prod/v1/test/api/v1"
+    # Path to the out-of-repo credentials file (key=value format).
+    # Override via the NOMAD_AUTH_FILE env var if needed.
+    NOMAD_AUTH_FILE: str = _DEFAULT_NOMAD_AUTH_FILE
+    # Populated at startup by _load_nomad_auth_from_file; do not set in .env.
+    NOMAD_USERNAME: str | None = None
+    NOMAD_PASSWORD: str | None = None
+    NOMAD_USE_GLOBAL_AUTH: bool = True
+    NOMAD_MOCK_MODE: bool = False
+
+    @model_validator(mode="after")
+    def _load_nomad_auth_from_file(self) -> Self:
+        """Read NOMAD credentials from the auth file unless already supplied."""
+        if self.NOMAD_USERNAME and self.NOMAD_PASSWORD:
+            return self  # allow direct injection in tests
+        auth_path = Path(self.NOMAD_AUTH_FILE)
+        if auth_path.is_file():
+            creds: dict[str, str] = {}
+            for raw in auth_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, val = line.partition("=")
+                    creds[key.strip().lower()] = val.strip()
+            if "username" in creds:
+                self.NOMAD_USERNAME = creds["username"]
+            if "password" in creds:
+                self.NOMAD_PASSWORD = creds["password"]
+        return self
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def nomad_enabled(self) -> bool:
+        """Check if NOMAD is configured with global auth credentials."""
+        return bool(
+            self.NOMAD_USE_GLOBAL_AUTH
+            and self.NOMAD_USERNAME
+            and self.NOMAD_PASSWORD
+        )
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

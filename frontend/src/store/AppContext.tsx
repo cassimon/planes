@@ -13,6 +13,7 @@ import {
   type BackendAdapter,
   HttpBackend,
   InMemoryBackend,
+  UNLOAD_BACKUP_KEY,
 } from "./backend"
 
 // ── Material ────────────────────────────────────────────────────────────────
@@ -55,24 +56,113 @@ export type ProcessParam = {
   // variationValues stored separately when needed
 }
 
+export type ProcessParameterKey =
+  | "depositionMethod"
+  | "depositionStartTime"
+  | "substrateTemp"
+  | "depositionAtmosphere"
+  | "depositionParameters"
+  | "solutionVolume"
+  | "dryingMethod"
+  | "annealingStartTime"
+  | "annealingTime"
+  | "annealingTemp"
+  | "annealingAtmosphere"
+
 /** Deposition/processing layer in an experiment */
 export type ExperimentLayer = {
   id: string
   name: string
   color: string
+  layerType?: "etl" | "htl" | "perovskite" | "additional" | "back_contact" // Layer category
   materialId?: string // reference to Material
   solutionId?: string // reference to Solution
   // Process parameters - all optional, encourage adding over requiring
   depositionMethod?: ProcessParam
+  depositionStartTime?: ProcessParam
   substrateTemp?: ProcessParam
   depositionAtmosphere?: ProcessParam
+  depositionParameters?: ProcessParam
   solutionVolume?: ProcessParam
   dryingMethod?: ProcessParam
+  annealingStartTime?: ProcessParam
   annealingTime?: ProcessParam
   annealingTemp?: ProcessParam
   annealingAtmosphere?: ProcessParam
   notes?: string
 }
+
+export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
+  key: ProcessParameterKey
+  label: string
+  placeholder?: string
+  unit?: string
+  type?: "text" | "number" | "datetime-local"
+}> = [
+  {
+    key: "depositionMethod",
+    label: "Deposition Method",
+    placeholder: "e.g. Spin coating",
+  },
+  {
+    key: "depositionStartTime",
+    label: "Deposition Start Time",
+    type: "datetime-local",
+  },
+  {
+    key: "substrateTemp",
+    label: "Substrate Temperature",
+    placeholder: "e.g. 25",
+    unit: "°C",
+    type: "number",
+  },
+  {
+    key: "depositionAtmosphere",
+    label: "Deposition Atmosphere",
+    placeholder: "e.g. N2 glovebox",
+  },
+  {
+    key: "depositionParameters",
+    label: "Deposition Parameters (spin / blade coating speed etc.)",
+    placeholder: "e.g. 4000 rpm for 30 s",
+  },
+  {
+    key: "solutionVolume",
+    label: "Solution Volume",
+    placeholder: "e.g. 50",
+    unit: "µL",
+    type: "number",
+  },
+  {
+    key: "dryingMethod",
+    label: "Drying/Quenching",
+    placeholder: "e.g. Antisolvent drip",
+  },
+  {
+    key: "annealingStartTime",
+    label: "Annealing Start Time",
+    type: "datetime-local",
+  },
+  {
+    key: "annealingTime",
+    label: "Annealing Time",
+    placeholder: "e.g. 10",
+    unit: "min",
+    type: "number",
+  },
+  {
+    key: "annealingTemp",
+    label: "Annealing Temperature",
+    placeholder: "e.g. 100",
+    unit: "°C",
+    type: "number",
+  },
+  {
+    key: "annealingAtmosphere",
+    label: "Annealing Atmosphere",
+    placeholder: "e.g. Air",
+  },
+] as const
 
 /** Architecture type for solar cell devices */
 export type DeviceArchitecture =
@@ -85,7 +175,7 @@ export type DeviceArchitecture =
 /** A single substrate in an experiment */
 export type Substrate = {
   id: string
-  name: string // e.g. "A1", "A2", "B1"
+  name: string // e.g. "substrate_1", "substrate_2"
   notes?: string
   // Per-substrate parameter values for variation mode
   // Key format: "layerId:paramName", Value: string
@@ -160,28 +250,16 @@ export function getVariedParameters(exp: Experiment): Array<{
     paramName: string
     paramKey: string
   }> = []
-  const PARAM_KEYS = [
-    "depositionMethod",
-    "substrateTemp",
-    "depositionAtmosphere",
-    "solutionVolume",
-    "dryingMethod",
-    "annealingTime",
-    "annealingTemp",
-    "annealingAtmosphere",
-  ] as const
 
   exp.layers.forEach((layer) => {
-    PARAM_KEYS.forEach((paramKey) => {
-      const param = layer[paramKey as keyof typeof layer] as
-        | ProcessParam
-        | undefined
+    PROCESS_PARAMETER_DEFINITIONS.forEach(({ key, label }) => {
+      const param = layer[key]
       if (param && param.mode === "variation") {
         varied.push({
           layerId: layer.id,
           layerName: layer.name,
-          paramName: paramKey.replace(/([A-Z])/g, " $1").trim(),
-          paramKey: `${layer.id}:${paramKey}`,
+          paramName: label,
+          paramKey: `${layer.id}:${key}`,
         })
       }
     })
@@ -211,35 +289,41 @@ export function newLayer(index: number): ExperimentLayer {
   }
 }
 
+type SubstrateNameOptions = {
+  baseName?: string
+  date?: string
+  experimentName?: string
+  userName?: string
+  includeDate?: boolean
+  includeExpName?: boolean
+  includeUser?: boolean
+  startIndex?: number
+}
+
 /**
- * Generate substrate names based on parameters (like Streamlit app)
- * Supports: date_expname_user format with automatic deduplication
+ * Generate substrate names from a base name plus optional metadata.
  */
 export function generateSubstrates(
   count: number,
-  options?: {
-    date?: string
-    experimentName?: string
-    userName?: string
-    includeDate?: boolean
-    includeExpName?: boolean
-    includeUser?: boolean
-  },
+  options?: SubstrateNameOptions,
 ): Substrate[] {
   const {
+    baseName = "substrate",
     date,
     experimentName,
     userName,
-    includeDate = true,
-    includeExpName = true,
+    includeDate = false,
+    includeExpName = false,
     includeUser = false,
+    startIndex = 1,
   } = options ?? {}
 
+  const normalizedBaseName = baseName.trim().replace(/\s+/g, "_") || "substrate"
   const substrates: Substrate[] = []
-  const nameCounts: Record<string, number> = {}
 
-  for (let i = 1; i <= count; i++) {
-    const parts: string[] = []
+  for (let i = 0; i < count; i++) {
+    const parts: string[] = [normalizedBaseName]
+    const index = startIndex + i
 
     if (includeDate && date) {
       parts.push(date)
@@ -251,26 +335,10 @@ export function generateSubstrates(
       parts.push(userName.replace(/\s+/g, "_"))
     }
 
-    // If no parts selected, use index-based names (A1, A2, etc.)
-    if (parts.length === 0) {
-      const cols = Math.ceil(Math.sqrt(count))
-      const row = Math.floor((i - 1) / cols)
-      const col = (i - 1) % cols
-      const rowLetter = String.fromCharCode(65 + row)
-      const colNumber = col + 1
-      substrates.push({
-        id: crypto.randomUUID(),
-        name: `${rowLetter}${colNumber}`,
-      })
-    } else {
-      const baseName = parts.join("_")
-      nameCounts[baseName] = (nameCounts[baseName] ?? 0) + 1
-      const finalName =
-        nameCounts[baseName] > 1
-          ? `${baseName}_${nameCounts[baseName]}`
-          : baseName
-      substrates.push({ id: crypto.randomUUID(), name: finalName })
-    }
+    substrates.push({
+      id: crypto.randomUUID(),
+      name: `${parts.join("_")}_${index}`,
+    })
   }
 
   return substrates
@@ -281,14 +349,7 @@ export function generateSubstrates(
  */
 export function regenerateSubstrateNames(
   existingSubstrates: Substrate[],
-  options?: {
-    date?: string
-    experimentName?: string
-    userName?: string
-    includeDate?: boolean
-    includeExpName?: boolean
-    includeUser?: boolean
-  },
+  options?: SubstrateNameOptions,
 ): Substrate[] {
   const newSubstrates = generateSubstrates(existingSubstrates.length, options)
   return existingSubstrates.map((sub, idx) => ({
@@ -332,11 +393,19 @@ export type SolutionComponent = {
 export type Solution = {
   id: string
   name: string
+  handling: string
+  creationTime: string
   components: SolutionComponent[]
 }
 
 export function newSolution(): Solution {
-  return { id: crypto.randomUUID(), name: "New Solution", components: [] }
+  return {
+    id: crypto.randomUUID(),
+    name: "New Solution",
+    handling: "",
+    creationTime: new Date().toISOString(),
+    components: [],
+  }
 }
 
 export function newComponent(): SolutionComponent {
@@ -390,6 +459,15 @@ export type DeviceGroup = {
   matchScore?: number
 }
 
+/** NOMAD upload information */
+export type NomadUploadInfo = {
+  upload_id?: string
+  entry_ids?: string[]
+  upload_time?: string
+  status?: string
+  mainfile?: string
+}
+
 /** All results data for an experiment */
 export type ExperimentResults = {
   id: string
@@ -404,6 +482,8 @@ export type ExperimentResults = {
   matchingStrategy: "fuzzy" | "sequential" | "manual"
   /** Last updated timestamp */
   updatedAt: string
+  /** NOMAD upload information (if uploaded) */
+  nomad?: NomadUploadInfo
 }
 
 export function newMeasurementFile(fileName: string): MeasurementFile {
@@ -605,7 +685,10 @@ export function getDependentLocations(
             (r) => r.kind === refKind && r.id === refId,
           )
         ) {
-          return { planeName: plane.name, collectionName: (el as CanvasCollectionElement).name }
+          return {
+            planeName: plane.name,
+            collectionName: (el as CanvasCollectionElement).name,
+          }
         }
       }
     }
@@ -616,33 +699,58 @@ export function getDependentLocations(
     for (const sol of data.solutions) {
       if (sol.components.some((c) => c.materialId === id)) {
         const host = findHost("solution", sol.id)
-        locations.push({ ...host, itemKind: "solution", itemName: sol.name, itemId: sol.id })
+        locations.push({
+          ...host,
+          itemKind: "solution",
+          itemName: sol.name,
+          itemId: sol.id,
+        })
       }
     }
     for (const exp of data.experiments) {
       if (exp.layers.some((l) => l.materialId === id)) {
         const host = findHost("experiment", exp.id)
-        locations.push({ ...host, itemKind: "experiment", itemName: exp.name, itemId: exp.id })
+        locations.push({
+          ...host,
+          itemKind: "experiment",
+          itemName: exp.name,
+          itemId: exp.id,
+        })
       }
     }
   } else if (kind === "solution") {
     for (const sol of data.solutions) {
       if (sol.components.some((c) => c.solutionId === id)) {
         const host = findHost("solution", sol.id)
-        locations.push({ ...host, itemKind: "solution", itemName: sol.name, itemId: sol.id })
+        locations.push({
+          ...host,
+          itemKind: "solution",
+          itemName: sol.name,
+          itemId: sol.id,
+        })
       }
     }
     for (const exp of data.experiments) {
       if (exp.layers.some((l) => l.solutionId === id)) {
         const host = findHost("experiment", exp.id)
-        locations.push({ ...host, itemKind: "experiment", itemName: exp.name, itemId: exp.id })
+        locations.push({
+          ...host,
+          itemKind: "experiment",
+          itemName: exp.name,
+          itemId: exp.id,
+        })
       }
     }
   } else if (kind === "experiment") {
     for (const res of data.results) {
       if (res.experimentId === id) {
         const host = findHost("result", res.id)
-        locations.push({ ...host, itemKind: "result", itemName: `Result ${res.id.slice(0, 6)}`, itemId: res.id })
+        locations.push({
+          ...host,
+          itemKind: "result",
+          itemName: `Result ${res.id.slice(0, 6)}`,
+          itemId: res.id,
+        })
       }
     }
   }
@@ -684,6 +792,8 @@ type AppContextValue = {
   ) => CanvasCollectionElement
   updateElement: (planeId: string, element: CanvasElement) => void
   deleteElement: (planeId: string, elementId: string) => void
+  /** Remove refs of a given kind/ids from every collection across all planes */
+  removeCollectionRefs: (kind: CollectionRef["kind"], ids: string[]) => void
   /** Remove srcId and dstId, insert merged collection — all in one atomic update */
   fuseCollections: (
     planeId: string,
@@ -729,12 +839,14 @@ type AppContextValue = {
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    requestId: string
   } | null
   setPendingCollectionLink: (
     v: {
       collectionId: string
       planeId: string
       kind: CollectionRef["kind"]
+      requestId: string
     } | null,
   ) => void
 
@@ -768,7 +880,7 @@ export function AppProvider({
 }) {
   // Use HttpBackend by default if user is authenticated, fall back to InMemory
   const getToken = useCallback(() => localStorage.getItem("access_token"), [])
-  
+
   const defaultBackend = useMemo(() => {
     const token = getToken()
     if (token) {
@@ -776,7 +888,7 @@ export function AppProvider({
     }
     return DEFAULT_BACKEND
   }, [getToken])
-  
+
   const backend = providedBackend ?? defaultBackend
   const [materials, setMaterials] = useState<Material[]>([])
   const [solutions, setSolutions] = useState<Solution[]>([])
@@ -791,6 +903,7 @@ export function AppProvider({
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    requestId: string
   } | null>(null)
   const [activeEntity, setActiveEntity] = useState<{
     kind: "experiment" | "material" | "solution"
@@ -813,7 +926,12 @@ export function AppProvider({
 
   const persistDirtyState = useCallback(async () => {
     if (!loaded || !dirtyRef.current) {
-      console.log("[AppContext] persistDirtyState skipped: loaded=", loaded, "dirty=", dirtyRef.current)
+      console.log(
+        "[AppContext] persistDirtyState skipped: loaded=",
+        loaded,
+        "dirty=",
+        dirtyRef.current,
+      )
       return
     }
     dirtyRef.current = false
@@ -840,17 +958,26 @@ export function AppProvider({
 
   useEffect(() => {
     let cancelled = false
-    console.log("[AppContext] loading state from backend...", backend.constructor.name)
+    console.log(
+      "[AppContext] loading state from backend...",
+      backend.constructor.name,
+    )
     backend.load().then((snapshot) => {
       if (cancelled) {
         return
       }
-      console.log("[AppContext] loaded snapshot:",
-        "materials:", snapshot.materials.length,
-        "solutions:", snapshot.solutions.length,
-        "experiments:", snapshot.experiments.length,
-        "results:", snapshot.results.length,
-        "planes:", snapshot.planes.length,
+      console.log(
+        "[AppContext] loaded snapshot:",
+        "materials:",
+        snapshot.materials.length,
+        "solutions:",
+        snapshot.solutions.length,
+        "experiments:",
+        snapshot.experiments.length,
+        "results:",
+        snapshot.results.length,
+        "planes:",
+        snapshot.planes.length,
       )
       if (snapshot.materials.length > 0) {
         setMaterials(snapshot.materials)
@@ -885,17 +1012,10 @@ export function AppProvider({
       return
     }
     scheduleSave()
-  }, [
-    loaded,
-    materials,
-    solutions,
-    experiments,
-    results,
-    planes,
-    scheduleSave,
-  ])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, scheduleSave, materials, solutions, experiments, results, planes])
 
-  // ── Periodic safety flush + unload flush ───────────────────────────────────
+  // ── Periodic safety flush + unload / visibility watchdog ──────────────────
 
   useEffect(() => {
     if (!loaded) {
@@ -906,16 +1026,46 @@ export function AppProvider({
       void persistDirtyState()
     }
 
-    const interval = window.setInterval(flushIfDirty, SAVE_INTERVAL_MS)
-    const handleUnload = () => {
-      dirtyRef.current = true
-      void persistDirtyState()
+    // visibilitychange fires while the page is still alive (tab switch, window
+    // minimize, reload).  The in-flight fetch can complete here, making this
+    // far more reliable than beforeunload for saving unsaved work.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        if (saveTimeoutRef.current !== null) {
+          window.clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        dirtyRef.current = true
+        void persistDirtyState()
+      }
     }
-    window.addEventListener("beforeunload", handleUnload)
+
+    // beforeunload fires synchronously right before the page is destroyed.
+    // Async fetches are not guaranteed to complete here, so we only write
+    // a synchronous emergency snapshot to localStorage.  HttpBackend.load()
+    // will pick this up on the next session and push it to the server.
+    const handleBeforeUnload = () => {
+      if (dirtyRef.current) {
+        try {
+          localStorage.setItem(
+            UNLOAD_BACKUP_KEY,
+            JSON.stringify({ snapshot: stateRef.current, savedAt: Date.now() }),
+          )
+        } catch {
+          // Storage full — ignore; the server either already has the data or
+          // visibilitychange will have flushed it.
+        }
+      }
+    }
+
+    const interval = window.setInterval(flushIfDirty, SAVE_INTERVAL_MS)
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("beforeunload", handleBeforeUnload)
 
     return () => {
       window.clearInterval(interval)
-      window.removeEventListener("beforeunload", handleUnload)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
       if (saveTimeoutRef.current !== null) {
         window.clearTimeout(saveTimeoutRef.current)
       }
@@ -1028,6 +1178,38 @@ export function AppProvider({
     )
   }, [])
 
+  const removeCollectionRefs = useCallback(
+    (kind: CollectionRef["kind"], ids: string[]) => {
+      const idSet = new Set(ids)
+      if (idSet.size === 0) {
+        return
+      }
+
+      setPlanes((prev) =>
+        prev.map((plane) => {
+          let changed = false
+          const nextElements = plane.elements.map((el) => {
+            if (el.type !== "collection") {
+              return el
+            }
+            const collection = el as CanvasCollectionElement
+            const nextRefs = collection.refs.filter(
+              (ref) => !(ref.kind === kind && idSet.has(ref.id)),
+            )
+            if (nextRefs.length === collection.refs.length) {
+              return el
+            }
+            changed = true
+            return { ...collection, refs: nextRefs }
+          })
+
+          return changed ? { ...plane, elements: nextElements } : plane
+        }),
+      )
+    },
+    [],
+  )
+
   const fuseCollections = useCallback(
     (
       planeId: string,
@@ -1118,6 +1300,7 @@ export function AppProvider({
         addCollectionElement,
         updateElement,
         deleteElement,
+        removeCollectionRefs,
         fuseCollections,
         copyElementToPlane,
         moveElementToPlane,
@@ -1264,7 +1447,12 @@ export function useEntityCollection() {
       if (!allReferencedEntities.has(`${kind}:${id}`)) return true
       return false
     },
-    [activeCollection, activePlane, planeReferencedEntities, allReferencedEntities],
+    [
+      activeCollection,
+      activePlane,
+      planeReferencedEntities,
+      allReferencedEntities,
+    ],
   )
 
   /**
@@ -1287,5 +1475,52 @@ export function useEntityCollection() {
     [planes],
   )
 
-  return { getEntityColor, isEntityVisible, getEntityPlane, activePlane }
+  /**
+   * True when entity belongs to the active plane (ignoring collection filter).
+   * Used for filtering picker options to the current plane context.
+   * - General view (no plane): always true
+   * - Plane selected: true for entities on that plane, or unassigned orphans
+   */
+  const isEntityOnActivePlane = useCallback(
+    (kind: CollectionRef["kind"], id: string): boolean => {
+      if (!activePlane) return true
+      if (planeReferencedEntities.has(`${kind}:${id}`)) return true
+      if (!allReferencedEntities.has(`${kind}:${id}`)) return true // orphan
+      return false
+    },
+    [activePlane, planeReferencedEntities, allReferencedEntities],
+  )
+
+  /**
+   * Returns { plane, collection } that owns an entity, or null if unowned.
+   * Searches all planes (not just the active one) so copy always lands in
+   * the right collection regardless of the current view.
+   */
+  const getEntityCollection = useCallback(
+    (
+      kind: CollectionRef["kind"],
+      id: string,
+    ): { plane: Plane; collection: CanvasCollectionElement } | null => {
+      for (const plane of planes) {
+        for (const el of plane.elements) {
+          if (el.type !== "collection") continue
+          const col = el as CanvasCollectionElement
+          if (col.refs.some((r) => r.kind === kind && r.id === id)) {
+            return { plane, collection: col }
+          }
+        }
+      }
+      return null
+    },
+    [planes],
+  )
+
+  return {
+    getEntityColor,
+    isEntityVisible,
+    getEntityPlane,
+    getEntityCollection,
+    activePlane,
+    isEntityOnActivePlane,
+  }
 }

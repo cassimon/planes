@@ -21,7 +21,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { Outlet, useLocation, useNavigate } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import useAuth from "@/hooks/useAuth"
 import {
   type CanvasCollectionElement,
@@ -57,6 +57,7 @@ export function AppLayout() {
     materials,
     solutions,
     activeEntity,
+    setActiveEntity,
     flushSave,
   } = useAppContext()
 
@@ -104,6 +105,28 @@ export function AppLayout() {
 
   // Accent color: collection color if selected, otherwise neutral
   const accentColor = activeCollection?.color || DEFAULT_ACCENT
+
+  const activeEntityMatchesPage = useMemo(() => {
+    if (!activeEntity) {
+      return false
+    }
+    if (activeEntity.kind === "material") {
+      return location.pathname.startsWith("/materials")
+    }
+    if (activeEntity.kind === "solution") {
+      return location.pathname.startsWith("/solutions")
+    }
+    return (
+      location.pathname.startsWith("/experiments") ||
+      location.pathname.startsWith("/results")
+    )
+  }, [activeEntity, location.pathname])
+
+  useEffect(() => {
+    if (activeEntity && !activeEntityMatchesPage) {
+      setActiveEntity(null)
+    }
+  }, [activeEntity, activeEntityMatchesPage, setActiveEntity])
 
   // Resolve the active entity's display name and icon
   const { entityName, EntityIcon } = useMemo(() => {
@@ -197,7 +220,10 @@ export function AppLayout() {
               <Menu.Dropdown>
                 <Menu.Item
                   fw={!activePlaneId ? 700 : undefined}
-                  onClick={() => setActivePlaneId(null)}
+                  onClick={() => {
+                    setActivePlaneId(null)
+                    setActiveCollectionId(null)
+                  }}
                 >
                   General
                 </Menu.Item>
@@ -225,7 +251,10 @@ export function AppLayout() {
                   c={activeCollection ? undefined : "dimmed"}
                   style={
                     activeCollection
-                      ? { borderLeft: `3px solid ${accentColor}`, paddingLeft: 8 }
+                      ? {
+                          borderLeft: `3px solid ${accentColor}`,
+                          paddingLeft: 8,
+                        }
                       : undefined
                   }
                 >
@@ -240,47 +269,49 @@ export function AppLayout() {
                         alignItems: "center",
                         padding: "0 2px",
                       }}
-                >
-                  <IconChevronDown
-                    size={14}
-                    style={{ color: "var(--mantine-color-dimmed)" }}
-                  />
-                </UnstyledButton>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item
-                  leftSection={<IconX size={14} />}
-                  disabled={!activeCollection}
-                  onClick={() => setActiveCollectionId(null)}
-                >
-                  No Collection
-                </Menu.Item>
-                {collections.length > 0 && <Menu.Divider />}
-                {collections.map((col) => (
-                  <Menu.Item
-                    key={col.id}
-                    fw={col.id === activeCollectionId ? 700 : undefined}
-                    leftSection={
-                      <ColorSwatch
-                        color={col.color || DEFAULT_ACCENT}
-                        size={12}
+                    >
+                      <IconChevronDown
+                        size={14}
+                        style={{ color: "var(--mantine-color-dimmed)" }}
                       />
-                    }
-                    onClick={() => setActiveCollectionId(col.id)}
-                  >
-                    {col.name}
-                  </Menu.Item>
-                ))}
-                {collections.length === 0 && (
-                  <Menu.Item disabled>No collections in this plane</Menu.Item>
-                )}
-              </Menu.Dropdown>
-            </Menu>
+                    </UnstyledButton>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item
+                      leftSection={<IconX size={14} />}
+                      disabled={!activeCollection}
+                      onClick={() => setActiveCollectionId(null)}
+                    >
+                      No Collection
+                    </Menu.Item>
+                    {collections.length > 0 && <Menu.Divider />}
+                    {collections.map((col) => (
+                      <Menu.Item
+                        key={col.id}
+                        fw={col.id === activeCollectionId ? 700 : undefined}
+                        leftSection={
+                          <ColorSwatch
+                            color={col.color || DEFAULT_ACCENT}
+                            size={12}
+                          />
+                        }
+                        onClick={() => setActiveCollectionId(col.id)}
+                      >
+                        {col.name}
+                      </Menu.Item>
+                    ))}
+                    {collections.length === 0 && (
+                      <Menu.Item disabled>
+                        No collections in this plane
+                      </Menu.Item>
+                    )}
+                  </Menu.Dropdown>
+                </Menu>
               </>
             )}
 
             {/* Active entity segment */}
-            {activeEntity && entityName && (
+            {activeEntityMatchesPage && activeEntity && entityName && (
               <>
                 {/* Removed path separator */}
                 {EntityIcon && (
