@@ -65,33 +65,6 @@ import {
 // File Parsing Utilities (ported from Streamlit app)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Recursively parse any string values that are valid JSON objects/arrays.
- * Fixes the issue where API responses contain double-stringified JSON. */
-function deepParseJsonStrings(value: unknown): unknown {
-  if (typeof value === "string") {
-    try {
-      const parsed: unknown = JSON.parse(value)
-      if (typeof parsed === "object" && parsed !== null) {
-        return deepParseJsonStrings(parsed)
-      }
-      return parsed
-    } catch {
-      return value
-    }
-  }
-  if (Array.isArray(value)) {
-    return value.map(deepParseJsonStrings)
-  }
-  if (typeof value === "object" && value !== null) {
-    const result: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      result[k] = deepParseJsonStrings(v)
-    }
-    return result
-  }
-  return value
-}
-
 /** Get file category based on extension */
 function getFileCategory(fileName: string): MeasurementType | null {
   const lower = fileName.toLowerCase()
@@ -1477,17 +1450,9 @@ function ResultsDetail({
                                   ),
                                 },
                               })
-                            // Show fabrication metadata JSON (first substrate)
-                            const cleanedJson = deepParseJsonStrings(
-                              preview.metadata_json,
-                            )
-                            const jsonStr = JSON.stringify(
-                              cleanedJson,
-                              null,
-                              2,
-                            )
+                            // Show fabrication metadata in YAML format
                             setFabricationMetadataPreview(
-                              jsonStr || "No metadata available",
+                              preview.metadata_yaml || "No metadata available",
                             )
                             setShowFabricationModal(true)
                           } catch (_err) {
@@ -1861,13 +1826,13 @@ function ResultsDetail({
               <Modal
                 opened={showFabricationModal}
                 onClose={() => setShowFabricationModal(false)}
-                title="Review NOMAD JSON"
+                title="Review Fabrication Metadata"
                 size="xl"
               >
                 <Stack gap="md">
                   <Text size="sm" c="dimmed">
                     Perovskite solar cell fabrication metadata for NOMAD upload.
-                    Use the buttons below to download or copy the JSON.
+                    Use the buttons below to download or copy the YAML.
                   </Text>
                   <ScrollArea
                     style={{
@@ -1899,7 +1864,7 @@ function ResultsDetail({
                           .then(() => {
                             notifications.show({
                               title: "Copied",
-                              message: "JSON copied to clipboard",
+                              message: "Metadata copied to clipboard",
                               color: "teal",
                             })
                           })
@@ -1921,17 +1886,17 @@ function ResultsDetail({
                       onClick={() => {
                         const blob = new Blob(
                           [fabricationMetadataPreview || ""],
-                          { type: "application/json" },
+                          { type: "application/yaml" },
                         )
                         const url = URL.createObjectURL(blob)
                         const a = document.createElement("a")
                         a.href = url
-                        a.download = "nomad_metadata.json"
+                        a.download = "archive.yaml"
                         a.click()
                         URL.revokeObjectURL(url)
                       }}
                     >
-                      Download JSON
+                      Download YAML
                     </Button>
                     <Button
                       variant="subtle"

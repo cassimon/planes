@@ -1568,6 +1568,10 @@ export const NomadMetadataPreviewSchema = {
             type: 'object',
             title: 'Metadata Json'
         },
+        metadata_yaml: {
+            type: 'string',
+            title: 'Metadata Yaml'
+        },
         yaml_content: {
             type: 'string',
             title: 'Yaml Content'
@@ -1582,7 +1586,7 @@ export const NomadMetadataPreviewSchema = {
         }
     },
     type: 'object',
-    required: ['metadata_json', 'yaml_content', 'file_count', 'device_group_count'],
+    required: ['metadata_json', 'metadata_yaml', 'yaml_content', 'file_count', 'device_group_count'],
     title: 'NomadMetadataPreview',
     description: 'Preview of NOMAD metadata.'
 } as const;

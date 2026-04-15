@@ -277,6 +277,7 @@ export type NomadMetadataPreview = {
     metadata_json: {
         [key: string]: unknown;
     };
+    metadata_yaml: string;
     yaml_content: string;
     file_count: number;
     device_group_count: number;

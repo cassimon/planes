@@ -291,48 +291,29 @@ def create_nomad_metadata_yaml(
     additional_layers = [l for l in layers if l.get("layerType") == "additional"]
     backcontact_layers = [l for l in layers if l.get("layerType") == "back_contact"]
     
+    # Normalise architecture: "n-i-p" → "nip", "p-i-n" → "pin", etc.
+    architecture_nomad = architecture.replace("-", "")
+
     # Build NOMAD structure
-    nomad_data = {
+    nomad_data: dict[str, Any] = {
         "data": {
             "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
             "ref": {
                 "free_text_comment": comment or "",
                 "name_of_person_entering_the_data": user_name,
-                "DOI_number": "",
-                "lead_author": "Unknown",
-                "publication_date": "Unknown",
-                "journal": "Unknown",
-                "extraction_method": "plains_gui"
             },
             "cell": {
                 "stack_sequence": stack_sequence,
-                "architecture": architecture
+                "architecture": architecture_nomad,
+                "area_total": exp_data.get("deviceArea", 0.09),
             },
             "substrate": {
                 "stack_sequence": substrate_material,
                 "thickness": "nan",
-                "deposition_procedure": "Unknown"
             },
-            "etl": {},
-            "perovskite": {},
-            "perovskite_deposition": {},
-            "htl": {},
-            "backcontact": {},
-            "add": {},
-            "encapsulation": {},
-            "jv": {
-                "light_intensity": "nan",
-                "light_spectra": "AM 1.5G",
-                "default_Voc": "nan",
-                "default_Jsc": "nan",
-                "default_FF": "nan",
-                "default_PCE": "nan"
-            },
-            "stability": {}
-        },
-        "results": {
-            "material": {"Hello World":"Test"
-                         }
+            # etl / perovskite / perovskite_deposition / htl / backcontact / add
+            # are inserted below only when the corresponding layers exist.
+            # jv is appended last to preserve the order from working_extend.archive.yaml.
         }
     }
     
@@ -352,28 +333,29 @@ def create_nomad_metadata_yaml(
             "deposition_thermal_annealing_temperature": concat_layer_params(etl_layers, "annealingTemp"),
             "deposition_thermal_annealing_time": concat_layer_params(etl_layers, "annealingTime"),
             "deposition_thermal_annealing_atmosphere": concat_layer_params(etl_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown"
+            "surface_treatment_before_next_deposition_step": "Unknown",
         }
     
     # Fill Perovskite section
+    # Perovskite composition is hardcoded to MAPI until a perovskite composition
+    # editor is added to the GUI.
     if perovskite_layers:
-        perovskite_layer = perovskite_layers[0]  # Use first perovskite layer
+        perovskite_layer = perovskite_layers[0]
         nomad_data["data"]["perovskite"] = {
             "dimension_3D": True,
             "dimension_list_of_layers": "3D",
-            "composition_a_ions": "Unknown",
-            "composition_a_ions_coefficients": "nan",
-            "composition_b_ions": "Unknown",
-            "composition_b_ions_coefficients": "nan",
-            "composition_c_ions": "Unknown",
-            "composition_c_ions_coefficients": "nan",
-            "composition_short_form": perovskite_layer.get("name", "Unknown"),
-            "composition_long_form": "Unknown",
+            "composition_a_ions": "MA",
+            "composition_a_ions_coefficients": "1",
+            "composition_b_ions": "Pb",
+            "composition_b_ions_coefficients": "1",
+            "composition_c_ions": "I",
+            "composition_c_ions_coefficients": "3",
+            "composition_short_form": "MAPbI",
+            "composition_long_form": "MA1Pb1I3",
             "thickness": "nan",
-            "band_gap": "nan",
-            "surface_treatment_before_next_deposition_step": "Unknown"
+            "band_gap": "1.55",
         }
-        
+
         # Fill perovskite deposition details
         nomad_data["data"]["perovskite_deposition"] = {
             "number_of_deposition_steps": 1,
@@ -411,8 +393,8 @@ def create_nomad_metadata_yaml(
             "solvent_annealing_solvent_atmosphere": "Unknown",
             "solvent_annealing_time": "Unknown",
             "solvent_annealing_temperature": "Unknown",
-            "after_treatment_of_formed_perovskite": False,
-            "after_treatment_of_formed_perovskite_method": "Unknown"
+            "after_treatment_of_formed_perovskite": "false",
+            "after_treatment_of_formed_perovskite_method": "Unknown",
         }
     
     # Fill HTL section
@@ -431,9 +413,9 @@ def create_nomad_metadata_yaml(
             "deposition_thermal_annealing_temperature": concat_layer_params(htl_layers, "annealingTemp"),
             "deposition_thermal_annealing_time": concat_layer_params(htl_layers, "annealingTime"),
             "deposition_thermal_annealing_atmosphere": concat_layer_params(htl_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown"
+            "surface_treatment_before_next_deposition_step": "Unknown",
         }
-    
+
     # Fill Back Contact section
     if backcontact_layers:
         nomad_data["data"]["backcontact"] = {
@@ -450,10 +432,10 @@ def create_nomad_metadata_yaml(
             "deposition_thermal_annealing_temperature": concat_layer_params(backcontact_layers, "annealingTemp"),
             "deposition_thermal_annealing_time": concat_layer_params(backcontact_layers, "annealingTime"),
             "deposition_thermal_annealing_atmosphere": concat_layer_params(backcontact_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown"
+            "surface_treatment_before_next_deposition_step": "Unknown",
         }
-    
-    # Fill Additional layers section
+
+    # Fill Additional layers section (only present when additional layers exist)
     if additional_layers:
         nomad_data["data"]["add"] = {
             "stack_sequence": concat_layer_names(additional_layers),
@@ -469,11 +451,20 @@ def create_nomad_metadata_yaml(
             "deposition_thermal_annealing_temperature": concat_layer_params(additional_layers, "annealingTemp"),
             "deposition_thermal_annealing_time": concat_layer_params(additional_layers, "annealingTime"),
             "deposition_thermal_annealing_atmosphere": concat_layer_params(additional_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown"
+            "surface_treatment_before_next_deposition_step": "Unknown",
         }
-    
+
+    # jv is appended last to match the key order in working_extend.archive.yaml
+    nomad_data["data"]["jv"] = {
+        "light_spectra": "AM 1.5G",
+        "default_Voc": "nan",
+        "default_Jsc": "nan",
+        "default_FF": "nan",
+        "default_PCE": "nan",
+    }
+
     logger.info(f"Generated NOMAD metadata for experiment {experiment_id}")
-    
+
     return nomad_data
 
 

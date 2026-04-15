@@ -9,10 +9,46 @@ Provides endpoints for:
 """
 
 import logging
+import math
 import uuid
 import yaml
 from datetime import datetime, timezone
 from typing import Any
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Custom YAML Dumper: quote all strings, keep numbers/bools unquoted,
+# treat nan/inf as quoted strings, render flat lists in flow style.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _QuotedDumper(yaml.Dumper):
+    def represent_mapping(self, tag: str, mapping: Any, flow_style: bool | None = None) -> yaml.MappingNode:
+        node = super().represent_mapping(tag, mapping, flow_style)
+        # Strip quotes from mapping keys so only values are quoted
+        for key_node, _value_node in node.value:
+            if isinstance(key_node, yaml.ScalarNode) and key_node.tag == "tag:yaml.org,2002:str":
+                key_node.style = None
+        return node
+
+
+def _represent_str_quoted(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+
+
+def _represent_float_safe(dumper: yaml.Dumper, data: float) -> yaml.Node:
+    if math.isnan(data) or math.isinf(data):
+        return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style='"')
+    return yaml.Dumper.represent_float(dumper, data)
+
+
+def _represent_list_flow_if_flat(dumper: yaml.Dumper, data: list) -> yaml.SequenceNode:
+    flat = all(isinstance(item, (str, int, float, bool)) for item in data)
+    return dumper.represent_sequence("tag:yaml.org,2002:seq", data, flow_style=flat)
+
+
+_QuotedDumper.add_representer(str, _represent_str_quoted)
+_QuotedDumper.add_representer(float, _represent_float_safe)
+_QuotedDumper.add_representer(list, _represent_list_flow_if_flat)
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -86,7 +122,8 @@ class NomadUploadRequest(BaseModel):
 class NomadMetadataPreview(BaseModel):
     """Preview of NOMAD metadata."""
     metadata_json: dict[str, Any]
-    yaml_content: str  # YAML serialization for display
+    metadata_yaml: str  # YAML serialization of perovskite solar cell metadata
+    yaml_content: str  # YAML serialization for upload file organization
     file_count: int
     device_group_count: int
 
@@ -200,10 +237,14 @@ def preview_nomad_metadata(
         # Convert upload metadata to YAML for file organization preview
         yaml_content = yaml.dump(upload_metadata, default_flow_style=False, allow_unicode=True, sort_keys=False)
         
+        # Convert perovskite solar cell metadata to YAML (strings quoted, nan as string)
+        metadata_yaml = yaml.dump(metadata_json, Dumper=_QuotedDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        
         logger.info(f"Generated metadata preview with keys: {list(metadata_json.get('data', {}).keys())}")
         
         preview = NomadMetadataPreview(
             metadata_json=metadata_json,
+            metadata_yaml=metadata_yaml,
             yaml_content=yaml_content,
             file_count=len(request.measurement_files),
             device_group_count=len(request.device_groups),
