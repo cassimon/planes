@@ -101,7 +101,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str
 
     # NOMAD Configuration
-    NOMAD_URL: str = "https://nomad-lab.eu/prod/v1/test/api/v1"
+    NOMAD_URL: str = "http://localhost/nomad-oasis/api/v1"
     # Path to the out-of-repo credentials file (key=value format).
     # Override via the NOMAD_AUTH_FILE env var if needed.
     NOMAD_AUTH_FILE: str = _DEFAULT_NOMAD_AUTH_FILE

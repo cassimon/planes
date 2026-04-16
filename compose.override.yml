@@ -10,7 +10,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "80:80"
+      - "81:80"
       - "8090:8080"
     # Duplicate the command from compose.yml to add --api.insecure=true
     command:
@@ -59,6 +59,8 @@ services:
     restart: "no"
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -82,11 +84,25 @@ services:
     volumes:
       - ./backend/htmlcov:/app/backend/htmlcov
       - ./backend/tests:/app/backend/tests
+      - "../sensitive config:/sensitive config:ro"
     environment:
       SMTP_HOST: "mailcatcher"
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
       EMAILS_FROM_EMAIL: "noreply@example.com"
+      # Optional legacy NOMAD endpoint override (disabled by default).
+      # Set NOMAD_LEGACY_TEST_URL in your shell or an untracked env file
+      # when you explicitly want to test against the previous domain.
+      # How to use legacy domain temporarily (without hardcoding it in repo):
+      # Export the variable only in your shell/session:
+      # export NOMAD_LEGACY_TEST_URL="your-old-test-domain-api-v1-url"
+      # Restart backend:
+      # docker compose up -d backend
+      # Unset to return to default local Oasis:
+      # unset NOMAD_LEGACY_TEST_URL
+      # docker compose up -d backend
+      # This keeps the old-domain option available, but disabled by default and not hardcoded anywhere.
+      NOMAD_URL: "${NOMAD_LEGACY_TEST_URL:-http://host.docker.internal/nomad-oasis/api/v1}"
 
   mailcatcher:
     image: schickling/mailcatcher

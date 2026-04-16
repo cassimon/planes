@@ -20,7 +20,7 @@ Run all tests:
     pytest tests/services/test_nomad.py -v
 
 IMPORTANT: Tests verify the TEST deployment URL is used:
-    https://nomad-lab.eu/prod/v1/test/api/v1
+    http://localhost/nomad-oasis/api/v1
 """
 
 import json
@@ -38,9 +38,9 @@ import pytest
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # These are the EXPECTED URLs for the TEST deployment
-EXPECTED_TEST_BASE_URL = "https://nomad-lab.eu/prod/v1/test/api/v1"
-EXPECTED_TEST_AUTH_URL = "https://nomad-lab.eu/prod/v1/test/api/v1/auth/token"
-EXPECTED_TEST_UPLOAD_URL = "https://nomad-lab.eu/prod/v1/test/api/v1/uploads"
+EXPECTED_TEST_BASE_URL = "http://localhost/nomad-oasis/api/v1"
+EXPECTED_TEST_AUTH_URL = "http://localhost/nomad-oasis/api/v1/auth/token"
+EXPECTED_TEST_UPLOAD_URL = "http://localhost/nomad-oasis/api/v1/uploads"
 
 # Production URLs (for comparison - should NOT be used by default)
 

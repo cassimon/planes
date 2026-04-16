@@ -1693,8 +1693,16 @@ function ResultsDetail({
                                               nomadConfig?.url?.replace(
                                                 "/api/v1",
                                                 "",
-                                              ) ||
-                                              "https://nomad-lab.eu/prod/v1/test"
+                                              )
+                                            if (!nomadUrl) {
+                                              notifications.show({
+                                                title: "NOMAD URL Missing",
+                                                message:
+                                                  "NOMAD base URL is not configured.",
+                                                color: "orange",
+                                              })
+                                              return
+                                            }
                                             window.open(
                                               `${nomadUrl}/user/uploads/upload/id/${result.upload_id}`,
                                               "_blank",
@@ -1770,9 +1778,18 @@ function ResultsDetail({
                       variant="light"
                       leftSection={<IconExternalLink size={14} />}
                       onClick={() => {
-                        const nomadUrl =
-                          nomadConfig?.url?.replace("/api/v1", "") ||
-                          "https://nomad-lab.eu/prod/v1/test"
+                        const nomadUrl = nomadConfig?.url?.replace(
+                          "/api/v1",
+                          "",
+                        )
+                        if (!nomadUrl) {
+                          notifications.show({
+                            title: "NOMAD URL Missing",
+                            message: "NOMAD base URL is not configured.",
+                            color: "orange",
+                          })
+                          return
+                        }
                         window.open(
                           `${nomadUrl}/user/uploads/upload/id/${results.nomad?.upload_id}`,
                           "_blank",

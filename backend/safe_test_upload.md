@@ -30,7 +30,7 @@ env | grep NOMAD
 **Expected output:**
 
 ```
-NOMAD_URL=https://nomad-lab.eu/prod/v1/test/api/v1
+NOMAD_URL=http://localhost/nomad-oasis/api/v1
 NOMAD_USE_GLOBAL_AUTH=true
 NOMAD_MOCK_MODE=true          # ← must be "true"
 ```
@@ -183,7 +183,7 @@ print('Ready for REAL test-server upload')
 "
 ```
 
-Now the upload will go to `https://nomad-lab.eu/prod/v1/test/api/v1`.
+Now the upload will go to `http://localhost/nomad-oasis/api/v1`.
 This is the **test** deployment — uploads there can be freely deleted.
 
 ---
