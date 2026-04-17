@@ -858,6 +858,61 @@ function ResultsDetail({
           return category !== null
         }),
       ])
+      ;
+
+      // Upload dropped files to create a temporary archive on the server
+      (async () => {
+        try {
+          const filesToSend = droppedFiles.filter((f) => getFileCategory(f.name) !== null)
+          if (filesToSend.length === 0) return
+
+          const form = new FormData()
+          form.append("experiment_id", experiment.id)
+          form.append("experiment_name", experiment.name)
+          for (const f of filesToSend) {
+            form.append("files", f)
+          }
+
+          const token =
+            typeof OpenAPI.TOKEN === "function"
+              ? await OpenAPI.TOKEN({} as any)
+              : OpenAPI.TOKEN || localStorage.getItem("access_token")
+
+          const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/files`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: form,
+          })
+
+          if (!res.ok) {
+            const text = await res.text()
+            notifications.show({
+              title: "Upload Error",
+              message: `Failed to upload files: ${res.status} ${text}`,
+              color: "red",
+            })
+            return
+          }
+
+          const data = await res.json()
+          notifications.show({
+            title: "Files Uploaded",
+            message: data.archive_path
+              ? `Created archive: ${data.archive_path}`
+              : "Files uploaded successfully",
+            color: "green",
+          })
+        } catch (err) {
+          console.error("upload files error", err)
+          notifications.show({
+            title: "Upload Error",
+            message: err instanceof Error ? err.message : String(err),
+            color: "red",
+          })
+        }
+      })()
 
       // Group files by device name while preserving existing ungrouped files
       const groupedExistingFiles = results.files.filter((f) =>

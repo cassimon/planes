@@ -457,10 +457,10 @@ def create_nomad_metadata_yaml(
     # jv is appended last to match the key order in working_extend.archive.yaml
     nomad_data["data"]["jv"] = {
         "light_spectra": "AM 1.5G",
-        "default_Voc": "nan",
-        "default_Jsc": "nan",
-        "default_FF": "nan",
-        "default_PCE": "nan",
+        #"default_Voc": "nan",
+        #"default_Jsc": "nan",
+        #"default_FF": "nan",
+        #"default_PCE": "nan",
     }
 
     logger.info(f"Generated NOMAD metadata for experiment {experiment_id}")

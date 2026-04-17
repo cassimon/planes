@@ -295,6 +295,8 @@ async def upload_files_for_nomad(
             archive_name=f"{experiment_id[:8]}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
         )
         
+        logger.info(f"Created temporary zip archive at {zip_path} with {len(file_data)} files, total size: {zip_path.stat().st_size} bytes")
+
         return {
             "success": True,
             "archive_path": str(zip_path),
