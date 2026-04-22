@@ -593,6 +593,7 @@ function ResultsDetail({
   >(null)
   const [showFabricationModal, setShowFabricationModal] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
+  const [lastArchivePath, setLastArchivePath] = useState<string | null>(null)
   const [selectedUngroupedFileIds, setSelectedUngroupedFileIds] = useState<
     Set<string>
   >(new Set())
@@ -611,6 +612,17 @@ function ResultsDetail({
         console.warn("Failed to fetch NOMAD config:", err),
       )
   }, [])
+
+  // Load any persisted archive path for this experiment from the session
+  useEffect(() => {
+    try {
+      const key = `nomad_archive:${experiment.id}`
+      const v = sessionStorage.getItem(key)
+      if (v) setLastArchivePath(v)
+    } catch (e) {
+      // ignore sessionStorage errors in restrictive environments
+    }
+  }, [experiment.id])
 
   // Undo-delete state: keeps recently deleted files for a short window
   type DeletedEntry = {
@@ -897,6 +909,16 @@ function ResultsDetail({
           }
 
           const data = await res.json()
+          // Persist archive path in session state so it survives reloads this session
+          if (data?.archive_path) {
+            try {
+              const key = `nomad_archive:${experiment.id}`
+              sessionStorage.setItem(key, data.archive_path)
+            } catch (e) {
+              // ignore
+            }
+            setLastArchivePath(data.archive_path)
+          }
           notifications.show({
             title: "Files Uploaded",
             message: data.archive_path
@@ -1280,6 +1302,12 @@ function ResultsDetail({
               </div>
             </Group>
           </Dropzone>
+
+          {lastArchivePath && (
+            <Text size="xs" c="dimmed" mt={8}>
+              Last created archive: {lastArchivePath}
+            </Text>
+          )}
 
           {results.files.length > 0 && (
             <>
@@ -2343,11 +2371,18 @@ export function ResultsPage() {
       return [...prev, updatedResults]
     })
 
-    // Keep experiment.hasResults in sync so the status propagates everywhere
+    // Keep experiment.hasResults in sync so the status propagates everywhere.
+    // Treat "finished" as equivalent to all device groups assigned.
+    const totalGroups = updatedResults.deviceGroups.length
+    const matchedCount = updatedResults.deviceGroups.filter(
+      (g) => g.assignedSubstrateId,
+    ).length
+    const allAssigned = totalGroups > 0 && matchedCount === totalGroups
+
     setExperiments((prev) =>
       prev.map((e) =>
         e.id === updatedResults.experimentId
-          ? { ...e, hasResults: hasFiles }
+          ? { ...e, hasResults: hasFiles || allAssigned }
           : e,
       ),
     )

@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 import yaml
+import copy
 
 from app.core.config import settings
 
@@ -160,7 +161,7 @@ def create_nomad_metadata_yaml(
     user_name: str,
     session: Any,
     experiment_snapshot: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> dict[tuple[str, str], dict[str, Any]]:
     """
     Create NOMAD perovskite solar cell metadata JSON structure from experiment data.
     
@@ -294,178 +295,224 @@ def create_nomad_metadata_yaml(
     # Normalise architecture: "n-i-p" → "nip", "p-i-n" → "pin", etc.
     architecture_nomad = architecture.replace("-", "")
 
-    # Build NOMAD structure
-    nomad_data: dict[str, Any] = {
-        "data": {
-            "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
-            "ref": {
-                "free_text_comment": comment or "",
-                "name_of_person_entering_the_data": user_name,
-            },
-            "cell": {
-                "stack_sequence": stack_sequence,
-                "architecture": architecture_nomad,
-                "area_total": exp_data.get("deviceArea", 0.09),
-            },
-            "substrate": {
-                "stack_sequence": substrate_material,
-                "thickness": "nan",
-            },
-            # etl / perovskite / perovskite_deposition / htl / backcontact / add
-            # are inserted below only when the corresponding layers exist.
-            # jv is appended last to preserve the order from working_extend.archive.yaml.
-        }
-    }
+    # Build a mapping keyed by (substrate_id, device_id) so callers can
+    # iterate over substrates and devices explicitly. For now each device
+    # receives the same metadata payload; later we'll populate device-specific
+    # fields.
+    substrates_list = []
+    # Prefer explicit substrate list from the frontend-provided snapshot
+    if isinstance(exp_data.get("substrates"), list) and exp_data.get("substrates"):
+        substrates_list = exp_data.get("substrates")
+    else:
+        # Fall back to experiment.substrates if available (SQLModel objects)
+        try:
+            if getattr(experiment, "substrates", None):
+                substrates_list = list(experiment.substrates)
+        except Exception:
+            substrates_list = []
+
+    # Determine devices per substrate (try request data, then experiment fields)
+    devices_per_substrate = (
+        exp_data.get("devicesPerSubstrate")
+        or exp_data.get("devices_per_substrate")
+        or getattr(experiment, "devicesPerSubstrate", None)
+        or getattr(experiment, "devices_per_substrate", None)
+        or 1
+    )
+    try:
+        devices_per_substrate = int(devices_per_substrate)
+    except Exception:
+        devices_per_substrate = 1
+
+    nomad_map: dict[tuple[str, str], dict[str, Any]] = {}
+
+    # If no substrates were found, create a single synthetic substrate entry
+    if not substrates_list:
+        substrates_list = [{"id": "substrate_0", "name": "substrate_0"}]
+
+    for substrate in substrates_list:
+        # substrate may be a dict from the frontend or a SQLModel object
+        if isinstance(substrate, dict):
+            substrate_id = str(substrate.get("id") or substrate.get("name"))
+        else:
+            substrate_id = str(getattr(substrate, "id", str(substrate)))
+
+        for dev_idx in range(devices_per_substrate):
+            device_id = f"device_{dev_idx}"
+            # Deep-copy the generated data payload so future per-device
+            # modifications don't share references.
+            nomad_map[(substrate_id, device_id)]  = {
+                "data": {
+                    "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
+                    "ref": {
+                        "free_text_comment": comment or "",
+                        "name_of_person_entering_the_data": user_name,
+                    },
+                    "cell": {
+                        "stack_sequence": stack_sequence,
+                        "architecture": architecture_nomad,
+                        "area_total": exp_data.get("deviceArea", 0.09),
+                    },
+                    "substrate": {
+                        "stack_sequence": substrate_material,
+                        "thickness": "nan",
+                    },
+                    # etl / perovskite / perovskite_deposition / htl / backcontact / add
+                    # are inserted below only when the corresponding layers exist.
+                    # jv is appended last to preserve the order from working_extend.archive.yaml.
+                }
+            }
     
-    # Fill ETL section
-    if etl_layers:
-        nomad_data["data"]["etl"] = {
-            "stack_sequence": concat_layer_names(etl_layers),
-            "thickness": "nan",
-            "deposition_procedure": concat_layer_params(etl_layers, "depositionMethod"),
-            "deposition_synthesis_atmosphere": concat_layer_params(etl_layers, "depositionAtmosphere"),
-            "deposition_solvents": "Unknown",
-            "deposition_reaction_solutions_compounds": "Unknown",
-            "deposition_reaction_solutions_concentrations": "Unknown",
-            "deposition_reaction_solutions_volumes": concat_layer_params(etl_layers, "solutionVolume"),
-            "deposition_reaction_solutions_temperature": "Unknown",
-            "deposition_substrate_temperature": concat_layer_params(etl_layers, "substrateTemp"),
-            "deposition_thermal_annealing_temperature": concat_layer_params(etl_layers, "annealingTemp"),
-            "deposition_thermal_annealing_time": concat_layer_params(etl_layers, "annealingTime"),
-            "deposition_thermal_annealing_atmosphere": concat_layer_params(etl_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown",
-        }
+            # Fill ETL section
+            if etl_layers:
+                nomad_map[(substrate_id, device_id)]["data"]["etl"] = {
+                    "stack_sequence": concat_layer_names(etl_layers),
+                    "thickness": "nan",
+                    "deposition_procedure": concat_layer_params(etl_layers, "depositionMethod"),
+                    "deposition_synthesis_atmosphere": concat_layer_params(etl_layers, "depositionAtmosphere"),
+                    "deposition_solvents": "Unknown",
+                    "deposition_reaction_solutions_compounds": "Unknown",
+                    "deposition_reaction_solutions_concentrations": "Unknown",
+                    "deposition_reaction_solutions_volumes": concat_layer_params(etl_layers, "solutionVolume"),
+                    "deposition_reaction_solutions_temperature": "Unknown",
+                    "deposition_substrate_temperature": concat_layer_params(etl_layers, "substrateTemp"),
+                    "deposition_thermal_annealing_temperature": concat_layer_params(etl_layers, "annealingTemp"),
+                    "deposition_thermal_annealing_time": concat_layer_params(etl_layers, "annealingTime"),
+                    "deposition_thermal_annealing_atmosphere": concat_layer_params(etl_layers, "annealingAtmosphere"),
+                    "surface_treatment_before_next_deposition_step": "Unknown",
+                }
     
-    # Fill Perovskite section
-    # Perovskite composition is hardcoded to MAPI until a perovskite composition
-    # editor is added to the GUI.
-    if perovskite_layers:
-        perovskite_layer = perovskite_layers[0]
-        nomad_data["data"]["perovskite"] = {
-            "dimension_3D": True,
-            "dimension_list_of_layers": "3D",
-            "composition_a_ions": "MA",
-            "composition_a_ions_coefficients": "1",
-            "composition_b_ions": "Pb",
-            "composition_b_ions_coefficients": "1",
-            "composition_c_ions": "I",
-            "composition_c_ions_coefficients": "3",
-            "composition_short_form": "MAPbI",
-            "composition_long_form": "MA1Pb1I3",
-            "thickness": "nan",
-            "band_gap": "1.55",
-        }
+                # Fill Perovskite section
+                # Perovskite composition is hardcoded to MAPI until a perovskite composition
+                # editor is added to the GUI.
+                if perovskite_layers:
+                    perovskite_layer = perovskite_layers[0]
+                    nomad_map[(substrate_id, device_id)]["data"]["perovskite"] = {
+                        "dimension_3D": True,
+                        "dimension_list_of_layers": "3D",
+                        "composition_a_ions": "MA",
+                        "composition_a_ions_coefficients": "1",
+                        "composition_b_ions": "Pb",
+                        "composition_b_ions_coefficients": "1",
+                        "composition_c_ions": "I",
+                        "composition_c_ions_coefficients": "3",
+                        "composition_short_form": "MAPbI",
+                        "composition_long_form": "MA1Pb1I3",
+                        "thickness": "nan",
+                        "band_gap": "1.55",
+                    }
 
-        # Fill perovskite deposition details
-        nomad_data["data"]["perovskite_deposition"] = {
-            "number_of_deposition_steps": 1,
-            "procedure": get_param_value(perovskite_layer.get("depositionMethod")),
-            "aggregation_state_of_reactants": "Unknown",
-            "synthesis_atmosphere": get_param_value(perovskite_layer.get("depositionAtmosphere")),
-            "synthesis_atmosphere_pressure_total": "Unknown",
-            "synthesis_atmosphere_pressure_partial": "Unknown",
-            "synthesis_atmosphere_relative_humidity": "Unknown",
-            "solvents": "Unknown",
-            "solvents_mixing_ratios": "Unknown",
-            "solvents_supplier": "Unknown",
-            "solvents_purity": "Unknown",
-            "reaction_solutions_compounds": "Unknown",
-            "reaction_solutions_compounds_supplier": "Unknown",
-            "reaction_solutions_compounds_purity": "Unknown",
-            "reaction_solutions_concentrations": "Unknown",
-            "reaction_solutions_volumes": get_param_value(perovskite_layer.get("solutionVolume")),
-            "reaction_solutions_age": "Unknown",
-            "reaction_solutions_temperature": "Unknown",
-            "substrate_temperature": get_param_value(perovskite_layer.get("substrateTemp")),
-            "quenching_induced_crystallisation": False,
-            "quenching_media": get_param_value(perovskite_layer.get("dryingMethod")),
-            "quenching_media_mixing_ratios": "Unknown",
-            "quenching_media_volume": "Unknown",
-            "quenching_media_additives_compounds": "Unknown",
-            "quenching_media_additives_concentrations": "Unknown",
-            "thermal_annealing_temperature": get_param_value(perovskite_layer.get("annealingTemp")),
-            "thermal_annealing_time": get_param_value(perovskite_layer.get("annealingTime")),
-            "thermal_annealing_atmosphere": get_param_value(perovskite_layer.get("annealingAtmosphere")),
-            "thermal_annealing_relative_humidity": "Unknown",
-            "thermal_annealing_pressure": "Unknown",
-            "solvent_annealing": False,
-            "solvent_annealing_timing": "Unknown",
-            "solvent_annealing_solvent_atmosphere": "Unknown",
-            "solvent_annealing_time": "Unknown",
-            "solvent_annealing_temperature": "Unknown",
-            "after_treatment_of_formed_perovskite": "false",
-            "after_treatment_of_formed_perovskite_method": "Unknown",
-        }
+                    # Fill perovskite deposition details
+                    nomad_map[(substrate_id, device_id)]["data"]["perovskite_deposition"] = {
+                        "number_of_deposition_steps": 1,
+                        "procedure": get_param_value(perovskite_layer.get("depositionMethod")),
+                        "aggregation_state_of_reactants": "Unknown",
+                        "synthesis_atmosphere": get_param_value(perovskite_layer.get("depositionAtmosphere")),
+                        "synthesis_atmosphere_pressure_total": "Unknown",
+                        "synthesis_atmosphere_pressure_partial": "Unknown",
+                        "synthesis_atmosphere_relative_humidity": "Unknown",
+                        "solvents": "Unknown",
+                        "solvents_mixing_ratios": "Unknown",
+                        "solvents_supplier": "Unknown",
+                        "solvents_purity": "Unknown",
+                        "reaction_solutions_compounds": "Unknown",
+                        "reaction_solutions_compounds_supplier": "Unknown",
+                        "reaction_solutions_compounds_purity": "Unknown",
+                        "reaction_solutions_concentrations": "Unknown",
+                        "reaction_solutions_volumes": get_param_value(perovskite_layer.get("solutionVolume")),
+                        "reaction_solutions_age": "Unknown",
+                        "reaction_solutions_temperature": "Unknown",
+                        "substrate_temperature": get_param_value(perovskite_layer.get("substrateTemp")),
+                        "quenching_induced_crystallisation": False,
+                        "quenching_media": get_param_value(perovskite_layer.get("dryingMethod")),
+                        "quenching_media_mixing_ratios": "Unknown",
+                        "quenching_media_volume": "Unknown",
+                        "quenching_media_additives_compounds": "Unknown",
+                        "quenching_media_additives_concentrations": "Unknown",
+                        "thermal_annealing_temperature": get_param_value(perovskite_layer.get("annealingTemp")),
+                        "thermal_annealing_time": get_param_value(perovskite_layer.get("annealingTime")),
+                        "thermal_annealing_atmosphere": get_param_value(perovskite_layer.get("annealingAtmosphere")),
+                        "thermal_annealing_relative_humidity": "Unknown",
+                        "thermal_annealing_pressure": "Unknown",
+                        "solvent_annealing": False,
+                        "solvent_annealing_timing": "Unknown",
+                        "solvent_annealing_solvent_atmosphere": "Unknown",
+                        "solvent_annealing_time": "Unknown",
+                        "solvent_annealing_temperature": "Unknown",
+                        "after_treatment_of_formed_perovskite": "false",
+                        "after_treatment_of_formed_perovskite_method": "Unknown",
+                    }
     
-    # Fill HTL section
-    if htl_layers:
-        nomad_data["data"]["htl"] = {
-            "stack_sequence": concat_layer_names(htl_layers),
-            "thickness_list": "nan",
-            "deposition_procedure": concat_layer_params(htl_layers, "depositionMethod"),
-            "deposition_synthesis_atmosphere": concat_layer_params(htl_layers, "depositionAtmosphere"),
-            "deposition_solvents": "Unknown",
-            "deposition_reaction_solutions_compounds": "Unknown",
-            "deposition_reaction_solutions_concentrations": "Unknown",
-            "deposition_reaction_solutions_volumes": concat_layer_params(htl_layers, "solutionVolume"),
-            "deposition_reaction_solutions_temperature": "Unknown",
-            "deposition_substrate_temperature": concat_layer_params(htl_layers, "substrateTemp"),
-            "deposition_thermal_annealing_temperature": concat_layer_params(htl_layers, "annealingTemp"),
-            "deposition_thermal_annealing_time": concat_layer_params(htl_layers, "annealingTime"),
-            "deposition_thermal_annealing_atmosphere": concat_layer_params(htl_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown",
-        }
+                # Fill HTL section
+                if htl_layers:
+                    nomad_map[(substrate_id, device_id)]["data"]["htl"] = {
+                        "stack_sequence": concat_layer_names(htl_layers),
+                        "thickness_list": "nan",
+                        "deposition_procedure": concat_layer_params(htl_layers, "depositionMethod"),
+                        "deposition_synthesis_atmosphere": concat_layer_params(htl_layers, "depositionAtmosphere"),
+                        "deposition_solvents": "Unknown",
+                        "deposition_reaction_solutions_compounds": "Unknown",
+                        "deposition_reaction_solutions_concentrations": "Unknown",
+                        "deposition_reaction_solutions_volumes": concat_layer_params(htl_layers, "solutionVolume"),
+                        "deposition_reaction_solutions_temperature": "Unknown",
+                        "deposition_substrate_temperature": concat_layer_params(htl_layers, "substrateTemp"),
+                        "deposition_thermal_annealing_temperature": concat_layer_params(htl_layers, "annealingTemp"),
+                        "deposition_thermal_annealing_time": concat_layer_params(htl_layers, "annealingTime"),
+                        "deposition_thermal_annealing_atmosphere": concat_layer_params(htl_layers, "annealingAtmosphere"),
+                        "surface_treatment_before_next_deposition_step": "Unknown",
+                    }
 
-    # Fill Back Contact section
-    if backcontact_layers:
-        nomad_data["data"]["backcontact"] = {
-            "stack_sequence": concat_layer_names(backcontact_layers),
-            "thickness_list": "nan",
-            "deposition_procedure": concat_layer_params(backcontact_layers, "depositionMethod"),
-            "deposition_synthesis_atmosphere": concat_layer_params(backcontact_layers, "depositionAtmosphere"),
-            "deposition_solvents": "Unknown",
-            "deposition_reaction_solutions_compounds": "Unknown",
-            "deposition_reaction_solutions_concentrations": "Unknown",
-            "deposition_reaction_solutions_volumes": concat_layer_params(backcontact_layers, "solutionVolume"),
-            "deposition_reaction_solutions_temperature": "Unknown",
-            "deposition_substrate_temperature": concat_layer_params(backcontact_layers, "substrateTemp"),
-            "deposition_thermal_annealing_temperature": concat_layer_params(backcontact_layers, "annealingTemp"),
-            "deposition_thermal_annealing_time": concat_layer_params(backcontact_layers, "annealingTime"),
-            "deposition_thermal_annealing_atmosphere": concat_layer_params(backcontact_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown",
-        }
+                # Fill Back Contact section
+                if backcontact_layers:
+                    nomad_map[(substrate_id, device_id)]["data"]["backcontact"] = {
+                        "stack_sequence": concat_layer_names(backcontact_layers),
+                        "thickness_list": "nan",
+                        "deposition_procedure": concat_layer_params(backcontact_layers, "depositionMethod"),
+                        "deposition_synthesis_atmosphere": concat_layer_params(backcontact_layers, "depositionAtmosphere"),
+                        "deposition_solvents": "Unknown",
+                        "deposition_reaction_solutions_compounds": "Unknown",
+                        "deposition_reaction_solutions_concentrations": "Unknown",
+                        "deposition_reaction_solutions_volumes": concat_layer_params(backcontact_layers, "solutionVolume"),
+                        "deposition_reaction_solutions_temperature": "Unknown",
+                        "deposition_substrate_temperature": concat_layer_params(backcontact_layers, "substrateTemp"),
+                        "deposition_thermal_annealing_temperature": concat_layer_params(backcontact_layers, "annealingTemp"),
+                        "deposition_thermal_annealing_time": concat_layer_params(backcontact_layers, "annealingTime"),
+                        "deposition_thermal_annealing_atmosphere": concat_layer_params(backcontact_layers, "annealingAtmosphere"),
+                        "surface_treatment_before_next_deposition_step": "Unknown",
+                    }
 
-    # Fill Additional layers section (only present when additional layers exist)
-    if additional_layers:
-        nomad_data["data"]["add"] = {
-            "stack_sequence": concat_layer_names(additional_layers),
-            "thickness_list": "nan",
-            "deposition_procedure": concat_layer_params(additional_layers, "depositionMethod"),
-            "deposition_synthesis_atmosphere": concat_layer_params(additional_layers, "depositionAtmosphere"),
-            "deposition_solvents": "Unknown",
-            "deposition_reaction_solutions_compounds": "Unknown",
-            "deposition_reaction_solutions_concentrations": "Unknown",
-            "deposition_reaction_solutions_volumes": concat_layer_params(additional_layers, "solutionVolume"),
-            "deposition_reaction_solutions_temperature": "Unknown",
-            "deposition_substrate_temperature": concat_layer_params(additional_layers, "substrateTemp"),
-            "deposition_thermal_annealing_temperature": concat_layer_params(additional_layers, "annealingTemp"),
-            "deposition_thermal_annealing_time": concat_layer_params(additional_layers, "annealingTime"),
-            "deposition_thermal_annealing_atmosphere": concat_layer_params(additional_layers, "annealingAtmosphere"),
-            "surface_treatment_before_next_deposition_step": "Unknown",
-        }
+                # Fill Additional layers section (only present when additional layers exist)
+                if additional_layers:
+                    nomad_map[(substrate_id, device_id)]["data"]["add"] = {
+                        "stack_sequence": concat_layer_names(additional_layers),
+                        "thickness_list": "nan",
+                        "deposition_procedure": concat_layer_params(additional_layers, "depositionMethod"),
+                        "deposition_synthesis_atmosphere": concat_layer_params(additional_layers, "depositionAtmosphere"),
+                        "deposition_solvents": "Unknown",
+                        "deposition_reaction_solutions_compounds": "Unknown",
+                        "deposition_reaction_solutions_concentrations": "Unknown",
+                        "deposition_reaction_solutions_volumes": concat_layer_params(additional_layers, "solutionVolume"),
+                        "deposition_reaction_solutions_temperature": "Unknown",
+                        "deposition_substrate_temperature": concat_layer_params(additional_layers, "substrateTemp"),
+                        "deposition_thermal_annealing_temperature": concat_layer_params(additional_layers, "annealingTemp"),
+                        "deposition_thermal_annealing_time": concat_layer_params(additional_layers, "annealingTime"),
+                        "deposition_thermal_annealing_atmosphere": concat_layer_params(additional_layers, "annealingAtmosphere"),
+                        "surface_treatment_before_next_deposition_step": "Unknown",
+                    }
 
-    # jv is appended last to match the key order in working_extend.archive.yaml
-    nomad_data["data"]["jv"] = {
-        "light_spectra": "AM 1.5G",
-        #"default_Voc": "nan",
-        #"default_Jsc": "nan",
-        #"default_FF": "nan",
-        #"default_PCE": "nan",
-    }
+                # jv is appended last to match the key order in working_extend.archive.yaml
+                nomad_map[(substrate_id, device_id)]["data"]["jv"] = {
+                    "light_spectra": "AM 1.5G",
+                    #"default_Voc": "nan",
+                    #"default_Jsc": "nan",
+                    #"default_FF": "nan",
+                    #"default_PCE": "nan",
+                }
 
-    logger.info(f"Generated NOMAD metadata for experiment {experiment_id}")
+                logger.info(f"Generated NOMAD metadata for experiment {experiment_id}")
 
-    return nomad_data
+    logger.info(f"Packed NOMAD metadata into {len(nomad_map)} device entries")
+    return nomad_map
 
 
 def upload_to_nomad(

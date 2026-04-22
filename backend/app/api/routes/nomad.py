@@ -121,7 +121,7 @@ class NomadUploadRequest(BaseModel):
 
 class NomadMetadataPreview(BaseModel):
     """Preview of NOMAD metadata."""
-    metadata_json: dict[str, Any]
+    metadata_json: dict[tuple[str, str], dict[str, Any]]
     metadata_yaml: str  # YAML serialization of perovskite solar cell metadata
     yaml_content: str  # YAML serialization for upload file organization
     file_count: int
@@ -240,7 +240,6 @@ def preview_nomad_metadata(
         # Convert perovskite solar cell metadata to YAML (strings quoted, nan as string)
         metadata_yaml = yaml.dump(metadata_json, Dumper=_QuotedDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
         
-        logger.info(f"Generated metadata preview with keys: {list(metadata_json.get('data', {}).keys())}")
         
         preview = NomadMetadataPreview(
             metadata_json=metadata_json,

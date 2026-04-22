@@ -393,7 +393,7 @@ export function AppLayout() {
       </AppShell.Header>
 
       <AppShell.Aside>
-        <Stack align="center" justify="center" h="100%" py="md" gap="xs">
+        <Stack align="center" justify="top" h="100%" py="md" gap="xs">
           {pages.map((page) => {
             const Icon = pageIcons[page.value as keyof typeof pageIcons]
             const active = currentPage === page.value
