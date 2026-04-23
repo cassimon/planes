@@ -30,6 +30,8 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCopy,
+  IconDownload,
+  IconFileText,
   IconFlask,
   IconInfoCircle,
   IconLayersLinked,
@@ -40,7 +42,7 @@ import {
   IconUpload,
   IconX,
 } from "@tabler/icons-react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   type DeviceArchitecture,
@@ -954,6 +956,803 @@ function ParameterVariationTab({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Summary Tab (read-only experiment protocol)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SummaryTab({
+  experiment,
+  materials,
+  solutions,
+}: {
+  experiment: Experiment
+  materials: Array<{ id: string; name: string }>
+  solutions: Array<{ id: string; name: string }>
+}) {
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [isExportingDocx, setIsExportingDocx] = useState(false)
+
+  const typeMap: Record<string, string> = {
+    etl: "ETL",
+    htl: "HTL",
+    perovskite: "Absorber",
+    additional: "Additional",
+    back_contact: "Back Contact",
+  }
+
+  const formatParamLabel = (key: ProcessParameterKey) => {
+    const found = PROCESS_PARAMETER_DEFINITIONS.find((d) => d.key === key)
+    return found?.label ?? key
+  }
+
+  const formatParamValue = (key: ProcessParameterKey, value: string) => {
+    const def = PROCESS_PARAMETER_DEFINITIONS.find((d) => d.key === key)
+    return def?.unit ? `${value} ${def.unit}` : value
+  }
+
+  const variationByLayer = experiment.layers
+    .map((layer) => {
+      const variedParamKeys = PROCESS_PARAMETER_DEFINITIONS.filter(
+        ({ key }) => layer[key]?.mode === "variation",
+      ).map(({ key }) => key)
+
+      return {
+        layer,
+        variedParamKeys,
+      }
+    })
+    .filter(({ variedParamKeys }) => variedParamKeys.length > 0)
+
+  const materialNameById = new Map(materials.map((m) => [m.id, m.name]))
+  const solutionNameById = new Map(solutions.map((s) => [s.id, s.name]))
+
+  const summaryFileBaseName = useMemo(() => {
+    const fallback = "experiment-summary"
+    const raw = (experiment.name || fallback).trim().toLowerCase()
+    const sanitized = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    return sanitized || fallback
+  }, [experiment.name])
+
+  const metadataItems = useMemo(
+    () => [
+      ["Name", experiment.name || "Untitled Experiment"],
+      ["Description", experiment.description?.trim() || "No description provided."],
+      ["Fabrication Date", experiment.date || "Not set"],
+      ["End Date", experiment.endDate || "Not set"],
+      ["Architecture", experiment.architecture],
+      ["Device Type", experiment.deviceType],
+      ["Device Area", `${experiment.deviceArea} cm²`],
+    ],
+    [
+      experiment.architecture,
+      experiment.date,
+      experiment.description,
+      experiment.deviceArea,
+      experiment.deviceType,
+      experiment.endDate,
+      experiment.name,
+    ],
+  )
+
+  const targetStackItems = useMemo(
+    () => [
+      [
+        "Target Stack",
+        `${experiment.substrateMaterial}${
+          experiment.layers.length > 0
+            ? ` | ${experiment.layers.map((l) => l.name).join(" | ")} |`
+            : ""
+        }`,
+      ],
+      ["Number of Substrates", String(experiment.substrates.length)],
+      [
+        "Substrate Names",
+        experiment.substrates.length > 0
+          ? experiment.substrates.map((s) => s.name).join(", ")
+          : "No substrates defined.",
+      ],
+      [
+        "Substrate Dimensions",
+        `${experiment.substrateWidth} cm x ${experiment.substrateLength} cm`,
+      ],
+      ["Devices per Substrate", String(experiment.devicesPerSubstrate)],
+    ],
+    [
+      experiment.devicesPerSubstrate,
+      experiment.layers,
+      experiment.substrateLength,
+      experiment.substrateMaterial,
+      experiment.substrateWidth,
+      experiment.substrates,
+    ],
+  )
+
+  const cleaningSteps = useMemo(
+    () => [
+      "Label all substrates according to the substrate name list above.",
+      `Prepare the cleaning setup appropriate for ${experiment.substrateMaterial} and verify all solvents and containers are clean.`,
+      "Perform the full cleaning sequence for each substrate (for example: rinse, sonication, drying, and any surface activation used in your lab SOP).",
+      "Keep cleaned substrates in a clean, dust-free environment until coating starts.",
+    ],
+    [experiment.substrateMaterial],
+  )
+
+  const layerInstructions = useMemo(
+    () =>
+      experiment.layers.map((layer, index) => {
+        const constantParams = PROCESS_PARAMETER_DEFINITIONS.filter(
+          ({ key }) => layer[key]?.value && layer[key]?.mode !== "variation",
+        )
+        const variedParams = PROCESS_PARAMETER_DEFINITIONS.filter(
+          ({ key }) => layer[key]?.mode === "variation",
+        )
+
+        return {
+          index,
+          layer,
+          constantParams,
+          variedParams,
+          materialName: layer.materialId
+            ? materialNameById.get(layer.materialId) || "Unknown"
+            : "Not assigned",
+          solutionName: layer.solutionId
+            ? solutionNameById.get(layer.solutionId) || "Unknown"
+            : "Not assigned",
+        }
+      }),
+    [experiment.layers, materialNameById, solutionNameById],
+  )
+
+  const protocolText = useMemo(() => {
+    const lines: string[] = []
+
+    lines.push("Experiment Summary Protocol")
+    lines.push("")
+
+    lines.push("1. Experiment Metadata")
+    metadataItems.forEach(([label, value]) => {
+      lines.push(`${label}: ${value}`)
+    })
+    lines.push("")
+
+    lines.push("2. Target Stack And Substrates")
+    targetStackItems.forEach(([label, value]) => {
+      lines.push(`${label}: ${value}`)
+    })
+    lines.push("")
+
+    lines.push("3. Substrate Cleaning Instructions")
+    cleaningSteps.forEach((step, idx) => {
+      lines.push(`${idx + 1}. ${step}`)
+    })
+    lines.push(
+      "Note: This summary intentionally does not override lab-specific safety and cleaning SOP details.",
+    )
+    lines.push("")
+
+    lines.push("4. Layer Coating Procedure (Step-by-Step)")
+    if (layerInstructions.length === 0) {
+      lines.push(
+        "No layers defined yet. Add layers in Layer Stack and Assign Parameters.",
+      )
+    } else {
+      layerInstructions.forEach(
+        ({ index, layer, constantParams, variedParams, materialName, solutionName }) => {
+          const layerType = layer.layerType
+            ? ` (${typeMap[layer.layerType] ?? layer.layerType})`
+            : ""
+          lines.push(`Step ${index + 1}: Coat ${layer.name}${layerType}`)
+          lines.push(
+            `Use this step to deposit the ${layer.name} layer on all cleaned substrates.`,
+          )
+          lines.push(`Material: ${materialName}`)
+          lines.push(`Solution: ${solutionName}`)
+
+          if (constantParams.length > 0) {
+            lines.push("Constant Parameters:")
+            constantParams.forEach(({ key }) => {
+              lines.push(
+                `- ${formatParamLabel(key)}: ${formatParamValue(
+                  key,
+                  layer[key]?.value || "",
+                )}`,
+              )
+            })
+          } else {
+            lines.push("No constant parameters specified for this layer.")
+          }
+
+          if (variedParams.length > 0) {
+            lines.push(
+              "Parameter variation is defined for this layer. See variation tables below.",
+            )
+          }
+
+          if (layer.notes?.trim()) {
+            lines.push(`Notes: ${layer.notes}`)
+          }
+
+          lines.push("")
+        },
+      )
+    }
+
+    lines.push("5. Parameter Variation Tables")
+    if (variationByLayer.length === 0) {
+      lines.push("No parameter variations are currently defined.")
+    } else {
+      variationByLayer.forEach(({ layer, variedParamKeys }) => {
+        lines.push(`${layer.name} variation matrix`)
+        const headers = [
+          "Substrate",
+          ...variedParamKeys.map((paramKey) => formatParamLabel(paramKey)),
+        ]
+        const rows = experiment.substrates.map((substrate) => [
+          substrate.name,
+          ...variedParamKeys.map(
+            (paramKey) =>
+              substrate.parameterValues?.[`${layer.id}:${paramKey}`] || "-",
+          ),
+        ])
+        const widths = headers.map((header, colIndex) =>
+          Math.max(
+            header.length,
+            ...rows.map((row) => (row[colIndex] || "").length),
+          ),
+        )
+        const formatRow = (row: string[]) =>
+          row.map((cell, i) => cell.padEnd(widths[i], " ")).join(" | ")
+
+        lines.push(formatRow(headers))
+        lines.push(widths.map((w) => "-".repeat(w)).join("-+-"))
+        rows.forEach((row) => {
+          lines.push(formatRow(row))
+        })
+        lines.push("")
+      })
+    }
+
+    return lines.join("\n")
+  }, [
+    cleaningSteps,
+    experiment.substrates,
+    layerInstructions,
+    metadataItems,
+    targetStackItems,
+    typeMap,
+    variationByLayer,
+  ])
+
+  const triggerDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportAsPdf = async () => {
+    try {
+      setIsExportingPdf(true)
+      const { jsPDF } = await import("jspdf")
+      const doc = new jsPDF({ unit: "pt", format: "a4" })
+      const margin = 42
+      const lineHeight = 14
+      const pageWidth = doc.internal.pageSize.getWidth()
+      const pageHeight = doc.internal.pageSize.getHeight()
+      const maxTextWidth = pageWidth - margin * 2
+      const lines = doc.splitTextToSize(protocolText, maxTextWidth)
+
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(11)
+
+      let y = margin
+      lines.forEach((line: string) => {
+        if (y > pageHeight - margin) {
+          doc.addPage()
+          y = margin
+        }
+        doc.text(line, margin, y)
+        y += lineHeight
+      })
+
+      doc.save(`${summaryFileBaseName}.pdf`)
+    } catch (error) {
+      console.error("Failed to export PDF summary", error)
+      window.alert("Failed to export PDF. Please try again.")
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
+
+  const exportAsDocx = async () => {
+    try {
+      setIsExportingDocx(true)
+      const docx = await import("docx")
+      const children: any[] = []
+
+      children.push(
+        new docx.Paragraph({
+          text: "Experiment Summary Protocol",
+          heading: docx.HeadingLevel.TITLE,
+        }),
+      )
+
+      children.push(
+        new docx.Paragraph({
+          text: "1. Experiment Metadata",
+          heading: docx.HeadingLevel.HEADING_2,
+        }),
+      )
+      metadataItems.forEach(([label, value]) => {
+        children.push(
+          new docx.Paragraph({
+            children: [
+              new docx.TextRun({ text: `${label}: `, bold: true }),
+              new docx.TextRun(String(value)),
+            ],
+          }),
+        )
+      })
+
+      children.push(
+        new docx.Paragraph({
+          text: "2. Target Stack And Substrates",
+          heading: docx.HeadingLevel.HEADING_2,
+        }),
+      )
+      targetStackItems.forEach(([label, value]) => {
+        children.push(
+          new docx.Paragraph({
+            children: [
+              new docx.TextRun({ text: `${label}: `, bold: true }),
+              new docx.TextRun(String(value)),
+            ],
+          }),
+        )
+      })
+
+      children.push(
+        new docx.Paragraph({
+          text: "3. Substrate Cleaning Instructions",
+          heading: docx.HeadingLevel.HEADING_2,
+        }),
+      )
+      cleaningSteps.forEach((step, idx) => {
+        children.push(new docx.Paragraph({ text: `${idx + 1}. ${step}` }))
+      })
+      children.push(
+        new docx.Paragraph({
+          text: "Note: This summary intentionally does not override lab-specific safety and cleaning SOP details.",
+        }),
+      )
+
+      children.push(
+        new docx.Paragraph({
+          text: "4. Layer Coating Procedure (Step-by-Step)",
+          heading: docx.HeadingLevel.HEADING_2,
+        }),
+      )
+      if (layerInstructions.length === 0) {
+        children.push(
+          new docx.Paragraph({
+            text: "No layers defined yet. Add layers in Layer Stack and Assign Parameters.",
+          }),
+        )
+      } else {
+        layerInstructions.forEach(
+          ({ index, layer, constantParams, variedParams, materialName, solutionName }) => {
+            const layerType = layer.layerType
+              ? ` (${typeMap[layer.layerType] ?? layer.layerType})`
+              : ""
+            children.push(
+              new docx.Paragraph({
+                text: `Step ${index + 1}: Coat ${layer.name}${layerType}`,
+                heading: docx.HeadingLevel.HEADING_3,
+              }),
+            )
+            children.push(
+              new docx.Paragraph({
+                text: `Use this step to deposit the ${layer.name} layer on all cleaned substrates.`,
+              }),
+            )
+            children.push(new docx.Paragraph({ text: `Material: ${materialName}` }))
+            children.push(new docx.Paragraph({ text: `Solution: ${solutionName}` }))
+
+            if (constantParams.length > 0) {
+              children.push(
+                new docx.Paragraph({
+                  children: [new docx.TextRun({ text: "Constant Parameters", bold: true })],
+                }),
+              )
+              constantParams.forEach(({ key }) => {
+                children.push(
+                  new docx.Paragraph({
+                    text: `- ${formatParamLabel(key)}: ${formatParamValue(
+                      key,
+                      layer[key]?.value || "",
+                    )}`,
+                  }),
+                )
+              })
+            } else {
+              children.push(
+                new docx.Paragraph({
+                  text: "No constant parameters specified for this layer.",
+                }),
+              )
+            }
+
+            if (variedParams.length > 0) {
+              children.push(
+                new docx.Paragraph({
+                  text: "Parameter variation is defined for this layer. See variation tables below.",
+                }),
+              )
+            }
+
+            if (layer.notes?.trim()) {
+              children.push(new docx.Paragraph({ text: `Notes: ${layer.notes}` }))
+            }
+          },
+        )
+      }
+
+      children.push(
+        new docx.Paragraph({
+          text: "5. Parameter Variation Tables",
+          heading: docx.HeadingLevel.HEADING_2,
+        }),
+      )
+      if (variationByLayer.length === 0) {
+        children.push(
+          new docx.Paragraph({ text: "No parameter variations are currently defined." }),
+        )
+      } else {
+        variationByLayer.forEach(({ layer, variedParamKeys }) => {
+          children.push(
+            new docx.Paragraph({
+              text: `${layer.name} variation matrix`,
+              heading: docx.HeadingLevel.HEADING_3,
+            }),
+          )
+
+          const headerCells = [
+            new docx.TableCell({
+              children: [new docx.Paragraph({ text: "Substrate" })],
+            }),
+            ...variedParamKeys.map(
+              (paramKey) =>
+                new docx.TableCell({
+                  children: [new docx.Paragraph({ text: formatParamLabel(paramKey) })],
+                }),
+            ),
+          ]
+
+          const rows = [
+            new docx.TableRow({ children: headerCells }),
+            ...experiment.substrates.map(
+              (substrate) =>
+                new docx.TableRow({
+                  children: [
+                    new docx.TableCell({
+                      children: [new docx.Paragraph({ text: substrate.name })],
+                    }),
+                    ...variedParamKeys.map(
+                      (paramKey) =>
+                        new docx.TableCell({
+                          children: [
+                            new docx.Paragraph({
+                              text:
+                                substrate.parameterValues?.[
+                                  `${layer.id}:${paramKey}`
+                                ] || "-",
+                            }),
+                          ],
+                        }),
+                    ),
+                  ],
+                }),
+            ),
+          ]
+
+          children.push(
+            new docx.Table({
+              width: { size: 100, type: docx.WidthType.PERCENTAGE },
+              rows,
+            }),
+          )
+          children.push(new docx.Paragraph({ text: "" }))
+        })
+      }
+
+      const document = new docx.Document({ sections: [{ children }] })
+      const blob = await docx.Packer.toBlob(document)
+      triggerDownload(blob, `${summaryFileBaseName}.docx`)
+    } catch (error) {
+      console.error("Failed to export DOCX summary", error)
+      window.alert("Failed to export DOCX. Please try again.")
+    } finally {
+      setIsExportingDocx(false)
+    }
+  }
+
+  return (
+    <Stack gap="md">
+      <Paper withBorder p="md" radius="md">
+        <Group justify="space-between" align="flex-start" gap="sm">
+          <Box>
+            <Text size="sm" fw={700} mb="xs">
+              Experiment Summary Protocol (Read-Only)
+            </Text>
+            <Text size="xs" c="dimmed">
+              This section auto-generates a non-editable protocol from your current
+              experiment definition.
+            </Text>
+          </Box>
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconDownload size={14} />}
+              onClick={exportAsPdf}
+              loading={isExportingPdf}
+            >
+              Export PDF
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
+              leftSection={<IconDownload size={14} />}
+              onClick={exportAsDocx}
+              loading={isExportingDocx}
+            >
+              Export DOCX
+            </Button>
+          </Group>
+        </Group>
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={700} mb="sm">
+          1. Experiment Metadata
+        </Text>
+        <Stack gap={4}>
+          {metadataItems.map(([label, value]) => (
+            <Text size="sm" key={label}>
+              <Text span fw={600}>
+                {label}:
+              </Text>{" "}
+              {value}
+            </Text>
+          ))}
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={700} mb="sm">
+          2. Target Stack And Substrates
+        </Text>
+        <Stack gap={4}>
+          {targetStackItems.map(([label, value]) => (
+            <Text size="sm" key={label}>
+              <Text span fw={600}>
+                {label}:
+              </Text>{" "}
+              {value}
+            </Text>
+          ))}
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={700} mb="sm">
+          3. Substrate Cleaning Instructions
+        </Text>
+        <Stack gap={6}>
+          {cleaningSteps.map((step, idx) => (
+            <Text size="sm" key={`cleaning-${idx + 1}`}>
+              {idx + 1}. {step}
+            </Text>
+          ))}
+          <Text size="sm" c="dimmed">
+            Note: This summary intentionally does not override lab-specific safety and cleaning SOP details.
+          </Text>
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={700} mb="sm">
+          4. Layer Coating Procedure (Step-by-Step)
+        </Text>
+
+        {experiment.layers.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            No layers defined yet. Add layers in Layer Stack and Assign Parameters.
+          </Text>
+        ) : (
+          <Stack gap="md">
+            {layerInstructions.map(
+              ({
+                index,
+                layer,
+                constantParams,
+                variedParams,
+                materialName,
+                solutionName,
+              }) => {
+                return (
+                <Paper
+                  key={layer.id}
+                  withBorder
+                  p="sm"
+                  radius="sm"
+                  style={{ background: "var(--mantine-color-gray-0)" }}
+                >
+                  <Text size="sm" fw={700}>
+                    Step {index + 1}: Coat {layer.name}
+                    {layer.layerType
+                      ? ` (${typeMap[layer.layerType] ?? layer.layerType})`
+                      : ""}
+                  </Text>
+
+                  <Text size="sm" mt={4}>
+                    Use this step to deposit the {layer.name} layer on all
+                    cleaned substrates.
+                  </Text>
+
+                  <Stack gap={2} mt="xs">
+                    <Text size="sm">
+                      <Text span fw={600}>
+                        Material:
+                      </Text>{" "}
+                      {materialName}
+                    </Text>
+                    <Text size="sm">
+                      <Text span fw={600}>
+                        Solution:
+                      </Text>{" "}
+                      {solutionName}
+                    </Text>
+                    {constantParams.length > 0 ? (
+                      <>
+                        <Text size="sm" fw={600} mt={4}>
+                          Constant Parameters
+                        </Text>
+                        {constantParams.map(({ key }) => (
+                          <Text size="sm" key={`${layer.id}:${key}`}>
+                            - {formatParamLabel(key)}: {formatParamValue(key, layer[key]?.value || "")}
+                          </Text>
+                        ))}
+                      </>
+                    ) : (
+                      <Text size="sm" c="dimmed" mt={4}>
+                        No constant parameters specified for this layer.
+                      </Text>
+                    )}
+
+                    {variedParams.length > 0 && (
+                      <Text size="sm" mt={4} c="blue.7">
+                        Parameter variation is defined for this layer. See variation tables below.
+                      </Text>
+                    )}
+
+                    {layer.notes?.trim() && (
+                      <Text size="sm" mt={4}>
+                        <Text span fw={600}>
+                          Notes:
+                        </Text>{" "}
+                        {layer.notes}
+                      </Text>
+                    )}
+                  </Stack>
+                </Paper>
+                )
+              },
+            )}
+          </Stack>
+        )}
+      </Paper>
+
+      <Paper withBorder p="md" radius="md">
+        <Text size="sm" fw={700} mb="sm">
+          5. Parameter Variation Tables
+        </Text>
+
+        {variationByLayer.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            No parameter variations are currently defined.
+          </Text>
+        ) : (
+          <Stack gap="md">
+            {variationByLayer.map(({ layer, variedParamKeys }) => (
+              <Box key={layer.id}>
+                <Text size="sm" fw={600} mb="xs">
+                  {layer.name} variation matrix
+                </Text>
+                <Box style={{ overflowX: "auto" }}>
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse: "collapse",
+                      fontSize: "14px",
+                    }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          background: "var(--mantine-color-gray-1)",
+                          borderBottom: "2px solid var(--mantine-color-gray-3)",
+                        }}
+                      >
+                        <th
+                          style={{
+                            padding: "10px 8px",
+                            textAlign: "left",
+                            fontWeight: 600,
+                            minWidth: "140px",
+                          }}
+                        >
+                          Substrate
+                        </th>
+                        {variedParamKeys.map((paramKey) => (
+                          <th
+                            key={`${layer.id}:${paramKey}`}
+                            style={{
+                              padding: "10px 8px",
+                              textAlign: "left",
+                              fontWeight: 600,
+                              minWidth: "180px",
+                            }}
+                          >
+                            {formatParamLabel(paramKey)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {experiment.substrates.map((substrate) => (
+                        <tr
+                          key={`${layer.id}:${substrate.id}`}
+                          style={{
+                            borderBottom: "1px solid var(--mantine-color-gray-2)",
+                          }}
+                        >
+                          <td
+                            style={{
+                              padding: "8px",
+                              fontWeight: 600,
+                              background: "var(--mantine-color-gray-0)",
+                            }}
+                          >
+                            {substrate.name}
+                          </td>
+                          {variedParamKeys.map((paramKey) => {
+                            const value =
+                              substrate.parameterValues?.[
+                                `${layer.id}:${paramKey}`
+                              ] || "-"
+                            return (
+                              <td key={`${layer.id}:${substrate.id}:${paramKey}`} style={{ padding: "8px" }}>
+                                {value}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Box>
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </Paper>
+    </Stack>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Substrates Tab with Table Editor
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1443,6 +2242,9 @@ function ExperimentDetail({
                 Parameter Variation
               </Tabs.Tab>
             )}
+            <Tabs.Tab value="summary" leftSection={<IconFileText size={14} />}>
+              Summary
+            </Tabs.Tab>
             {experiment.deviceType !== "film" && (
               <Tabs.Tab
                 value="devicelayout"
@@ -1857,6 +2659,14 @@ function ExperimentDetail({
             <ParameterVariationTab
               experiment={experiment}
               onUpdate={onUpdate}
+            />
+          </Tabs.Panel>
+
+          <Tabs.Panel value="summary">
+            <SummaryTab
+              experiment={experiment}
+              materials={materials}
+              solutions={solutions}
             />
           </Tabs.Panel>
 
