@@ -2,7 +2,6 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import {
   createFileRoute,
   Link as RouterLink,
-  redirect,
 } from "@tanstack/react-router"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
@@ -20,7 +19,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
-import useAuth, { isLoggedIn } from "@/hooks/useAuth"
+import useAuth from "@/hooks/useAuth"
+import { isUserRegistrationEnabled, redirectIfAuthenticated } from "@/lib/auth"
 
 const formSchema = z.object({
   username: z.email(),
@@ -34,13 +34,7 @@ type FormData = z.infer<typeof formSchema>
 
 export const Route = createFileRoute("/login")({
   component: Login,
-  beforeLoad: async () => {
-    if (isLoggedIn()) {
-      throw redirect({
-        to: "/",
-      })
-    }
-  },
+  beforeLoad: redirectIfAuthenticated,
   head: () => ({
     meta: [
       {
@@ -52,6 +46,7 @@ export const Route = createFileRoute("/login")({
 
 function Login() {
   const { loginMutation } = useAuth()
+  const userRegistrationEnabled = isUserRegistrationEnabled()
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -129,12 +124,14 @@ function Login() {
             </LoadingButton>
           </div>
 
-          <div className="text-center text-sm">
-            Don't have an account yet?{" "}
-            <RouterLink to="/signup" className="underline underline-offset-4">
-              Sign up
-            </RouterLink>
-          </div>
+          {userRegistrationEnabled ? (
+            <div className="text-center text-sm">
+              Don't have an account yet?{" "}
+              <RouterLink to="/signup" className="underline underline-offset-4">
+                Sign up
+              </RouterLink>
+            </div>
+          ) : null}
         </form>
       </Form>
     </AuthLayout>

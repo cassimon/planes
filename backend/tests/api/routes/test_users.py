@@ -355,6 +355,22 @@ def test_register_user_already_exists_error(client: TestClient) -> None:
     assert r.json()["detail"] == "The user with this email already exists in the system"
 
 
+def test_register_user_disabled(client: TestClient) -> None:
+    data = {
+        "email": random_email(),
+        "password": random_lower_string(),
+        "full_name": random_lower_string(),
+    }
+    with patch("app.core.config.settings.USERS_OPEN_REGISTRATION", False):
+        r = client.post(
+            f"{settings.API_V1_STR}/users/signup",
+            json=data,
+        )
+
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Open user registration is disabled"
+
+
 def test_update_user(
     client: TestClient, superuser_token_headers: dict[str, str], db: Session
 ) -> None:

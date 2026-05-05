@@ -8,12 +8,9 @@ import {
   type UserRegister,
   UsersService,
 } from "@/client"
+import { isLoggedIn } from "@/lib/auth"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
-
-const isLoggedIn = () => {
-  return localStorage.getItem("access_token") !== null
-}
 
 const useAuth = () => {
   const navigate = useNavigate()
