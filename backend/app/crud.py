@@ -83,6 +83,11 @@ def authenticate(*, session: Session, email: str, password: str) -> User | None:
         # This ensures the response time is similar whether or not the email exists
         verify_password(password, DUMMY_HASH)
         return None
+    
+    # NOMAD OAuth users don't have passwords
+    if not db_user.hashed_password:
+        return None
+    
     verified, updated_password_hash = verify_password(password, db_user.hashed_password)
     if not verified:
         return None

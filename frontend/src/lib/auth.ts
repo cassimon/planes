@@ -73,3 +73,7 @@ const parseBooleanEnv = (value: string | undefined, fallback: boolean) => {
 export const isUserRegistrationEnabled = () => {
   return parseBooleanEnv(import.meta.env.VITE_USERS_OPEN_REGISTRATION, true)
 }
+
+export const isNomadOAuthEnabled = () => {
+  return parseBooleanEnv(import.meta.env.VITE_NOMAD_OAUTH_ENABLED, false)
+}

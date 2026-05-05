@@ -1,9 +1,10 @@
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
+import httpx
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
@@ -121,3 +122,59 @@ def recover_password_html_content(email: str, session: SessionDep) -> Any:
     return HTMLResponse(
         content=email_data.html_content, headers={"subject:": email_data.subject}
     )
+
+
+@router.get("/login/nomad/authorize")
+def nomad_oauth_authorize() -> dict[str, str]:
+    """
+    Get NOMAD OAuth authorization URL for frontend redirect.
+    """
+    if not settings.NOMAD_OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="NOMAD OAuth is not enabled"
+        )
+    
+    if not settings.NOMAD_OAUTH_CLIENT_ID:
+        raise HTTPException(
+            status_code=500,
+            detail="NOMAD OAuth client ID not configured"
+        )
+    
+    auth_url = (
+        f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/auth"
+        f"?client_id={settings.NOMAD_OAUTH_CLIENT_ID}"
+        f"&redirect_uri={settings.FRONTEND_HOST}/auth/nomad/callback"
+        f"&response_type=token"
+        f"&scope=openid"
+    )
+    
+    return {"authorization_url": auth_url}
+
+
+@router.post("/login/nomad/token")
+def nomad_oauth_token(access_token: str) -> Token:
+    """
+    Validate NOMAD OAuth token and return it as Plains bearer token.
+    The frontend gets the token from Keycloak and sends it here for validation.
+    Plains will use the same token for both its own API and NOMAD API calls.
+    """
+    if not settings.NOMAD_OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=400,
+            detail="NOMAD OAuth is not enabled"
+        )
+    
+    # Verify the token is valid
+    try:
+        claims = security.verify_nomad_token(access_token)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Token validation failed: {str(e)}"
+        )
+    
+    # Return the same token - it will be used as Bearer token for both Plains and NOMAD
+    return Token(access_token=access_token)

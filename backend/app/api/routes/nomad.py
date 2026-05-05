@@ -53,7 +53,7 @@ _QuotedDumper.add_representer(list, _represent_list_flow_if_flat)
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from app.api.deps import CurrentUser, SessionDep
+from app.api.deps import CurrentUser, SessionDep, TokenDep
 from app.core.config import settings
 from app.models import ExperimentResults
 from app.services.nomad import (
@@ -313,6 +313,7 @@ async def upload_files_for_nomad(
 async def upload_to_nomad_endpoint(
     session: SessionDep,
     current_user: CurrentUser,
+    token: TokenDep,  # Get the user's current auth token
     request_json: str = Form(...),
     archive_path: str | None = None,
     files: list[UploadFile] | None = File(None),
@@ -389,12 +390,19 @@ async def upload_to_nomad_endpoint(
             raise HTTPException(status_code=400, detail="No files or archive provided")
         
         # Get NOMAD token
-        token = get_nomad_token()
+        # If user is authenticated via NOMAD OAuth, use that token
+        # Otherwise, use global credentials
+        if current_user.nomad_sub and settings.NOMAD_OAUTH_ENABLED:
+            nomad_token = token  # Use the user's OAuth token directly
+            logger.info("Using user's NOMAD OAuth token for upload")
+        else:
+            nomad_token = get_nomad_token()
+            logger.info("Using global NOMAD credentials for upload")
         
         # Upload to NOMAD
         result = upload_to_nomad(
             zip_path=zip_path,
-            token=token,
+            token=nomad_token,
             upload_name=request.experiment_name,
         )
         

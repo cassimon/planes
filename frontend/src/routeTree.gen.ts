@@ -26,6 +26,7 @@ import { Route as GuiMaterialsRouteImport } from './routes/_gui/materials'
 import { Route as GuiExportRouteImport } from './routes/_gui/export'
 import { Route as GuiExperimentsRouteImport } from './routes/_gui/experiments'
 import { Route as GuiAnalysisRouteImport } from './routes/_gui/analysis'
+import { Route as AuthNomadCallbackRouteImport } from './routes/auth/nomad/callback'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -110,6 +111,11 @@ const GuiAnalysisRoute = GuiAnalysisRouteImport.update({
   path: '/analysis',
   getParentRoute: () => GuiRoute,
 } as any)
+const AuthNomadCallbackRoute = AuthNomadCallbackRouteImport.update({
+  id: '/auth/nomad/callback',
+  path: '/auth/nomad/callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof LayoutIndexRoute
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/auth/nomad/callback': typeof AuthNomadCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof LayoutIndexRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/admin': typeof LayoutAdminRoute
   '/items': typeof LayoutItemsRoute
   '/settings': typeof LayoutSettingsRoute
+  '/auth/nomad/callback': typeof AuthNomadCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/_layout/items': typeof LayoutItemsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
   '/_layout/': typeof LayoutIndexRoute
+  '/auth/nomad/callback': typeof AuthNomadCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/items'
     | '/settings'
+    | '/auth/nomad/callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/items'
     | '/settings'
+    | '/auth/nomad/callback'
   id:
     | '__root__'
     | '/_gui'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/_layout/items'
     | '/_layout/settings'
     | '/_layout/'
+    | '/auth/nomad/callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  AuthNomadCallbackRoute: typeof AuthNomadCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -351,6 +364,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuiAnalysisRouteImport
       parentRoute: typeof GuiRoute
     }
+    '/auth/nomad/callback': {
+      id: '/auth/nomad/callback'
+      path: '/auth/nomad/callback'
+      fullPath: '/auth/nomad/callback'
+      preLoaderRoute: typeof AuthNomadCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -400,6 +420,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  AuthNomadCallbackRoute: AuthNomadCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

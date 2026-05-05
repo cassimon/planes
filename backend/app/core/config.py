@@ -103,6 +103,10 @@ class Settings(BaseSettings):
 
     # NOMAD Configuration
     NOMAD_URL: str = "http://localhost/nomad-oasis/api/v1"
+    # NOMAD OAuth / Keycloak Configuration
+    NOMAD_KEYCLOAK_REALM_URL: str = "https://nomad-lab.eu/fairdi/keycloak/auth/realms/fairdi_nomad_prod"
+    NOMAD_OAUTH_CLIENT_ID: str | None = None  # Your Oasis client ID
+    NOMAD_OAUTH_ENABLED: bool = False  # Enable NOMAD OAuth login
     # Path to the out-of-repo credentials file (key=value format).
     # Override via the NOMAD_AUTH_FILE env var if needed.
     NOMAD_AUTH_FILE: str = _DEFAULT_NOMAD_AUTH_FILE

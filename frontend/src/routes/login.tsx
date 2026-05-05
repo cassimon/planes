@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-router"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { useState } from "react"
 
 import type { Body_login_login_access_token as AccessToken } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
@@ -19,8 +20,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
+import { Button } from "@/components/ui/button"
 import useAuth from "@/hooks/useAuth"
-import { isUserRegistrationEnabled, redirectIfAuthenticated } from "@/lib/auth"
+import { 
+  isUserRegistrationEnabled, 
+  redirectIfAuthenticated,
+  isNomadOAuthEnabled 
+} from "@/lib/auth"
 
 const formSchema = z.object({
   username: z.email(),
@@ -47,6 +53,9 @@ export const Route = createFileRoute("/login")({
 function Login() {
   const { loginMutation } = useAuth()
   const userRegistrationEnabled = isUserRegistrationEnabled()
+  const nomadOAuthEnabled = isNomadOAuthEnabled()
+  const [isLoadingNomad, setIsLoadingNomad] = useState(false)
+  
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -60,6 +69,23 @@ function Login() {
   const onSubmit = (data: FormData) => {
     if (loginMutation.isPending) return
     loginMutation.mutate(data)
+  }
+
+  const handleNomadLogin = async () => {
+    setIsLoadingNomad(true)
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/v1/login/nomad/authorize`
+      )
+      const data = await response.json()
+      
+      if (data.authorization_url) {
+        window.location.href = data.authorization_url
+      }
+    } catch (error) {
+      console.error("Failed to get NOMAD authorization URL:", error)
+      setIsLoadingNomad(false)
+    }
   }
 
   return (
@@ -122,6 +148,30 @@ function Login() {
             <LoadingButton type="submit" loading={loginMutation.isPending}>
               Log In
             </LoadingButton>
+            
+            {nomadOAuthEnabled && (
+              <>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Or continue with
+                    </span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleNomadLogin}
+                  disabled={isLoadingNomad}
+                >
+                  {isLoadingNomad ? "Redirecting..." : "Login with NOMAD"}
+                </Button>
+              </>
+            )}
           </div>
 
           {userRegistrationEnabled ? (
