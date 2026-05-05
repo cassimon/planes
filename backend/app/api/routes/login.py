@@ -4,6 +4,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 import httpx
 
 from app import crud
@@ -124,57 +125,85 @@ def recover_password_html_content(email: str, session: SessionDep) -> Any:
     )
 
 
+class NomadAuthorizeParams(BaseModel):
+    realm_url: str
+    client_id: str
+    redirect_uri: str
+
+
+class NomadExchangeRequest(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
+
+
 @router.get("/login/nomad/authorize")
-def nomad_oauth_authorize() -> dict[str, str]:
+def nomad_oauth_authorize() -> NomadAuthorizeParams:
     """
-    Get NOMAD OAuth authorization URL for frontend redirect.
+    Return the Keycloak realm URL, client_id and redirect_uri so the frontend
+    can build a proper Authorization Code + PKCE request.  The frontend is
+    responsible for generating state, nonce and the code_verifier/challenge.
     """
     if not settings.NOMAD_OAUTH_ENABLED:
         raise HTTPException(
             status_code=400,
             detail="NOMAD OAuth is not enabled"
         )
-    
-    if not settings.NOMAD_OAUTH_CLIENT_ID:
-        raise HTTPException(
-            status_code=500,
-            detail="NOMAD OAuth client ID not configured"
-        )
-    
-    auth_url = (
-        f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/auth"
-        f"?client_id={settings.NOMAD_OAUTH_CLIENT_ID}"
-        f"&redirect_uri={settings.FRONTEND_HOST}/auth/nomad/callback"
-        f"&response_type=token"
-        f"&scope=openid"
+
+    return NomadAuthorizeParams(
+        realm_url=settings.NOMAD_KEYCLOAK_REALM_URL,
+        client_id=settings.NOMAD_OAUTH_CLIENT_ID,
+        redirect_uri=f"{settings.FRONTEND_HOST}/auth/nomad/callback",
     )
-    
-    return {"authorization_url": auth_url}
 
 
-@router.post("/login/nomad/token")
-def nomad_oauth_token(access_token: str) -> Token:
+@router.post("/login/nomad/exchange")
+def nomad_oauth_exchange(body: NomadExchangeRequest) -> Token:
     """
-    Validate NOMAD OAuth token and return it as Plains bearer token.
-    The frontend gets the token from Keycloak and sends it here for validation.
-    Plains will use the same token for both its own API and NOMAD API calls.
+    Exchange a Keycloak authorization code (+ PKCE code_verifier) for an
+    access token.  Plains re-uses the Keycloak access token as its own bearer
+    token so that the NOMAD upload service can forward it when needed.
     """
     if not settings.NOMAD_OAUTH_ENABLED:
         raise HTTPException(
             status_code=400,
             detail="NOMAD OAuth is not enabled"
         )
-    
-    # Verify the token is valid
+
+    # Exchange code at Keycloak token endpoint
     try:
-        claims = security.verify_nomad_token(access_token)
-    except HTTPException:
-        raise
-    except Exception as e:
+        resp = httpx.post(
+            f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": body.code,
+                "code_verifier": body.code_verifier,
+                "redirect_uri": body.redirect_uri,
+                "client_id": settings.NOMAD_OAUTH_CLIENT_ID,
+            },
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
         raise HTTPException(
             status_code=401,
-            detail=f"Token validation failed: {str(e)}"
+            detail=f"Keycloak token exchange failed: {e.response.text}"
         )
-    
-    # Return the same token - it will be used as Bearer token for both Plains and NOMAD
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not reach Keycloak: {str(e)}"
+        )
+
+    token_data = resp.json()
+    access_token = token_data.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=401,
+            detail="No access_token in Keycloak response"
+        )
+
+    # Validate the token locally via JWKS — ensures it wasn't tampered with
+    security.verify_nomad_token(access_token)
+
     return Token(access_token=access_token)

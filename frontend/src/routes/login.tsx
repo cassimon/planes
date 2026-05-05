@@ -74,16 +74,52 @@ function Login() {
   const handleNomadLogin = async () => {
     setIsLoadingNomad(true)
     try {
+      // Fetch base params from backend (realm URL, client_id, redirect_uri)
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/api/v1/login/nomad/authorize`
       )
-      const data = await response.json()
-      
-      if (data.authorization_url) {
-        window.location.href = data.authorization_url
-      }
+      if (!response.ok) throw new Error("Failed to get authorize params")
+      const { realm_url, client_id, redirect_uri } = await response.json()
+
+      // --- PKCE (RFC 7636) ---
+      // Generate a cryptographically random code_verifier
+      const verifierBytes = new Uint8Array(96)
+      crypto.getRandomValues(verifierBytes)
+      const code_verifier = btoa(String.fromCharCode(...verifierBytes))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+
+      // Compute SHA-256 of verifier → base64url = code_challenge
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(code_verifier),
+      )
+      const code_challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
+
+      // CSRF state + nonce for replay protection
+      const state = crypto.randomUUID()
+      const nonce = crypto.randomUUID()
+
+      // Persist for the callback page (same origin, clears on tab close)
+      sessionStorage.setItem("nomad_state", state)
+      sessionStorage.setItem("nomad_code_verifier", code_verifier)
+      sessionStorage.setItem("nomad_redirect_uri", redirect_uri)
+
+      // Build authorize URL identical to real NOMAD Oasis
+      const params = new URLSearchParams({
+        client_id,
+        redirect_uri,
+        state,
+        response_mode: "fragment",
+        response_type: "code",
+        scope: "openid",
+        nonce,
+        code_challenge,
+        code_challenge_method: "S256",
+      })
+      window.location.href = `${realm_url}/protocol/openid-connect/auth?${params}`
     } catch (error) {
-      console.error("Failed to get NOMAD authorization URL:", error)
+      console.error("Failed to initiate NOMAD login:", error)
       setIsLoadingNomad(false)
     }
   }

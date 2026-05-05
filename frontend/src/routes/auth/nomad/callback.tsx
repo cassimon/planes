@@ -10,39 +10,66 @@ function NomadCallback() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Extract access token from URL fragment (implicit flow)
+    // Keycloak returns the authorization code in the URL fragment when
+    // response_mode=fragment is used.  Parse it before the hash is cleared.
     const hash = window.location.hash.substring(1)
     const params = new URLSearchParams(hash)
-    const accessToken = params.get("access_token")
 
-    if (accessToken) {
-      // Send token to backend for validation and user creation
-      fetch(`${import.meta.env.VITE_API_URL}/api/v1/login/nomad/token`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ access_token: accessToken }),
-      })
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error("Token validation failed")
-          }
-          return response.json()
-        })
-        .then((data) => {
-          // Store the token
-          localStorage.setItem("access_token", data.access_token)
-          // Redirect to home
-          navigate({ to: "/" })
-        })
-        .catch((err) => {
-          console.error("Failed to validate NOMAD token:", err)
-          setError("Authentication failed. Please try again.")
-        })
-    } else {
-      setError("No access token received from NOMAD.")
+    const code = params.get("code")
+    const returnedState = params.get("state")
+
+    // --- CSRF state check ---
+    const storedState = sessionStorage.getItem("nomad_state")
+    if (!returnedState || returnedState !== storedState) {
+      setError("Invalid state parameter — possible CSRF attack. Please try again.")
+      sessionStorage.removeItem("nomad_state")
+      sessionStorage.removeItem("nomad_code_verifier")
+      sessionStorage.removeItem("nomad_redirect_uri")
+      return
     }
+
+    const code_verifier = sessionStorage.getItem("nomad_code_verifier")
+    const redirect_uri = sessionStorage.getItem("nomad_redirect_uri")
+
+    // Clean up session storage now that we've read the values
+    sessionStorage.removeItem("nomad_state")
+    sessionStorage.removeItem("nomad_code_verifier")
+    sessionStorage.removeItem("nomad_redirect_uri")
+
+    if (!code) {
+      const errorDesc = params.get("error_description") ?? params.get("error") ?? "No authorization code received."
+      setError(errorDesc)
+      return
+    }
+
+    if (!code_verifier || !redirect_uri) {
+      setError("Missing PKCE session data. Please start the login flow again.")
+      return
+    }
+
+    // Exchange the authorization code for a token via our backend.
+    // The backend calls Keycloak's token endpoint and validates the result.
+    fetch(`${import.meta.env.VITE_API_URL}/api/v1/login/nomad/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, code_verifier, redirect_uri }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          return response.json().then((body) => {
+            throw new Error(body?.detail ?? "Token exchange failed")
+          })
+        }
+        return response.json()
+      })
+      .then((data) => {
+        localStorage.setItem("access_token", data.access_token)
+        navigate({ to: "/" })
+      })
+      .catch((err: Error) => {
+        console.error("NOMAD token exchange failed:", err)
+        setError(err.message ?? "Authentication failed. Please try again.")
+      })
   }, [navigate])
 
   if (error) {

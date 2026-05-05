@@ -1,9 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from functools import lru_cache
 
 import jwt
-import httpx
+from jwt import PyJWKClient
 from fastapi import HTTPException
 from pwdlib import PasswordHash
 from pwdlib.hashers.argon2 import Argon2Hasher
@@ -18,8 +17,21 @@ password_hash = PasswordHash(
     )
 )
 
-
 ALGORITHM = "HS256"
+
+# Module-level JWKS client — PyJWKClient handles key caching and rotation internally.
+# Instantiated lazily on first use so it doesn't fire on import (before settings load).
+_jwks_client: PyJWKClient | None = None
+
+
+def _get_jwks_client() -> PyJWKClient:
+    global _jwks_client
+    if _jwks_client is None:
+        _jwks_client = PyJWKClient(
+            f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/certs",
+            cache_keys=True,
+        )
+    return _jwks_client
 
 
 def create_access_token(subject: str | Any, expires_delta: timedelta) -> str:
@@ -39,60 +51,37 @@ def get_password_hash(password: str) -> str:
     return password_hash.hash(password)
 
 
-@lru_cache(maxsize=1)
-def get_nomad_jwks() -> dict[str, Any]:
-    """Fetch Keycloak JWKS for token verification. Cached to avoid repeated fetches."""
-    if not settings.NOMAD_OAUTH_ENABLED:
-        return {}
-    
-    jwks_url = f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/certs"
-    try:
-        response = httpx.get(jwks_url, timeout=10.0)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to fetch NOMAD JWKS: {str(e)}"
-        )
-
-
 def verify_nomad_token(token: str) -> dict[str, Any]:
-    """Verify a Keycloak JWT and return its claims."""
+    """
+    Verify a Keycloak RS256 JWT against the central NOMAD JWKS endpoint and
+    return the decoded claims.  Raises HTTP 401 on any verification failure.
+    """
     if not settings.NOMAD_OAUTH_ENABLED:
         raise HTTPException(
             status_code=400,
-            detail="NOMAD OAuth is not enabled"
+            detail="NOMAD OAuth is not enabled",
         )
-    
-    jwks = get_nomad_jwks()
+
     issuer = settings.NOMAD_KEYCLOAK_REALM_URL
-    
     try:
-        # PyJWT with JWKS support
-        from jwt import PyJWKClient
-        
-        jwks_client = PyJWKClient(
-            f"{issuer}/protocol/openid-connect/certs",
-            cache_keys=True
-        )
+        jwks_client = _get_jwks_client()
         signing_key = jwks_client.get_signing_key_from_jwt(token)
-        
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=["RS256"],
             issuer=issuer,
-            options={"verify_aud": False}  # Oasis doesn't restrict audience
+            # nomad_public tokens carry no restricted audience claim
+            options={"verify_aud": False},
         )
         return claims
     except jwt.InvalidTokenError as e:
         raise HTTPException(
             status_code=401,
-            detail=f"Invalid NOMAD token: {str(e)}"
+            detail=f"Invalid NOMAD token: {str(e)}",
         )
     except Exception as e:
         raise HTTPException(
             status_code=401,
-            detail=f"Token verification failed: {str(e)}"
+            detail=f"Token verification failed: {str(e)}",
         )
