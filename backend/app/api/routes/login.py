@@ -150,10 +150,12 @@ def nomad_oauth_authorize() -> NomadAuthorizeParams:
             detail="NOMAD OAuth is not enabled"
         )
 
+    expected_redirect_uri = f"{settings.FRONTEND_HOST.rstrip('/')}/auth/nomad/callback"
+
     return NomadAuthorizeParams(
         realm_url=settings.NOMAD_KEYCLOAK_REALM_URL,
         client_id=settings.NOMAD_OAUTH_CLIENT_ID,
-        redirect_uri=f"{settings.FRONTEND_HOST}/auth/nomad/callback",
+        redirect_uri=expected_redirect_uri,
     )
 
 
@@ -168,6 +170,13 @@ def nomad_oauth_exchange(body: NomadExchangeRequest) -> Token:
         raise HTTPException(
             status_code=400,
             detail="NOMAD OAuth is not enabled"
+        )
+
+    expected_redirect_uri = f"{settings.FRONTEND_HOST.rstrip('/')}/auth/nomad/callback"
+    if body.redirect_uri != expected_redirect_uri:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid redirect_uri for NOMAD code exchange",
         )
 
     # Exchange code at Keycloak token endpoint

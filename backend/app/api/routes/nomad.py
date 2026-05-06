@@ -72,6 +72,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nomad", tags=["nomad"])
 
 
+def _require_nomad_upload_authorized(current_user: CurrentUser) -> None:
+    """
+    Allow archive creation/upload only for users authorized to use NOMAD uploads.
+
+    When NOMAD OAuth is enabled, require an OAuth-linked user (`nomad_sub`) or
+    a superuser account. This prevents local-only users from creating server-side
+    upload archives for NOMAD.
+    """
+    if settings.NOMAD_OAUTH_ENABLED and not current_user.nomad_sub and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=403,
+            detail="NOMAD upload requires an authenticated NOMAD OAuth user",
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Request/Response Models
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,6 +289,8 @@ async def upload_files_for_nomad(
     
     Returns the archive ID for use in the upload step.
     """
+    _require_nomad_upload_authorized(current_user)
+
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
     
@@ -331,6 +348,7 @@ async def upload_to_nomad_endpoint(
     - archive_path: Path to a pre-created archive (from /upload/files)
     - files: Direct file upload
     """
+    _require_nomad_upload_authorized(current_user)
 
     try:
         request = NomadUploadRequest.model_validate_json(request_json)
@@ -342,7 +360,9 @@ async def upload_to_nomad_endpoint(
         f"Received NOMAD upload request for experiment_id: {request.experiment_id}, experiment_name: {request.experiment_name}, archive_path: {archive_path}, file_count: {len(files) if files else 0}"
     )
 
-    if not settings.nomad_enabled:
+    use_user_nomad_token = bool(settings.NOMAD_OAUTH_ENABLED and current_user.nomad_sub)
+
+    if not use_user_nomad_token and not settings.nomad_enabled:
         return NomadUploadResponse(
             success=False,
             message="NOMAD integration is not configured. Add credentials to the NOMAD auth file (../sensitive config/.nomad_auth)",
@@ -392,7 +412,7 @@ async def upload_to_nomad_endpoint(
         # Get NOMAD token
         # If user is authenticated via NOMAD OAuth, use that token
         # Otherwise, use global credentials
-        if current_user.nomad_sub and settings.NOMAD_OAUTH_ENABLED:
+        if use_user_nomad_token:
             nomad_token = token  # Use the user's OAuth token directly
             logger.info("Using user's NOMAD OAuth token for upload")
         else:

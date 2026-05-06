@@ -66,14 +66,18 @@ def verify_nomad_token(token: str) -> dict[str, Any]:
     try:
         jwks_client = _get_jwks_client()
         signing_key = jwks_client.get_signing_key_from_jwt(token)
-        claims = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            issuer=issuer,
-            # nomad_public tokens carry no restricted audience claim
-            options={"verify_aud": False},
-        )
+        decode_kwargs: dict[str, Any] = {
+            "algorithms": ["RS256"],
+            "issuer": issuer,
+        }
+        if settings.NOMAD_OAUTH_VERIFY_AUDIENCE:
+            decode_kwargs["audience"] = (
+                settings.NOMAD_OAUTH_AUDIENCE or settings.NOMAD_OAUTH_CLIENT_ID
+            )
+        else:
+            decode_kwargs["options"] = {"verify_aud": False}
+
+        claims = jwt.decode(token, signing_key.key, **decode_kwargs)
         return claims
     except jwt.InvalidTokenError as e:
         raise HTTPException(
