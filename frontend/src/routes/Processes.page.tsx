@@ -16,16 +16,24 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
 } from "@mantine/core"
 import {
+  IconAtom,
   IconChevronDown,
   IconCopy,
+  IconDroplet,
   IconInfoCircle,
+  IconLayersIntersect,
+  IconPlayerPlay,
   IconPlus,
+  IconSparkles,
+  IconSquare,
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import {
   type ProcessParam,
   PROCESS_PARAMETER_DEFINITIONS,
@@ -33,18 +41,27 @@ import {
   type ProcessParameterKey,
   type ProcessStep,
   type ProcessStepCategory,
+  newExperiment,
   newProcess,
   newProcessStep,
 } from "@/store/AppContext"
 import { useAppContext, useEntityCollection } from "@/store/AppContext"
 
-const STEP_CATEGORIES: Array<{ value: ProcessStepCategory; label: string }> = [
-  { value: "wet_deposition", label: "Wet Deposition" },
-  { value: "dry_deposition", label: "Dry Deposition" },
-  { value: "surface_treatment", label: "Surface Treatment" },
-  { value: "doping_aging", label: "Doping/Aging" },
-  { value: "substrate_preparation", label: "Substrate Preparation" },
+const STEP_CATEGORIES: Array<{ value: ProcessStepCategory; label: string; icon: React.ReactNode }> = [
+  { value: "wet_deposition", label: "Wet Deposition", icon: <IconDroplet size={14} /> },
+  { value: "dry_deposition", label: "Dry Deposition", icon: <IconLayersIntersect size={14} /> },
+  { value: "surface_treatment", label: "Surface Treatment", icon: <IconSparkles size={14} /> },
+  { value: "doping_aging", label: "Doping/Aging", icon: <IconAtom size={14} /> },
+  { value: "substrate_preparation", label: "Substrate Preparation", icon: <IconSquare size={14} /> },
 ]
+
+const STEP_CATEGORY_ICON_MAP: Record<ProcessStepCategory, React.ReactNode> = {
+  wet_deposition: <IconDroplet size={14} />,
+  dry_deposition: <IconLayersIntersect size={14} />,
+  surface_treatment: <IconSparkles size={14} />,
+  doping_aging: <IconAtom size={14} />,
+  substrate_preparation: <IconSquare size={14} />,
+}
 
 const STEP_COLOR_PALETTE = [
   "#d96c4f",
@@ -264,10 +281,13 @@ function ProcessParamInput({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ProcessesPage() {
+  const navigate = useNavigate()
+
   const {
     materials,
     processes,
     setProcesses,
+    setExperiments,
     planes,
     updateElement,
     removeCollectionRefs,
@@ -393,6 +413,12 @@ export function ProcessesPage() {
         }
       }
     }
+  }
+
+  const handleSpawnExperiment = (process: Process) => {
+    const exp = newExperiment(process.id)
+    setExperiments((prev) => [...prev, exp])
+    void navigate({ to: "/experiments" })
   }
 
   const handleDeleteProcess = (id: string) => {
@@ -775,7 +801,7 @@ export function ProcessesPage() {
           "Unnamed solution"
         )
       }
-      return "No source"
+      return "No material"
     },
     [materials, solutions],
   )
@@ -1042,15 +1068,15 @@ export function ProcessesPage() {
                   return (
                     <Paper
                       key={process.id}
-                      p="xs"
-                      radius="sm"
+                      withBorder
+                      p="sm"
+                      radius="md"
                       style={{
                         cursor: "pointer",
-                        backgroundColor: isSelected
-                          ? "var(--mantine-color-blue-0)"
-                          : "transparent",
+                        background: isSelected ? "var(--mantine-color-blue-0)" : undefined,
+                        borderColor: isSelected ? "var(--mantine-color-blue-4)" : undefined,
                         borderLeft: collectionColor
-                          ? `3px solid ${collectionColor}`
+                          ? `4px solid ${collectionColor}`
                           : undefined,
                       }}
                       onClick={() => {
@@ -1058,37 +1084,52 @@ export function ProcessesPage() {
                         setSelectedStepId(null)
                       }}
                     >
-                      <Group justify="space-between">
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <Text size="sm" fw={isSelected ? 600 : 400} truncate>
+                      <Group justify="space-between" wrap="nowrap">
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Text size="sm" fw={600} truncate mb={2}>
                             {process.name || "Untitled"}
                           </Text>
                           <Text size="xs" c="dimmed">
                             {process.stages.length} step{process.stages.length !== 1 ? "s" : ""}
                           </Text>
-                        </div>
-                        <Menu shadow="md" width={160}>
-                          <Menu.Target>
-                            <ActionIcon size="sm" variant="subtle" color="gray">
-                              <IconChevronDown size={14} />
+                        </Box>
+                        <Group gap={2} wrap="nowrap">
+                          <Tooltip label="New experiment" withArrow>
+                            <ActionIcon
+                              size="sm"
+                              variant="subtle"
+                              color="green"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSpawnExperiment(process)
+                              }}
+                            >
+                              <IconPlayerPlay size={14} />
                             </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            <Menu.Item
-                              leftSection={<IconCopy size={14} />}
-                              onClick={() => handleCopyProcess(process)}
-                            >
-                              Copy
-                            </Menu.Item>
-                            <Menu.Item
-                              leftSection={<IconTrash size={14} />}
-                              color="red"
-                              onClick={() => handleDeleteProcess(process.id)}
-                            >
-                              Delete
-                            </Menu.Item>
-                          </Menu.Dropdown>
-                        </Menu>
+                          </Tooltip>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="teal"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCopyProcess(process)
+                            }}
+                          >
+                            <IconCopy size={14} />
+                          </ActionIcon>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="red"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteProcess(process.id)
+                            }}
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
                       </Group>
                     </Paper>
                   )
@@ -1229,7 +1270,7 @@ export function ProcessesPage() {
                                   wrap="nowrap"
                                   style={{ flex: 1 }}
                                 >
-                                  {stage.alternatives.map((step) => (
+                                  {stage.alternatives.map((step, altIdx) => (
                                     <Box
                                       key={step.id}
                                       data-step-box="true"
@@ -1347,6 +1388,11 @@ export function ProcessesPage() {
                                       ) : (
                                         <>
                                           <Group justify="space-between" wrap="nowrap" gap="xs">
+                                            {stage.alternatives.length > 1 && (
+                                              <Text size="xs" c="dimmed" style={{ fontWeight: 700, minWidth: 16 }}>
+                                                {String.fromCharCode(97 + altIdx)}
+                                              </Text>
+                                            )}
                                             <Text size="sm" fw={600} truncate>
                                               {step.depositionMethod?.value?.trim() ||
                                                 step.name ||
@@ -1366,9 +1412,12 @@ export function ProcessesPage() {
                                             </ActionIcon>
                                           </Group>
                                           <Group justify="space-between" gap="xs" wrap="nowrap">
-                                            <Text size="xs" c="dimmed" truncate>
-                                              {step.stepCategory.replace(/_/g, " ")}
-                                            </Text>
+                                            <Group gap={4} wrap="nowrap">
+                                              {STEP_CATEGORY_ICON_MAP[step.stepCategory]}
+                                              <Text size="xs" c="dimmed" truncate>
+                                                {STEP_CATEGORIES.find(c => c.value === step.stepCategory)?.label ?? step.stepCategory.replace(/_/g, " ")}
+                                              </Text>
+                                            </Group>
                                             {countSpecifiedParams(step) > 0 && (
                                               <Badge size="xs" variant="light" color="teal">
                                                 {countSpecifiedParams(step)} params
@@ -1394,6 +1443,7 @@ export function ProcessesPage() {
                                       {STEP_CATEGORIES.map((category) => (
                                         <Menu.Item
                                           key={`alt-${stage.index}-${category.value}`}
+                                          leftSection={category.icon}
                                           onClick={() =>
                                             handleAddAlternativeStep(
                                               stage.index,
@@ -1459,6 +1509,7 @@ export function ProcessesPage() {
                           {STEP_CATEGORIES.map((category) => (
                             <Menu.Item
                               key={`next-${category.value}`}
+                              leftSection={category.icon}
                               onClick={() => handleAddProcessStep(category.value)}
                             >
                               {category.label}

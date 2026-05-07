@@ -4,6 +4,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Divider,
   Group,
   Modal,
@@ -22,7 +23,7 @@ import {
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   type Experiment,
   getExperimentStatus,
@@ -38,60 +39,81 @@ import {
 
 function SubstrateNameGenerator({
   experiment,
+  process,
+  nextStepDefaults,
+  onChangeNextStepDefault,
   onUpdate,
 }: {
   experiment: Experiment
+  process: Process
+  nextStepDefaults: Record<number, string>
+  onChangeNextStepDefault: (stageIndex: number, value: string) => void
   onUpdate: (exp: Experiment) => void
 }) {
   const [generatorName, setGeneratorName] = useState("substrate")
+  const [addCount, setAddCount] = useState(5)
+  const [includeDate, setIncludeDate] = useState(false)
+  const [includeExpName, setIncludeExpName] = useState(false)
+
+  const buildDefaultStageValues = () => {
+    const values: Record<string, string> = {}
+    process.stages.forEach((stage, idx) => {
+      const selected =
+        nextStepDefaults[idx] ?? stage.alternatives[0]?.id ?? "SKIP"
+      values[`stageSelection:${idx}`] = selected
+    })
+    return values
+  }
+
+  const buildSubstrateName = (index: number) => {
+    const parts: string[] = [generatorName || "substrate"]
+    if (includeDate && experiment.date) {
+      parts.push(experiment.date)
+    }
+    if (includeExpName && experiment.name) {
+      parts.push(experiment.name.replace(/\s+/g, "_"))
+    }
+    return `${parts.join("_")}_${index}`
+  }
 
   const handleAddOne = () => {
     const newSubstrates = [
       ...experiment.substrates,
       {
         id: crypto.randomUUID(),
-        name: `${generatorName}_${experiment.substrates.length + 1}`,
+        name: buildSubstrateName(experiment.substrates.length + 1),
+        parameterValues: buildDefaultStageValues(),
       },
     ]
-    onUpdate({ ...experiment, substrates: newSubstrates })
+    onUpdate({ ...experiment, numSubstrates: newSubstrates.length, substrates: newSubstrates })
   }
 
   const handleAddMultiple = () => {
-    modals.openConfirmModal({
-      title: "Add Multiple Substrates",
-      children: (
-        <Stack gap="md">
-          <NumberInput
-            label="How many substrates to add?"
-            defaultValue={5}
-            min={1}
-            max={100}
-            id="substrate-count-input"
-          />
-        </Stack>
-      ),
-      labels: { confirm: "Add", cancel: "Cancel" },
-      confirmProps: { color: "blue" },
-      onConfirm: () => {
-        const input = document.getElementById(
-          "substrate-count-input",
-        ) as HTMLInputElement
-        const count = parseInt(input?.value || "5", 10)
-        const newSubstrates = [
-          ...experiment.substrates,
-          ...Array.from({ length: count }, (_, i) => ({
-            id: crypto.randomUUID(),
-            name: `${generatorName}_${experiment.substrates.length + i + 1}`,
-          })),
-        ]
-        onUpdate({ ...experiment, substrates: newSubstrates })
-      },
+    const count = Math.max(1, addCount)
+    const newSubstrates = [
+      ...experiment.substrates,
+      ...Array.from({ length: count }, (_, i) => ({
+        id: crypto.randomUUID(),
+        name: buildSubstrateName(experiment.substrates.length + i + 1),
+        parameterValues: buildDefaultStageValues(),
+      })),
+    ]
+    onUpdate({
+      ...experiment,
+      numSubstrates: newSubstrates.length,
+      substrates: newSubstrates,
     })
   }
 
   return (
-    <Paper withBorder p="md" radius="md" mb="md">
-      <Group justify="space-between" align="flex-end">
+    <Paper
+      withBorder
+      p="md"
+      radius="md"
+      mb="md"
+      style={{ background: "var(--mantine-color-blue-0)" }}
+    >
+      <Group justify="space-between" align="flex-end" mb="sm">
         <Box style={{ flex: 1 }}>
           <Text size="sm" fw={600} mb="xs">
             Substrate Name Generator
@@ -104,6 +126,16 @@ function SubstrateNameGenerator({
               value={generatorName}
               onChange={(e) => setGeneratorName(e.currentTarget.value)}
               style={{ flex: 1, maxWidth: 200 }}
+            />
+            <Checkbox
+              label="Include Date"
+              checked={includeDate}
+              onChange={(e) => setIncludeDate(e.currentTarget.checked)}
+            />
+            <Checkbox
+              label="Include Experiment Name"
+              checked={includeExpName}
+              onChange={(e) => setIncludeExpName(e.currentTarget.checked)}
             />
             <Button
               size="sm"
@@ -126,6 +158,56 @@ function SubstrateNameGenerator({
         <Text size="xs" c="dimmed">
           Total: {experiment.substrates.length}
         </Text>
+      </Group>
+
+      <Divider my="sm" />
+
+      <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb="xs">
+        Default Values For Next Added Substrates
+      </Text>
+      <Group gap="sm" align="flex-end" wrap="wrap" mb="sm">
+        {process.stages.map((stage, idx) => (
+          <Select
+            key={`default-stage-${idx}`}
+            size="xs"
+            label={`Step ${idx + 1}`}
+            w={210}
+            value={nextStepDefaults[idx] ?? stage.alternatives[0]?.id ?? "SKIP"}
+            onChange={(value) =>
+              onChangeNextStepDefault(
+                idx,
+                value ?? stage.alternatives[0]?.id ?? "SKIP",
+              )
+            }
+            data={[
+              ...stage.alternatives.map((step) => ({
+                value: step.id,
+                label: step.name,
+              })),
+              { value: "SKIP", label: "Skip step" },
+            ]}
+          />
+        ))}
+      </Group>
+
+      <Group gap="sm" align="flex-end">
+        <NumberInput
+          label="Add Multiple"
+          size="sm"
+          min={1}
+          max={200}
+          value={addCount}
+          onChange={(v) => setAddCount(Number(v) || 1)}
+          style={{ width: 140 }}
+        />
+        <Button
+          size="sm"
+          variant="light"
+          leftSection={<IconPlus size={14} />}
+          onClick={handleAddMultiple}
+        >
+          Add Multiple
+        </Button>
       </Group>
     </Paper>
   )
@@ -217,18 +299,20 @@ function RecipeSelectionModal({
 function ProcessStepSelector({
   alternatives,
   selectedStepId,
+  defaultStepId,
   onSelect,
 }: {
   alternatives: ProcessStep[]
   selectedStepId: string | undefined | null
+  defaultStepId: string | null
   onSelect: (stepId: string | null) => void
 }) {
   const data = [
-    { value: "SKIP", label: "Skip this step" },
     ...alternatives.map((step) => ({
       value: step.id,
       label: step.name,
     })),
+    { value: "SKIP", label: "Skip this step" },
   ]
 
   const handleChange = (value: string | null) => {
@@ -243,7 +327,7 @@ function ProcessStepSelector({
     <Select
       placeholder="Select step..."
       data={data}
-      value={selectedStepId || "SKIP"}
+      value={selectedStepId || defaultStepId || "SKIP"}
       onChange={handleChange}
       size="xs"
       maxDropdownHeight={200}
@@ -264,33 +348,34 @@ function ExperimentGrid({
   process: Process
   onUpdate: (exp: Experiment) => void
 }) {
-  // Store selected steps per substrate per stage: { [substrateId]: { [stageIndex]: stepId | null } }
-  const [selectedSteps, setSelectedSteps] = useState<
-    { [subId: string]: { [stageIdx: number]: string | null } }
-  >({})
+  const [variationTarget, setVariationTarget] = useState<string | null>(null)
+  const [variationParam, setVariationParam] = useState<string | null>(null)
 
-  // Initialize selectedSteps from experiment data if available
-  useEffect(() => {
-    const initial: typeof selectedSteps = {}
-    experiment.substrates.forEach((sub) => {
-      initial[sub.id] = {}
-      // You could load from experiment.parameterValues or similar
-    })
-    setSelectedSteps(initial)
-  }, [experiment])
+  const getStageSelection = (substrateId: string, stageIndex: number): string | null => {
+    const substrate = experiment.substrates.find((s) => s.id === substrateId)
+    const stored = substrate?.parameterValues?.[`stageSelection:${stageIndex}`]
+    if (stored) {
+      return stored === "SKIP" ? null : stored
+    }
+    return process.stages[stageIndex]?.alternatives[0]?.id ?? null
+  }
 
   const handleStepSelect = (
     substrateId: string,
     stageIndex: number,
     stepId: string | null,
   ) => {
-    setSelectedSteps((prev) => {
-      const newStages = { ...prev[substrateId], [stageIndex]: stepId }
+    const newSubstrates = experiment.substrates.map((substrate) => {
+      if (substrate.id !== substrateId) return substrate
       return {
-        ...prev,
-        [substrateId]: newStages,
+        ...substrate,
+        parameterValues: {
+          ...(substrate.parameterValues ?? {}),
+          [`stageSelection:${stageIndex}`]: stepId ?? "SKIP",
+        },
       }
     })
+    onUpdate({ ...experiment, substrates: newSubstrates })
   }
 
   const handleRemoveSubstrate = (substrateId: string) => {
@@ -300,133 +385,225 @@ function ExperimentGrid({
     onUpdate({ ...experiment, substrates: newSubstrates })
   }
 
+  const handleProcessingTimeChange = (stageKey: string, value: string) => {
+    onUpdate({
+      ...experiment,
+      processingTimes: {
+        ...(experiment.processingTimes ?? {}),
+        [stageKey]: value,
+      },
+    })
+  }
+
   return (
-    <Box style={{ overflowX: "auto", marginBottom: "2rem" }}>
-      <table
-        style={{
-          borderCollapse: "collapse",
-          width: "100%",
-          fontSize: "14px",
-        }}
-      >
-        <thead>
-          <tr style={{ background: "var(--mantine-color-gray-1)" }}>
-            <th
-              style={{
-                padding: "12px 8px",
-                textAlign: "left",
-                fontWeight: 600,
-                borderBottom: "2px solid var(--mantine-color-gray-3)",
-                minWidth: "150px",
-              }}
-            >
-              Substrate
-            </th>
-            {process.stages.map((stage, idx) => {
-              const step = stage.alternatives[0]
-              return (
-                <th
-                  key={`stage-${idx}`}
-                  style={{
-                    padding: "12px 8px",
-                    textAlign: "left",
-                    fontWeight: 600,
-                    borderBottom: "2px solid var(--mantine-color-gray-3)",
-                    minWidth: "180px",
-                  }}
-                >
-                  <Group justify="space-between" gap="xs">
-                    <Text size="sm">{step.name}</Text>
-                    {stage.alternatives.length > 1 && (
-                      <Badge size="xs" variant="light" color="orange">
-                        {stage.alternatives.length} options
-                      </Badge>
-                    )}
-                  </Group>
-                </th>
-              )
-            })}
-            <th
-              style={{
-                padding: "12px 8px",
-                textAlign: "center",
-                fontWeight: 600,
-                borderBottom: "2px solid var(--mantine-color-gray-3)",
-                minWidth: "80px",
-              }}
-            >
-              Action
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {experiment.substrates.map((substrate) => (
-            <tr
-              key={substrate.id}
-              style={{
-                borderBottom: "1px solid var(--mantine-color-gray-2)",
-              }}
-            >
-              {/* Substrate name column */}
-              <td
+    <>
+      <Group align="flex-start" wrap="nowrap" gap="md" mb="lg">
+        <Box style={{ overflowX: "auto", flex: 1 }}>
+        <table
+          style={{
+            borderCollapse: "collapse",
+            width: "100%",
+            fontSize: "14px",
+          }}
+        >
+          <thead>
+            <tr style={{ background: "var(--mantine-color-gray-1)" }}>
+              <th
                 style={{
                   padding: "12px 8px",
-                  fontWeight: 500,
-                  background: "var(--mantine-color-gray-0)",
+                  textAlign: "left",
+                  fontWeight: 600,
+                  borderBottom: "2px solid var(--mantine-color-gray-3)",
+                  minWidth: "150px",
                 }}
               >
-                {substrate.name}
-              </td>
-
-              {/* Step selector columns */}
-              {process.stages.map((stage, stageIdx) => (
+                Substrate
+              </th>
+              {process.stages.map((stage, idx) => {
+                const step = stage.alternatives[0]
+                return (
+                  <th
+                    key={`stage-${idx}`}
+                    style={{
+                      padding: "12px 8px",
+                      textAlign: "left",
+                      fontWeight: 600,
+                      borderBottom: "2px solid var(--mantine-color-gray-3)",
+                      minWidth: "180px",
+                    }}
+                  >
+                    <Group justify="space-between" gap="xs">
+                      <Text size="sm">{step.name}</Text>
+                      {stage.alternatives.length > 1 && (
+                        <Badge size="xs" variant="light" color="orange">
+                          {stage.alternatives.length} options
+                        </Badge>
+                      )}
+                    </Group>
+                  </th>
+                )
+              })}
+              <th
+                style={{
+                  padding: "12px 8px",
+                  textAlign: "center",
+                  fontWeight: 600,
+                  borderBottom: "2px solid var(--mantine-color-gray-3)",
+                  minWidth: "80px",
+                }}
+              >
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {experiment.substrates.map((substrate) => (
+              <tr
+                key={substrate.id}
+                style={{
+                  borderBottom: "1px solid var(--mantine-color-gray-2)",
+                }}
+              >
                 <td
-                  key={`${substrate.id}-stage-${stageIdx}`}
                   style={{
-                    padding: "8px 4px",
+                    padding: "12px 8px",
+                    fontWeight: 500,
+                    background: "var(--mantine-color-gray-0)",
                   }}
                 >
-                  <ProcessStepSelector
-                    alternatives={stage.alternatives}
-                    selectedStepId={
-                      selectedSteps[substrate.id]?.[stageIdx] ?? null
-                    }
-                    onSelect={(stepId) =>
-                      handleStepSelect(substrate.id, stageIdx, stepId)
+                  {substrate.name}
+                </td>
+
+                {process.stages.map((stage, stageIdx) => (
+                  <td
+                    key={`${substrate.id}-stage-${stageIdx}`}
+                    style={{
+                      padding: "8px 4px",
+                    }}
+                  >
+                    <ProcessStepSelector
+                      alternatives={stage.alternatives}
+                      defaultStepId={stage.alternatives[0]?.id ?? null}
+                      selectedStepId={getStageSelection(substrate.id, stageIdx)}
+                      onSelect={(stepId) =>
+                        handleStepSelect(substrate.id, stageIdx, stepId)
+                      }
+                    />
+                  </td>
+                ))}
+
+                <td
+                  style={{
+                    padding: "8px 4px",
+                    textAlign: "center",
+                  }}
+                >
+                  <Tooltip label="Remove substrate">
+                    <ActionIcon
+                      size="sm"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => handleRemoveSubstrate(substrate.id)}
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                </td>
+              </tr>
+            ))}
+
+            <tr style={{ background: "var(--mantine-color-gray-0)" }}>
+              <td
+                style={{
+                  padding: "10px 8px",
+                  fontWeight: 600,
+                  borderTop: "2px solid var(--mantine-color-gray-2)",
+                }}
+              >
+                Processing Times
+              </td>
+              {process.stages.map((stage, idx) => {
+                const processingKey = `stage:${idx}`
+                return (
+                <td
+                  key={`processing-time-${stage.index}-${idx}`}
+                  style={{
+                    padding: "8px 4px",
+                    borderTop: "2px solid var(--mantine-color-gray-2)",
+                  }}
+                >
+                  <TextInput
+                    size="xs"
+                    type="datetime-local"
+                    value={experiment.processingTimes?.[processingKey] ?? ""}
+                    onChange={(e) =>
+                      handleProcessingTimeChange(processingKey, e.currentTarget.value)
                     }
                   />
                 </td>
-              ))}
-
-              {/* Remove button */}
+                )
+              })}
               <td
                 style={{
-                  padding: "8px 4px",
-                  textAlign: "center",
+                  borderTop: "2px solid var(--mantine-color-gray-2)",
                 }}
-              >
-                <Tooltip label="Remove substrate">
-                  <ActionIcon
-                    size="sm"
-                    variant="subtle"
-                    color="red"
-                    onClick={() => handleRemoveSubstrate(substrate.id)}
-                  >
-                    <IconTrash size={14} />
-                  </ActionIcon>
-                </Tooltip>
-              </td>
+              />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </tbody>
+          </table>
+        </Box>
+
+        <Paper
+          withBorder
+          p="md"
+          radius="md"
+          style={{ width: 320, background: "var(--mantine-color-blue-0)" }}
+        >
+          <Text size="sm" fw={600} mb="xs">
+            Add Parameter Variation
+          </Text>
+          <Text size="xs" c="dimmed" mb="sm">
+            Create variation columns for selected process steps.
+          </Text>
+          <Stack gap="sm">
+            <Select
+              placeholder="Select step..."
+              searchable
+              value={variationTarget}
+              onChange={setVariationTarget}
+              data={process.stages.flatMap((stage, idx) =>
+                stage.alternatives.map((step) => ({
+                  value: `${idx}:${step.id}`,
+                  label: `${idx + 1}. ${step.name}`,
+                })),
+              )}
+              size="sm"
+            />
+            <Select
+              placeholder="Select parameter..."
+              value={variationParam}
+              onChange={setVariationParam}
+              data={[
+                { value: "depositionParameters", label: "Deposition Parameters" },
+                { value: "annealingTemp", label: "Annealing Temperature" },
+                { value: "annealingTime", label: "Annealing Time" },
+                { value: "substrateTemp", label: "Substrate Temperature" },
+              ]}
+              size="sm"
+            />
+            <Button size="sm" disabled={!variationTarget || !variationParam}>
+              Add Variation
+            </Button>
+          </Stack>
+        </Paper>
+      </Group>
 
       {experiment.substrates.length === 0 && (
         <Text size="sm" c="dimmed" ta="center" py="md">
           No substrates added. Use the generator above to add substrates.
         </Text>
       )}
-    </Box>
+    </>
   )
 }
 
@@ -443,6 +620,9 @@ export default function ExperimentsPage() {
 
   const [selectedExpId, setSelectedExpId] = useState<string | null>(null)
   const [recipeModalOpen, setRecipeModalOpen] = useState(false)
+  const [nextStepDefaults, setNextStepDefaults] = useState<Record<number, string>>(
+    {},
+  )
 
   const selectedExperiment = experiments.find((e) => e.id === selectedExpId)
   const selectedProcess =
@@ -616,22 +796,26 @@ export default function ExperimentsPage() {
           <Stack gap="md">
             {/* Header with title and meta info */}
             <Group justify="space-between" align="flex-start">
-              <Box style={{ flex: 1 }}>
-                <TextInput
-                  label="Experiment Name"
-                  placeholder="Enter experiment name..."
-                  size="lg"
-                  value={selectedExperiment.name}
-                  onChange={(e) =>
-                    handleUpdateExperiment({
-                      ...selectedExperiment,
-                      name: e.currentTarget.value,
-                    })
-                  }
-                  style={{ marginBottom: "1rem" }}
-                />
+              <Paper
+                withBorder
+                p="sm"
+                radius="md"
+                style={{ flex: 1, background: "var(--mantine-color-gray-1)" }}
+              >
+                <SimpleGrid cols={4} spacing="sm">
+                  <TextInput
+                    label="Experiment Name"
+                    placeholder="Name"
+                    size="sm"
+                    value={selectedExperiment.name}
+                    onChange={(e) =>
+                      handleUpdateExperiment({
+                        ...selectedExperiment,
+                        name: e.currentTarget.value,
+                      })
+                    }
+                  />
 
-                <SimpleGrid cols={3} spacing="md">
                   <Box>
                     <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={4}>
                       Date of Execution
@@ -667,14 +851,19 @@ export default function ExperimentsPage() {
                     </Badge>
                   </Box>
 
-                  <Box>
+                  <Paper
+                    withBorder
+                    p="xs"
+                    radius="sm"
+                    style={{ background: "var(--mantine-color-blue-0)" }}
+                  >
                     <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb={4}>
-                      Recipe
+                      Recipe / Process
                     </Text>
                     <Group gap="xs">
-                      <Text size="sm" fw={500}>
+                      <Badge color="blue" variant="filled" size="lg">
                         {selectedProcess.name}
-                      </Text>
+                      </Badge>
                       <Button
                         size="xs"
                         variant="subtle"
@@ -683,9 +872,9 @@ export default function ExperimentsPage() {
                         Change
                       </Button>
                     </Group>
-                  </Box>
+                  </Paper>
                 </SimpleGrid>
-              </Box>
+              </Paper>
             </Group>
 
             {/* Intent/Description */}
@@ -710,6 +899,11 @@ export default function ExperimentsPage() {
             {/* Substrate Management */}
             <SubstrateNameGenerator
               experiment={selectedExperiment}
+              process={selectedProcess}
+              nextStepDefaults={nextStepDefaults}
+              onChangeNextStepDefault={(stageIndex, value) =>
+                setNextStepDefaults((prev) => ({ ...prev, [stageIndex]: value }))
+              }
               onUpdate={handleUpdateExperiment}
             />
 
@@ -725,36 +919,6 @@ export default function ExperimentsPage() {
               />
             </Paper>
 
-            {/* Add Variation Section */}
-            <Paper withBorder p="md" radius="md" style={{ background: "var(--mantine-color-blue-0)" }}>
-              <Group justify="space-between">
-                <Box>
-                  <Text size="sm" fw={600} mb="xs">
-                    Add Parameter Variation
-                  </Text>
-                  <Text size="xs" c="dimmed">
-                    Create variations for specific parameters across different substrates
-                  </Text>
-                </Box>
-                <Group gap="sm">
-                  <Select
-                    placeholder="Select step..."
-                    searchable
-                    data={selectedProcess.stages.flatMap((stage, idx) =>
-                      stage.alternatives.map((step) => ({
-                        value: `${idx}:${step.id}`,
-                        label: `${idx + 1}. ${step.name}`,
-                      })),
-                    )}
-                    size="sm"
-                    style={{ minWidth: 250 }}
-                  />
-                  <Button size="sm">
-                    Add Variation
-                  </Button>
-                </Group>
-              </Group>
-            </Paper>
           </Stack>
         )}
       </Box>

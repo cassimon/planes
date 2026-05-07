@@ -270,6 +270,8 @@ export type Experiment = {
   processId: string
   // Substrates in the experiment
   substrates: Substrate[]
+  // Absolute processing times keyed by process stage id
+  processingTimes?: { [stageId: string]: string }
   // Results uploaded (makes experiment "Finished")
   hasResults: boolean
 } // NOTE: Layer stack is now managed in the linked Process
@@ -459,6 +461,7 @@ export function newExperiment(processId: string): Experiment {
     deviceArea: 0.09,
     deviceType: "film",
     substrates: generateSubstrates(1),
+    processingTimes: {},
     hasResults: false,
   }
 }
@@ -714,7 +717,7 @@ function newCollectionElement(position: Vec2): CanvasCollectionElement {
     type: "collection",
     position,
     size: { x: 200, y: 160 },
-    name: "New Collection",
+    name: "Data Collection",
     refs: [],
   }
 }
@@ -1215,11 +1218,22 @@ export function AppProvider({
   const addCollectionElement = useCallback(
     (planeId: string, position: Vec2): CanvasCollectionElement => {
       const el = newCollectionElement(position)
-      setPlanes((prev) =>
-        prev.map((p) =>
+      setPlanes((prev) => {
+        const plane = prev.find((p) => p.id === planeId)
+        const existing = new Set(
+          plane?.elements
+            .filter((e) => e.type === "collection")
+            .map((e) => (e as CanvasCollectionElement).name) ?? [],
+        )
+        if (existing.has(el.name)) {
+          let counter = 2
+          while (existing.has(`Data Collection ${counter}`)) counter++
+          el.name = `Data Collection ${counter}`
+        }
+        return prev.map((p) =>
           p.id === planeId ? { ...p, elements: [...p.elements, el] } : p,
-        ),
-      )
+        )
+      })
       return el
     },
     [],

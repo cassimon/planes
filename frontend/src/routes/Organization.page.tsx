@@ -833,7 +833,12 @@ function CollectionEl({
   onStartDivide: () => void
   onHoveredPlaneTabChange?: (planeId: string | null) => void
 }) {
-  const { activeCollectionId, setPendingCollectionLink } = useAppContext()
+  const {
+    activeCollectionId,
+    setActiveCollectionId,
+    setActivePlaneId,
+    setPendingCollectionLink,
+  } = useAppContext()
   const navigate = useNavigate()
   const [dragging, setDragging] = useState(false)
   const [editingName, setEditingName] = useState(false)
@@ -942,7 +947,7 @@ function CollectionEl({
     return acc
   }, {})
 
-  const hasExperiment = el.refs.some((r) => r.kind === "experiment")
+  // const hasExperiment = el.refs.some((r) => r.kind === "experiment")
 
   // Build action bubbles - icons must match nav menu (AppLayout.icons.tsx)
   const routeForKind: Record<CollectionRef["kind"], string> = {
@@ -964,6 +969,12 @@ function CollectionEl({
     navigate({ to: routeForKind[kind] })
   }
 
+  const handleRefIconClick = (kind: CollectionRef["kind"]) => {
+    setActiveCollectionId(el.id)
+    setActivePlaneId(planeId)
+    navigate({ to: routeForKind[kind] })
+  }
+
   const actions: {
     label: string
     Icon: React.ElementType
@@ -972,29 +983,8 @@ function CollectionEl({
   }[] = [
     { label: "Add Material", Icon: IconBox, color: "teal", kind: "material" },
     { label: "Add Solution", Icon: IconFlask, color: "blue", kind: "solution" },
-    {
-      label: "Add Experiment",
-      Icon: IconPlayerPlay,
-      color: "grape",
-      kind: "experiment",
-    },
+    { label: "Add Process", Icon: IconStack3, color: "gray", kind: "process" },
   ]
-  if (hasExperiment) {
-    actions.push(
-      {
-        label: "Add Results",
-        Icon: IconDownload,
-        color: "orange",
-        kind: "result",
-      },
-      {
-        label: "Add Analysis",
-        Icon: IconChartBar,
-        color: "red",
-        kind: "analysis",
-      },
-    )
-  }
 
   // When dragging, render using fixed positioning so the element appears above
   // the toolbar and plane tabs instead of being clipped by overflow:hidden.
@@ -1099,22 +1089,75 @@ function CollectionEl({
 
         {/* Compact ref summary - show icons for present entity types */}
         {el.refs.length > 0 ? (
-          <Group gap={6} wrap="wrap">
-            {refCounts.material && (
-              <IconBox size={14} color="var(--mantine-color-teal-6)" />
-            )}
-            {refCounts.solution && (
-              <IconFlask size={14} color="var(--mantine-color-blue-6)" />
-            )}
-            {refCounts.experiment && (
-              <IconPlayerPlay size={14} color="var(--mantine-color-grape-6)" />
-            )}
-            {refCounts.result && (
-              <IconDownload size={14} color="var(--mantine-color-orange-6)" />
-            )}
-            {refCounts.analysis && (
-              <IconChartBar size={14} color="var(--mantine-color-red-6)" />
-            )}
+          <Group gap={4} wrap="wrap">
+            {(
+              [
+                {
+                  kind: "material",
+                  Icon: IconBox,
+                  color: "var(--mantine-color-teal-6)",
+                  label: "material",
+                },
+                {
+                  kind: "solution",
+                  Icon: IconFlask,
+                  color: "var(--mantine-color-blue-6)",
+                  label: "solution",
+                },
+                {
+                  kind: "process",
+                  Icon: IconStack3,
+                  color: "var(--mantine-color-gray-6)",
+                  label: "process",
+                },
+                {
+                  kind: "experiment",
+                  Icon: IconPlayerPlay,
+                  color: "var(--mantine-color-grape-6)",
+                  label: "experiment",
+                },
+                {
+                  kind: "result",
+                  Icon: IconDownload,
+                  color: "var(--mantine-color-orange-6)",
+                  label: "result",
+                },
+                {
+                  kind: "analysis",
+                  Icon: IconChartBar,
+                  color: "var(--mantine-color-red-6)",
+                  label: "analysis",
+                },
+              ] as const
+            )
+              .filter(({ kind }) => Boolean(refCounts[kind]))
+              .map(({ kind, Icon, color, label }) => {
+                const count = refCounts[kind]
+                const suffix = count === 1 ? "" : "s"
+                return (
+                  <Tooltip
+                    key={kind}
+                    label={`${count} ${label}${suffix}`}
+                    position="top"
+                    withArrow
+                  >
+                    <ActionIcon
+                      size="sm"
+                      variant="subtle"
+                      color="gray"
+                      radius="xl"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        handleRefIconClick(kind)
+                      }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <Icon size={14} color={color} />
+                    </ActionIcon>
+                  </Tooltip>
+                )
+              })}
           </Group>
         ) : (
           <Text size="xs" c="dimmed">
@@ -2778,149 +2821,180 @@ function PlaneCanvas({
 
           {/* Element Picker Popup for Pointer Tool */}
           {elementPickerOpen && elementPickerPos && (
-            <Group
-              gap={8}
+            <Stack
+              gap={6}
               style={{
                 position: "absolute",
-                left: elementPickerPos.x - 76,
-                top: elementPickerPos.y - 20,
+                left: elementPickerPos.x - 90,
+                top: elementPickerPos.y - 24,
                 zIndex: 10001,
                 cursor: "default",
+                animation: "bubble-in 150ms ease-out both",
               }}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             >
-              {(
-                [
-                  {
-                    label: "Place Note",
-                    Icon: IconNote,
-                    color: "yellow",
-                    action: () => {
-                      const pos = canvasCoords(
-                        {
-                          clientX:
-                            (containerRef.current?.getBoundingClientRect()
-                              .left || 0) + elementPickerPos.x,
-                          clientY:
-                            (containerRef.current?.getBoundingClientRect()
-                              .top || 0) + elementPickerPos.y,
-                        } as MouseEvent<HTMLDivElement>,
-                        containerRef,
-                        pan,
-                      )
-                      const el = addTextElement(plane.id, pos)
-                      updateElement(plane.id, { ...el, color: selectedColor })
-                      setElementPickerOpen(false)
-                      setElementPickerPos(null)
-                      setTool("text")
+              {/* ── Primary action: Add Data Collection ── */}
+              <Tooltip label="Add Data Collection" position="top" withArrow>
+                <Box
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    const pos = canvasCoords(
+                      {
+                        clientX:
+                          (containerRef.current?.getBoundingClientRect().left ||
+                            0) + elementPickerPos.x,
+                        clientY:
+                          (containerRef.current?.getBoundingClientRect().top ||
+                            0) + elementPickerPos.y,
+                      } as MouseEvent<HTMLDivElement>,
+                      containerRef,
+                      pan,
+                    )
+                    const el = addCollectionElement(plane.id, pos)
+                    updateElement(plane.id, { ...el, color: selectedColor })
+                    setElementPickerOpen(false)
+                    setElementPickerPos(null)
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    borderRadius: 10,
+                    border: `2px solid ${selectedColor || "var(--mantine-color-teal-5)"}`,
+                    boxShadow: `0 0 0 3px ${selectedColor ? selectedColor + "33" : "var(--mantine-color-teal-2)"}`,
+                    background: "white",
+                    padding: "10px 16px",
+                    transition: "box-shadow 120ms",
+                  }}
+                >
+                  <Group gap={6}>
+                    <IconFolderPlus
+                      size={16}
+                      color={selectedColor || "var(--mantine-color-teal-6)"}
+                    />
+                    <Text size="sm" fw={600} c="dark">
+                      Add Data Collection
+                    </Text>
+                  </Group>
+                </Box>
+              </Tooltip>
+
+              {/* ── Secondary actions (muted) ── */}
+              <Group gap={6} justify="center">
+                {(
+                  [
+                    {
+                      label: "Place Note",
+                      Icon: IconNote,
+                      action: () => {
+                        const pos = canvasCoords(
+                          {
+                            clientX:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .left || 0) + elementPickerPos.x,
+                            clientY:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .top || 0) + elementPickerPos.y,
+                          } as MouseEvent<HTMLDivElement>,
+                          containerRef,
+                          pan,
+                        )
+                        const el = addTextElement(plane.id, pos)
+                        updateElement(plane.id, { ...el, color: selectedColor })
+                        setElementPickerOpen(false)
+                        setElementPickerPos(null)
+                        setTool("text")
+                      },
                     },
-                  },
-                  {
-                    label: "Place Text",
-                    Icon: IconLetterT,
-                    color: "blue",
-                    action: () => {
-                      const pos = canvasCoords(
-                        {
-                          clientX:
-                            (containerRef.current?.getBoundingClientRect()
-                              .left || 0) + elementPickerPos.x,
-                          clientY:
-                            (containerRef.current?.getBoundingClientRect()
-                              .top || 0) + elementPickerPos.y,
-                        } as MouseEvent<HTMLDivElement>,
-                        containerRef,
-                        pan,
-                      )
-                      plaintextEditingRef.current = true
-                      const newEl = addPlainTextElement(
-                        plane.id,
-                        pos,
-                        textColor,
-                        textFormatting,
-                      )
-                      setEditingPlaintextId(newEl.id)
-                      setElementPickerOpen(false)
-                      setElementPickerPos(null)
-                      setTool("plaintext")
+                    {
+                      label: "Place Text",
+                      Icon: IconLetterT,
+                      action: () => {
+                        const pos = canvasCoords(
+                          {
+                            clientX:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .left || 0) + elementPickerPos.x,
+                            clientY:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .top || 0) + elementPickerPos.y,
+                          } as MouseEvent<HTMLDivElement>,
+                          containerRef,
+                          pan,
+                        )
+                        plaintextEditingRef.current = true
+                        const newEl = addPlainTextElement(
+                          plane.id,
+                          pos,
+                          textColor,
+                          textFormatting,
+                        )
+                        setEditingPlaintextId(newEl.id)
+                        setElementPickerOpen(false)
+                        setElementPickerPos(null)
+                        setTool("plaintext")
+                      },
                     },
-                  },
-                  {
-                    label: "Draw Line",
-                    Icon: IconMinus,
-                    color: "gray",
-                    action: () => {
-                      const pos = canvasCoords(
-                        {
-                          clientX:
-                            (containerRef.current?.getBoundingClientRect()
-                              .left || 0) + elementPickerPos.x,
-                          clientY:
-                            (containerRef.current?.getBoundingClientRect()
-                              .top || 0) + elementPickerPos.y,
-                        } as MouseEvent<HTMLDivElement>,
-                        containerRef,
-                        pan,
-                      )
-                      const el = addLineElement(plane.id, pos)
-                      updateElement(plane.id, {
-                        ...el,
-                        color: selectedColor,
-                      } as CanvasLineElement)
-                      drawingLineId.current = el.id
-                      setElementPickerOpen(false)
-                      setElementPickerPos(null)
-                      setTool("line")
+                    {
+                      label: "Draw Line",
+                      Icon: IconMinus,
+                      action: () => {
+                        const pos = canvasCoords(
+                          {
+                            clientX:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .left || 0) + elementPickerPos.x,
+                            clientY:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .top || 0) + elementPickerPos.y,
+                          } as MouseEvent<HTMLDivElement>,
+                          containerRef,
+                          pan,
+                        )
+                        const el = addLineElement(plane.id, pos)
+                        updateElement(plane.id, {
+                          ...el,
+                          color: selectedColor,
+                        } as CanvasLineElement)
+                        drawingLineId.current = el.id
+                        setElementPickerOpen(false)
+                        setElementPickerPos(null)
+                        setTool("line")
+                      },
                     },
-                  },
-                  {
-                    label: "Place Collection",
-                    Icon: IconFolderPlus,
-                    color: "teal",
-                    action: () => {
-                      const pos = canvasCoords(
-                        {
-                          clientX:
-                            (containerRef.current?.getBoundingClientRect()
-                              .left || 0) + elementPickerPos.x,
-                          clientY:
-                            (containerRef.current?.getBoundingClientRect()
-                              .top || 0) + elementPickerPos.y,
-                        } as MouseEvent<HTMLDivElement>,
-                        containerRef,
-                        pan,
-                      )
-                      const el = addCollectionElement(plane.id, pos)
-                      updateElement(plane.id, { ...el, color: selectedColor })
-                      setElementPickerOpen(false)
-                      setElementPickerPos(null)
-                    },
-                  },
-                ] as const
-              ).map(({ label, Icon, color, action }, i) => (
-                <Tooltip key={label} label={label} position="top" withArrow>
-                  <ActionIcon
-                    size="lg"
-                    variant="filled"
-                    color={color}
-                    radius="xl"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-                      action()
-                    }}
-                    style={{
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-                      animation: `bubble-in 150ms ease-out ${i * 40}ms both`,
-                      cursor: "default",
-                    }}
-                  >
-                    <Icon size={18} />
-                  </ActionIcon>
-                </Tooltip>
-              ))}
-            </Group>
+                  ] as const
+                ).map(({ label, Icon, action }, i) => (
+                  <Tooltip key={label} label={label} position="bottom" withArrow>
+                    <ActionIcon
+                      size="md"
+                      variant="default"
+                      color="gray"
+                      radius="md"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        action()
+                      }}
+                      style={{
+                        opacity: 0.55,
+                        animation: `bubble-in 150ms ease-out ${i * 40 + 60}ms both`,
+                        cursor: "default",
+                        border: "1px solid var(--mantine-color-gray-3)",
+                        background: "var(--mantine-color-gray-1)",
+                      }}
+                    >
+                      <Icon size={16} />
+                    </ActionIcon>
+                  </Tooltip>
+                ))}
+              </Group>
+            </Stack>
           )}
         </Box>
 
