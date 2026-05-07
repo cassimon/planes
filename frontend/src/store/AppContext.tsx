@@ -615,7 +615,8 @@ export type CanvasTextElement = {
   position: Vec2
   size: Vec2
   content: string
-  color?: string
+  color: string // text color, default black
+  formatting: TextFormatting
 }
 
 export type TextFormatting = {
@@ -683,6 +684,12 @@ function newTextElement(position: Vec2): CanvasTextElement {
     position,
     size: { x: 200, y: 80 },
     content: "",
+    color: "#000000",
+    formatting: {
+      bold: false,
+      italic: false,
+      underline: false,
+    },
   }
 }
 

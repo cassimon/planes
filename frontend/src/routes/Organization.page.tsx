@@ -44,6 +44,7 @@ import {
 } from "@tabler/icons-react"
 import { useNavigate } from "@tanstack/react-router"
 import {
+  type DragEvent as ReactDragEvent,
   type MouseEvent,
   type PointerEvent as ReactPointerEvent,
   useCallback,
@@ -69,6 +70,8 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const GRID = 20 // px – subtle grid snap
+const ELEMENT_PICKER_DISMISS_DISTANCE = 220 // px from popup origin
+const COLLECTION_REF_DRAG_MIME = "application/x-plains-collection-ref-drag"
 
 // Neutral grayish-blue for default selections
 const DEFAULT_ACCENT = "#94a3b8"
@@ -96,6 +99,13 @@ function canvasCoords(
 // ─────────────────────────────────────────────────────────────────────────────
 // Collection fusion helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+type CollectionRefDragPayload = {
+  sourceCollectionId: string
+  kind: CollectionRef["kind"]
+  mode: "kind" | "single"
+  refIds: string[]
+}
 
 /** Approximate rendered bounding box of a CollectionEl card */
 const COL_W = 156
@@ -207,17 +217,22 @@ function TextEl({
   el,
   onUpdate,
   onDelete,
+  onStartEdit,
+  onEditEnd,
   pan,
 }: {
   el: CanvasTextElement
   onUpdate: (e: CanvasElement) => void
   onDelete: () => void
+  onStartEdit?: () => void
+  onEditEnd?: () => void
   pan: Vec2
 }) {
   const [editing, setEditing] = useState(el.content === "")
   const [dragging, setDragging] = useState(false)
   const dragStart = useRef<{ mouse: Vec2; origin: Vec2 } | null>(null)
   const resizeStart = useRef<{ mouse: Vec2; size: Vec2 } | null>(null)
+  const prevEditing = useRef(editing)
 
   const startDrag = (ev: ReactPointerEvent<HTMLDivElement>) => {
     if (editing) {
@@ -282,7 +297,22 @@ function TextEl({
     resizeStart.current = null
   }
 
-  const textColor = el.color || "inherit"
+  const textColor = el.color || "#000000"
+  const textFormatting = el.formatting || {
+    bold: false,
+    italic: false,
+    underline: false,
+  }
+
+  useEffect(() => {
+    if (!prevEditing.current && editing) {
+      onStartEdit?.()
+    }
+    if (prevEditing.current && !editing) {
+      onEditEnd?.()
+    }
+    prevEditing.current = editing
+  }, [editing, onEditEnd, onStartEdit])
 
   return (
     <Box
@@ -352,6 +382,11 @@ function TextEl({
                 color: textColor,
                 fontFamily: "inherit",
                 fontSize: "0.85rem",
+                fontWeight: textFormatting.bold ? 700 : 400,
+                fontStyle: textFormatting.italic ? "italic" : "normal",
+                textDecoration: textFormatting.underline
+                  ? "underline"
+                  : "none",
                 padding: 0,
               },
             }}
@@ -363,6 +398,9 @@ function TextEl({
               whiteSpace: "pre-wrap",
               minHeight: rem(40),
               color: textColor,
+              fontWeight: textFormatting.bold ? 700 : 400,
+              fontStyle: textFormatting.italic ? "italic" : "normal",
+              textDecoration: textFormatting.underline ? "underline" : "none",
               cursor: "grab",
             }}
             onDoubleClick={(e) => {
@@ -759,12 +797,16 @@ function ActionBubble({
   color,
   onClick,
   index,
+  onHoverStart,
+  onHoverEnd,
 }: {
   label: string
   Icon: React.ElementType
   color: string
   onClick: () => void
   index: number
+  onHoverStart?: () => void
+  onHoverEnd?: () => void
 }) {
   // Position bubbles in a vertical stack to the right of the collection
   return (
@@ -789,6 +831,8 @@ function ActionBubble({
           e.preventDefault()
           ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
         }}
+        onMouseEnter={onHoverStart}
+        onMouseLeave={onHoverEnd}
         style={{
           position: "absolute",
           right: -44,
@@ -813,6 +857,7 @@ function CollectionEl({
   isFuseCandidate,
   onDragPositionUpdate,
   onDropped,
+  onDropRefs,
   onStartDivide,
   onHoveredPlaneTabChange,
 }: {
@@ -830,13 +875,23 @@ function CollectionEl({
     didMove: boolean,
     droppedOnPlaneId?: string,
   ) => void
+  onDropRefs: (
+    targetCollectionId: string,
+    payload: CollectionRefDragPayload,
+  ) => void
   onStartDivide: () => void
   onHoveredPlaneTabChange?: (planeId: string | null) => void
 }) {
   const {
     activeCollectionId,
+    materials,
+    solutions,
+    processes,
+    experiments,
+    results,
     setActiveCollectionId,
     setActivePlaneId,
+    setActiveEntity,
     setPendingCollectionLink,
   } = useAppContext()
   const navigate = useNavigate()
@@ -846,12 +901,76 @@ function CollectionEl({
   const dragStart = useRef<{ mouse: Vec2; origin: Vec2 } | null>(null)
   /** Screen-space position of the element while dragging (for fixed overlay) */
   const [dragScreenPos, setDragScreenPos] = useState<Vec2 | null>(null)
+  const [hoveredRefKind, setHoveredRefKind] = useState<CollectionRef["kind"] | null>(
+    null,
+  )
+  const [isHovered, setIsHovered] = useState(false)
+  const hoverHideTimeoutRef = useRef<number | null>(null)
   const finalPosRef = useRef<Vec2>(el.position)
   const didMove = useRef(false)
   const lastPointerEvent = useRef<{ clientX: number; clientY: number } | null>(
     null,
   )
   const isActive = activeCollectionId === el.id
+  const showCollectionControls = isActive || isHovered
+
+  const parseRefDragPayload = (
+    e: ReactDragEvent<HTMLElement>,
+  ): CollectionRefDragPayload | null => {
+    const raw =
+      e.dataTransfer.getData(COLLECTION_REF_DRAG_MIME) ||
+      e.dataTransfer.getData("text/plain")
+    if (!raw) {
+      return null
+    }
+    try {
+      const parsed = JSON.parse(raw) as CollectionRefDragPayload
+      if (
+        !parsed ||
+        typeof parsed.sourceCollectionId !== "string" ||
+        typeof parsed.kind !== "string" ||
+        !Array.isArray(parsed.refIds)
+      ) {
+        return null
+      }
+      return parsed
+    } catch {
+      return null
+    }
+  }
+
+  const startRefDrag = (
+    e: ReactDragEvent<HTMLElement>,
+    payload: CollectionRefDragPayload,
+  ) => {
+    e.stopPropagation()
+    e.dataTransfer.effectAllowed = "move"
+    const encoded = JSON.stringify(payload)
+    e.dataTransfer.setData(COLLECTION_REF_DRAG_MIME, encoded)
+    e.dataTransfer.setData("text/plain", encoded)
+  }
+
+  const clearHoverHideTimeout = () => {
+    if (hoverHideTimeoutRef.current !== null) {
+      window.clearTimeout(hoverHideTimeoutRef.current)
+      hoverHideTimeoutRef.current = null
+    }
+  }
+
+  const activateHover = () => {
+    clearHoverHideTimeout()
+    setIsHovered(true)
+  }
+
+  const scheduleHoverHide = () => {
+    clearHoverHideTimeout()
+    hoverHideTimeoutRef.current = window.setTimeout(() => {
+      setIsHovered(false)
+      setHoveredRefKind(null)
+    }, 320)
+  }
+
+  useEffect(() => () => clearHoverHideTimeout(), [])
 
   const startDrag = (ev: ReactPointerEvent<HTMLDivElement>) => {
     setDragging(true)
@@ -975,6 +1094,44 @@ function CollectionEl({
     navigate({ to: routeForKind[kind] })
   }
 
+  const handleRefItemClick = (kind: CollectionRef["kind"], id: string) => {
+    setActiveCollectionId(el.id)
+    setActivePlaneId(planeId)
+    if (
+      kind === "material" ||
+      kind === "solution" ||
+      kind === "process" ||
+      kind === "experiment"
+    ) {
+      setActiveEntity({ kind, id })
+    }
+    navigate({ to: routeForKind[kind] })
+  }
+
+  const labelForRef = (kind: CollectionRef["kind"], id: string) => {
+    if (kind === "material") {
+      const m = materials.find((x) => x.id === id)
+      return m ? m.name || m.inventoryLabel || m.casNumber || m.id : id
+    }
+    if (kind === "solution") {
+      const s = solutions.find((x) => x.id === id)
+      return s ? s.name || s.id : id
+    }
+    if (kind === "process") {
+      const p = processes.find((x) => x.id === id)
+      return p ? p.name || p.id : id
+    }
+    if (kind === "experiment") {
+      const exp = experiments.find((x) => x.id === id)
+      return exp ? exp.name || exp.id : id
+    }
+    if (kind === "result") {
+      const r = results.find((x) => x.id === id)
+      return r ? r.id : id
+    }
+    return id
+  }
+
   const actions: {
     label: string
     Icon: React.ElementType
@@ -1013,6 +1170,25 @@ function CollectionEl({
       onPointerDown={startDrag}
       onPointerMove={onPointerMove}
       onPointerUp={stopDrag}
+      onDragOver={(e) => {
+        const payload = parseRefDragPayload(e)
+        if (!payload || payload.sourceCollectionId === el.id) {
+          return
+        }
+        e.preventDefault()
+        e.dataTransfer.dropEffect = "move"
+      }}
+      onDrop={(e) => {
+        const payload = parseRefDragPayload(e)
+        if (!payload || payload.sourceCollectionId === el.id) {
+          return
+        }
+        e.preventDefault()
+        e.stopPropagation()
+        onDropRefs(el.id, payload)
+      }}
+      onMouseEnter={activateHover}
+      onMouseLeave={scheduleHoverHide}
     >
       {/* Main card */}
       {isFuseCandidate && (
@@ -1096,66 +1272,131 @@ function CollectionEl({
                   kind: "material",
                   Icon: IconBox,
                   color: "var(--mantine-color-teal-6)",
-                  label: "material",
                 },
                 {
                   kind: "solution",
                   Icon: IconFlask,
                   color: "var(--mantine-color-blue-6)",
-                  label: "solution",
                 },
                 {
                   kind: "process",
                   Icon: IconStack3,
                   color: "var(--mantine-color-gray-6)",
-                  label: "process",
                 },
                 {
                   kind: "experiment",
                   Icon: IconPlayerPlay,
                   color: "var(--mantine-color-grape-6)",
-                  label: "experiment",
                 },
                 {
                   kind: "result",
                   Icon: IconDownload,
                   color: "var(--mantine-color-orange-6)",
-                  label: "result",
                 },
                 {
                   kind: "analysis",
                   Icon: IconChartBar,
                   color: "var(--mantine-color-red-6)",
-                  label: "analysis",
                 },
               ] as const
             )
               .filter(({ kind }) => Boolean(refCounts[kind]))
-              .map(({ kind, Icon, color, label }) => {
+              .map(({ kind, Icon, color }) => {
                 const count = refCounts[kind]
-                const suffix = count === 1 ? "" : "s"
+                const refs = el.refs.filter((r) => r.kind === kind)
                 return (
-                  <Tooltip
+                  <Popover
                     key={kind}
-                    label={`${count} ${label}${suffix}`}
-                    position="top"
-                    withArrow
+                    opened={hoveredRefKind === kind}
+                    withinPortal={false}
+                    position="bottom-start"
+                    offset={6}
+                    shadow="md"
                   >
-                    <ActionIcon
-                      size="sm"
-                      variant="subtle"
-                      color="gray"
-                      radius="xl"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        e.preventDefault()
-                        handleRefIconClick(kind)
-                      }}
-                      onPointerDown={(e) => e.stopPropagation()}
+                    <Popover.Target>
+                      <Box
+                        onMouseEnter={() => setHoveredRefKind(kind)}
+                        onMouseLeave={() => setHoveredRefKind(null)}
+                      >
+                        <Stack gap={0} align="center">
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="gray"
+                            radius="xl"
+                            draggable
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              handleRefIconClick(kind)
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onDragStart={(e) =>
+                              startRefDrag(e, {
+                                sourceCollectionId: el.id,
+                                kind,
+                                mode: "kind",
+                                refIds: refs.map((r) => r.id),
+                              })
+                            }
+                          >
+                            <Icon size={14} color={color} />
+                          </ActionIcon>
+                          <Text
+                            size="8px"
+                            c="dimmed"
+                            style={{ lineHeight: 1, marginTop: -1 }}
+                          >
+                            {count}
+                          </Text>
+                        </Stack>
+                      </Box>
+                    </Popover.Target>
+                    <Popover.Dropdown
+                      p={6}
+                      onMouseEnter={() => setHoveredRefKind(kind)}
+                      onMouseLeave={() => setHoveredRefKind(null)}
                     >
-                      <Icon size={14} color={color} />
-                    </ActionIcon>
-                  </Tooltip>
+                      <Stack gap={4}>
+                        {refs.map((r, idx) => (
+                          <Button
+                            key={`${r.id}-${idx}`}
+                            variant="subtle"
+                            color="gray"
+                            size="compact-xs"
+                            fullWidth
+                            draggable
+                            styles={{
+                              inner: { justifyContent: "flex-start" },
+                              label: {
+                                maxWidth: 200,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              },
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              e.preventDefault()
+                              setHoveredRefKind(null)
+                              handleRefItemClick(kind, r.id)
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onDragStart={(e) =>
+                              startRefDrag(e, {
+                                sourceCollectionId: el.id,
+                                kind,
+                                mode: "single",
+                                refIds: [r.id],
+                              })
+                            }
+                          >
+                            {labelForRef(kind, r.id)}
+                          </Button>
+                        ))}
+                      </Stack>
+                    </Popover.Dropdown>
+                  </Popover>
                 )
               })}
           </Group>
@@ -1167,7 +1408,7 @@ function CollectionEl({
       </Paper>
 
       {/* Speech-bubble actions (only when selected) */}
-      {isActive &&
+      {showCollectionControls &&
         actions.map((a, i) => (
           <ActionBubble
             key={a.kind}
@@ -1176,11 +1417,12 @@ function CollectionEl({
             color={a.color}
             onClick={() => handleBubbleClick(a.kind)}
             index={i}
+            onHoverStart={activateHover}
+            onHoverEnd={scheduleHoverHide}
           />
         ))}
 
-      {/* Divide button (only when selected and has refs) */}
-      {isActive && el.refs.length > 0 && (
+      {showCollectionControls && el.refs.length > 0 && (
         <Tooltip label="Divide collection" position="left" withArrow>
           <ActionIcon
             size="xs"
@@ -1192,6 +1434,8 @@ function CollectionEl({
               e.preventDefault()
               onStartDivide()
             }}
+            onMouseEnter={activateHover}
+            onMouseLeave={scheduleHoverHide}
             style={{
               position: "absolute",
               top: -8,
@@ -1205,7 +1449,7 @@ function CollectionEl({
       )}
 
       {/* Delete button (only when selected) */}
-      {isActive && (
+      {showCollectionControls && (
         <ActionIcon
           size="xs"
           variant="filled"
@@ -1216,6 +1460,8 @@ function CollectionEl({
             e.preventDefault()
             onDelete()
           }}
+          onMouseEnter={activateHover}
+          onMouseLeave={scheduleHoverHide}
           style={{
             position: "absolute",
             top: -8,
@@ -1944,6 +2190,7 @@ function PlaneCanvas({
   const [editingPlaintextId, setEditingPlaintextId] = useState<string | null>(
     null,
   )
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const drawingLineId = useRef<string | null>(null)
   const plaintextEditingRef = useRef(false)
 
@@ -2039,6 +2286,54 @@ function PlaneCanvas({
       setActiveCollectionId(activeCollectionId === srcId ? null : srcId)
     }
   }
+
+  const handleDropRefs = useCallback(
+    (targetCollectionId: string, payload: CollectionRefDragPayload) => {
+      if (targetCollectionId === payload.sourceCollectionId) {
+        return
+      }
+      const source = plane.elements.find(
+        (e) => e.id === payload.sourceCollectionId && e.type === "collection",
+      ) as CanvasCollectionElement | undefined
+      const target = plane.elements.find(
+        (e) => e.id === targetCollectionId && e.type === "collection",
+      ) as CanvasCollectionElement | undefined
+      if (!source || !target) {
+        return
+      }
+
+      const idSet = new Set(payload.refIds)
+      const shouldMove = (r: CollectionRef) =>
+        r.kind === payload.kind && idSet.has(r.id)
+
+      const moving = source.refs.filter(shouldMove)
+      if (moving.length === 0) {
+        return
+      }
+
+      const nextSourceRefs = source.refs.filter((r) => !shouldMove(r))
+      const nextTargetRefs = [...target.refs]
+      for (const r of moving) {
+        if (!nextTargetRefs.some((x) => x.kind === r.kind && x.id === r.id)) {
+          nextTargetRefs.push(r)
+        }
+      }
+
+      updatePlane({
+        ...plane,
+        elements: plane.elements.map((e) => {
+          if (e.id === source.id && e.type === "collection") {
+            return { ...e, refs: nextSourceRefs }
+          }
+          if (e.id === target.id && e.type === "collection") {
+            return { ...e, refs: nextTargetRefs }
+          }
+          return e
+        }),
+      })
+    },
+    [plane, updatePlane],
+  )
 
   const handleFuse = () => {
     if (!fuseDialog) {
@@ -2253,6 +2548,14 @@ function PlaneCanvas({
 
     // Pointer tool: Show element picker popup on bare canvas click, or close if already open
     if (tool === "pointer" && e.target === e.currentTarget) {
+      // If a collection is selected, first click on empty canvas should only deselect it.
+      if (activeCollectionId) {
+        setActiveCollectionId(null)
+        setElementPickerOpen(false)
+        setElementPickerPos(null)
+        return
+      }
+
       // If popup is already open, close it and reopen at new position
       if (elementPickerOpen) {
         setElementPickerOpen(false)
@@ -2299,7 +2602,11 @@ function PlaneCanvas({
 
     if (tool === "text") {
       const el = addTextElement(plane.id, pos)
-      updateElement(plane.id, { ...el, color: selectedColor })
+      updateElement(plane.id, {
+        ...el,
+        color: textColor,
+        formatting: textFormatting,
+      })
       setTool("select")
     } else if (tool === "plaintext") {
       // Don't place if currently editing another plaintext element
@@ -2340,6 +2647,21 @@ function PlaneCanvas({
       setPan({ x: pan.x, y: newY })
       return
     }
+
+    // Auto-dismiss pointer element picker if cursor moves too far away.
+    if (tool === "pointer" && elementPickerOpen && elementPickerPos) {
+      const rect = containerRef.current?.getBoundingClientRect()
+      if (rect) {
+        const dx = e.clientX - rect.left - elementPickerPos.x
+        const dy = e.clientY - rect.top - elementPickerPos.y
+        const dist = Math.hypot(dx, dy)
+        if (dist > ELEMENT_PICKER_DISMISS_DISTANCE) {
+          setElementPickerOpen(false)
+          setElementPickerPos(null)
+        }
+      }
+    }
+
     // Track position for pointer-tool tooltip
     if (tool === "pointer" && plane.elements.length === 0) {
       const rect = containerRef.current?.getBoundingClientRect()
@@ -2450,8 +2772,8 @@ function PlaneCanvas({
             <IconLetterT size={16} />
           </ActionIcon>
         </Tooltip>
-        {/* Text formatting options (visible when plaintext tool selected) */}
-        {tool === "plaintext" && (
+        {/* Text formatting options (visible when text/plaintext tool selected) */}
+        {(tool === "plaintext" || tool === "text") && (
           <>
             <Divider orientation="vertical" />
             <Tooltip label="Bold" position="bottom">
@@ -2469,6 +2791,16 @@ function PlaneCanvas({
                     const el = plane.elements.find(
                       (e) => e.id === editingPlaintextId,
                     ) as CanvasPlainTextElement | undefined
+                    if (el) {
+                      updateElement(plane.id, {
+                        ...el,
+                        formatting: newFormatting,
+                      })
+                    }
+                  } else if (editingTextId) {
+                    const el = plane.elements.find(
+                      (e) => e.id === editingTextId,
+                    ) as CanvasTextElement | undefined
                     if (el) {
                       updateElement(plane.id, {
                         ...el,
@@ -2502,6 +2834,16 @@ function PlaneCanvas({
                         formatting: newFormatting,
                       })
                     }
+                  } else if (editingTextId) {
+                    const el = plane.elements.find(
+                      (e) => e.id === editingTextId,
+                    ) as CanvasTextElement | undefined
+                    if (el) {
+                      updateElement(plane.id, {
+                        ...el,
+                        formatting: newFormatting,
+                      })
+                    }
                   }
                 }}
               >
@@ -2523,6 +2865,16 @@ function PlaneCanvas({
                     const el = plane.elements.find(
                       (e) => e.id === editingPlaintextId,
                     ) as CanvasPlainTextElement | undefined
+                    if (el) {
+                      updateElement(plane.id, {
+                        ...el,
+                        formatting: newFormatting,
+                      })
+                    }
+                  } else if (editingTextId) {
+                    const el = plane.elements.find(
+                      (e) => e.id === editingTextId,
+                    ) as CanvasTextElement | undefined
                     if (el) {
                       updateElement(plane.id, {
                         ...el,
@@ -2582,7 +2934,30 @@ function PlaneCanvas({
                               : "none",
                           outlineOffset: 2,
                         }}
-                        onClick={() => setTextColor(c)}
+                        onClick={() => {
+                          setTextColor(c)
+                          if (editingPlaintextId) {
+                            const el = plane.elements.find(
+                              (e) => e.id === editingPlaintextId,
+                            ) as CanvasPlainTextElement | undefined
+                            if (el) {
+                              updateElement(plane.id, {
+                                ...el,
+                                color: c,
+                              })
+                            }
+                          } else if (editingTextId) {
+                            const el = plane.elements.find(
+                              (e) => e.id === editingTextId,
+                            ) as CanvasTextElement | undefined
+                            if (el) {
+                              updateElement(plane.id, {
+                                ...el,
+                                color: c,
+                              })
+                            }
+                          }
+                        }}
                       />
                     ))}
                   </Group>
@@ -2722,12 +3097,29 @@ function PlaneCanvas({
           {/* Element layer */}
           {nonLines.map((el) => {
             if (el.type === "text") {
+              const tel = el as CanvasTextElement
               return (
                 <TextEl
                   key={el.id}
-                  el={el as CanvasTextElement}
+                  el={tel}
                   onUpdate={(updated) => updateElement(plane.id, updated)}
                   onDelete={() => deleteElement(plane.id, el.id)}
+                  onStartEdit={() => {
+                    setEditingTextId(tel.id)
+                    setTool("text")
+                    setTextColor(tel.color || "#000000")
+                    setTextFormatting(
+                      tel.formatting || {
+                        bold: false,
+                        italic: false,
+                        underline: false,
+                      },
+                    )
+                  }}
+                  onEditEnd={() => {
+                    setEditingTextId((prev) => (prev === tel.id ? null : prev))
+                    setTool("select")
+                  }}
                   pan={pan}
                 />
               )
@@ -2783,6 +3175,7 @@ function PlaneCanvas({
                     handleDragPositionUpdate(el.id, pos)
                   }
                   onDropped={handleDrop}
+                  onDropRefs={handleDropRefs}
                   onStartDivide={() => {
                     handleStartDivide(el as CanvasCollectionElement)
                   }}
@@ -2902,7 +3295,11 @@ function PlaneCanvas({
                           pan,
                         )
                         const el = addTextElement(plane.id, pos)
-                        updateElement(plane.id, { ...el, color: selectedColor })
+                        updateElement(plane.id, {
+                          ...el,
+                          color: textColor,
+                          formatting: textFormatting,
+                        })
                         setElementPickerOpen(false)
                         setElementPickerPos(null)
                         setTool("text")

@@ -22,6 +22,7 @@ import {
   IconAtom,
   IconChevronDown,
   IconCopy,
+  IconDownload,
   IconDroplet,
   IconInfoCircle,
   IconLayersIntersect,
@@ -34,6 +35,10 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import {
+  exportProcessProtocolAsDocx,
+  exportProcessProtocolAsPdf,
+} from "@/lib/processExport"
 import {
   type ProcessParam,
   PROCESS_PARAMETER_DEFINITIONS,
@@ -313,6 +318,8 @@ export function ProcessesPage() {
   const [noteEditorStepId, setNoteEditorStepId] = useState<string | null>(null)
   const [dropStagePos, setDropStagePos] = useState<number | null>(null)
   const [dropInsertIndex, setDropInsertIndex] = useState<number | null>(null)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [isExportingDocx, setIsExportingDocx] = useState(false)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectProcess = useCallback(
@@ -395,6 +402,14 @@ export function ProcessesPage() {
     return null
   }, [selectedProcess, selectedStepId])
 
+  const selectedStepStagePos = useMemo(() => {
+    if (!selectedProcess || !selectedStepId) return null
+    const stagePos = selectedProcess.stages.findIndex((stage) =>
+      stage.alternatives.some((alt) => alt.id === selectedStepId),
+    )
+    return stagePos >= 0 ? stagePos : null
+  }, [selectedProcess, selectedStepId])
+
   const handleCreateProcess = () => {
     const newProc = newProcess()
     setProcesses((prev) => [...prev, newProc])
@@ -419,6 +434,40 @@ export function ProcessesPage() {
     const exp = newExperiment(process.id)
     setExperiments((prev) => [...prev, exp])
     void navigate({ to: "/experiments" })
+  }
+
+  const handleExportProcessPdf = async () => {
+    if (!selectedProcess) return
+    try {
+      setIsExportingPdf(true)
+      await exportProcessProtocolAsPdf({
+        process: selectedProcess,
+        materials: materials.map((m) => ({ id: m.id, name: m.name })),
+        solutions: solutions.map((s) => ({ id: s.id, name: s.name })),
+      })
+    } catch (error) {
+      console.error("Failed to export process PDF", error)
+      window.alert("Failed to export process PDF. Please try again.")
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }
+
+  const handleExportProcessDocx = async () => {
+    if (!selectedProcess) return
+    try {
+      setIsExportingDocx(true)
+      await exportProcessProtocolAsDocx({
+        process: selectedProcess,
+        materials: materials.map((m) => ({ id: m.id, name: m.name })),
+        solutions: solutions.map((s) => ({ id: s.id, name: s.name })),
+      })
+    } catch (error) {
+      console.error("Failed to export process DOCX", error)
+      window.alert("Failed to export process DOCX. Please try again.")
+    } finally {
+      setIsExportingDocx(false)
+    }
   }
 
   const handleDeleteProcess = (id: string) => {
@@ -829,14 +878,26 @@ export function ProcessesPage() {
     )
   }
 
-  const countSpecifiedParams = useCallback((step: ProcessStep) => {
-    return PROCESS_PARAMETER_DEFINITIONS.filter(
-      ({ key }) =>
-        key !== "depositionMethod" &&
-        key !== "depositionStartTime" &&
-        key !== "annealingStartTime" &&
-        Boolean(step[key]?.value),
-    ).length
+  const getParameterFlowLines = useCallback((step: ProcessStep) => {
+    const lines = PROCESS_PARAMETER_DEFINITIONS.flatMap(({ key, label, unit }) => {
+      if (
+        key === "depositionMethod" ||
+        key === "depositionStartTime" ||
+        key === "annealingStartTime"
+      ) {
+        return []
+      }
+      const value = step[key]?.value?.trim()
+      if (!value) {
+        return []
+      }
+      return [`${label}: ${value}${unit ? ` ${unit}` : ""}`]
+    })
+
+    if (lines.length === 0) {
+      return ["No parameters set"]
+    }
+    return lines
   }, [])
 
   const selectedStepParameterSections = useMemo(() => {
@@ -845,6 +906,131 @@ export function ProcessesPage() {
     }
     return getParameterSections(selectedStep.stepCategory)
   }, [selectedStep])
+
+  const inlineStepDetailsPanel = selectedStep ? (
+    <Paper
+      p="md"
+      radius="md"
+      withBorder
+      style={{
+        backgroundColor: "var(--mantine-color-gray-0)",
+      }}
+    >
+      <Stack gap="md">
+        {selectedStepParameterSections && (
+          <>
+            {selectedStepParameterSections.deposition.length > 0 && (
+              <Stack gap="xs">
+                <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                  Deposition Parameters
+                </Text>
+                <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
+                  {selectedStepParameterSections.deposition.map((key) => {
+                    const definition = PROCESS_DETAIL_DEFINITIONS.get(key)
+                    if (!definition) return null
+                    return (
+                      <Box
+                        key={key}
+                        p="xs"
+                        style={{
+                          borderRadius: 8,
+                          border: `1px solid ${selectedStep.color}66`,
+                          background: `linear-gradient(90deg, ${selectedStep.color}18 0%, transparent 100%)`,
+                        }}
+                      >
+                        <ProcessParamInput
+                          label={
+                            selectedStepParameterSections.labelOverrides[key] ??
+                            definition.label
+                          }
+                          param={selectedStep[key]}
+                          onChange={(param) =>
+                            handleUpdateStepParam(selectedStep.id, key, param)
+                          }
+                          placeholder={
+                            selectedStepParameterSections.placeholderOverrides[key] ??
+                            definition.placeholder
+                          }
+                          unit={definition.unit}
+                          sourceSuggestions={getSourceSuggestions(key)}
+                          type={definition.type ?? "text"}
+                        />
+                      </Box>
+                    )
+                  })}
+                </SimpleGrid>
+              </Stack>
+            )}
+
+            {selectedStepParameterSections.annealing.length > 0 && (
+              <Stack gap="xs">
+                <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+                  Annealing Parameters
+                </Text>
+                <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
+                  {selectedStepParameterSections.annealing.map((key) => {
+                    const definition = PROCESS_DETAIL_DEFINITIONS.get(key)
+                    if (!definition) return null
+                    return (
+                      <Box
+                        key={key}
+                        p="xs"
+                        style={{
+                          borderRadius: 8,
+                          border: `1px solid ${selectedStep.color}66`,
+                          background: `linear-gradient(90deg, ${selectedStep.color}18 0%, transparent 100%)`,
+                        }}
+                      >
+                        <ProcessParamInput
+                          label={
+                            selectedStepParameterSections.labelOverrides[key] ??
+                            definition.label
+                          }
+                          param={selectedStep[key]}
+                          onChange={(param) =>
+                            handleUpdateStepParam(selectedStep.id, key, param)
+                          }
+                          placeholder={
+                            selectedStepParameterSections.placeholderOverrides[key] ??
+                            definition.placeholder
+                          }
+                          unit={definition.unit}
+                          sourceSuggestions={getSourceSuggestions(key)}
+                          type={definition.type ?? "text"}
+                        />
+                      </Box>
+                    )
+                  })}
+                </SimpleGrid>
+              </Stack>
+            )}
+          </>
+        )}
+
+        {noteEditorStepId === selectedStep.id || Boolean(selectedStep.notes?.trim()) ? (
+          <Textarea
+            label="Notes"
+            minRows={2}
+            maxRows={4}
+            value={selectedStep.notes ?? ""}
+            onChange={(e) =>
+              handleUpdateStepNotes(selectedStep.id, e.currentTarget.value)
+            }
+          />
+        ) : (
+          <Button
+            size="xs"
+            variant="subtle"
+            leftSection={<IconPlus size={12} />}
+            onClick={() => setNoteEditorStepId(selectedStep.id)}
+            style={{ justifyContent: "flex-start", width: "fit-content" }}
+          >
+            Add Note
+          </Button>
+        )}
+      </Stack>
+    </Paper>
+  ) : null
 
   return (
     <Box style={{ display: "grid", gridTemplateColumns: "250px 1fr", height: "100%" }}>
@@ -1152,6 +1338,26 @@ export function ProcessesPage() {
                 onChange={(e) => handleUpdateProcessName(e.currentTarget.value)}
                 style={{ flex: 1 }}
               />
+              <Group gap="xs">
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconDownload size={14} />}
+                  onClick={handleExportProcessPdf}
+                  loading={isExportingPdf}
+                >
+                  Export PDF
+                </Button>
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconDownload size={14} />}
+                  onClick={handleExportProcessDocx}
+                  loading={isExportingDocx}
+                >
+                  Export DOCX
+                </Button>
+              </Group>
             </Group>
 
             <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -1270,7 +1476,14 @@ export function ProcessesPage() {
                                   wrap="nowrap"
                                   style={{ flex: 1 }}
                                 >
-                                  {stage.alternatives.map((step, altIdx) => (
+                                  {stage.alternatives.map((step, altIdx) => {
+                                    const parameterLines = getParameterFlowLines(step)
+                                    const isSelected = selectedStepId === step.id
+                                    const cardMinHeight = isSelected
+                                      ? 92
+                                      : Math.max(92, 86 + parameterLines.length * 16)
+
+                                    return (
                                     <Box
                                       key={step.id}
                                       data-step-box="true"
@@ -1289,7 +1502,7 @@ export function ProcessesPage() {
                                       onClick={() => setSelectedStepId(step.id)}
                                       style={{
                                         width: 260,
-                                        minHeight: 92,
+                                        minHeight: cardMinHeight,
                                         borderRadius: 8,
                                         padding: "10px 12px",
                                         display: "flex",
@@ -1304,40 +1517,55 @@ export function ProcessesPage() {
                                             : "1px solid var(--mantine-color-gray-3)",
                                       }}
                                     >
-                                      {selectedStepId === step.id ? (
-                                        <Stack gap={6}>
-                                          <Group
-                                            justify="space-between"
-                                            align="flex-start"
-                                            wrap="nowrap"
-                                            gap="xs"
-                                          >
-                                            <TextInput
-                                              size="xs"
-                                              placeholder="Deposition method"
-                                              autoFocus={pendingFocusStepId === step.id}
-                                              value={step.depositionMethod?.value ?? ""}
-                                              onClick={(e) => e.stopPropagation()}
-                                              onFocus={(e) => {
-                                                e.currentTarget.select()
-                                                if (pendingFocusStepId === step.id) {
-                                                  setPendingFocusStepId(null)
+                                      <Stack gap={6}>
+                                        <Group justify="space-between" wrap="nowrap" gap="xs">
+                                          <Group gap={6} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                                            {STEP_CATEGORY_ICON_MAP[step.stepCategory]}
+                                            {stage.alternatives.length > 1 && (
+                                              <Text
+                                                size="xs"
+                                                c="dimmed"
+                                                style={{ fontWeight: 700, minWidth: 16 }}
+                                              >
+                                                {String.fromCharCode(97 + altIdx)}
+                                              </Text>
+                                            )}
+                                            {selectedStepId === step.id ? (
+                                              <TextInput
+                                                size="xs"
+                                                placeholder="Step name"
+                                                autoFocus={pendingFocusStepId === step.id}
+                                                value={step.depositionMethod?.value ?? ""}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onFocus={(e) => {
+                                                  e.currentTarget.select()
+                                                  if (pendingFocusStepId === step.id) {
+                                                    setPendingFocusStepId(null)
+                                                  }
+                                                }}
+                                                onChange={(e) =>
+                                                  handleUpdateStepParam(
+                                                    step.id,
+                                                    "depositionMethod",
+                                                    {
+                                                      value: e.currentTarget.value,
+                                                      mode: "constant",
+                                                    },
+                                                  )
                                                 }
-                                              }}
-                                              onChange={(e) =>
-                                                handleUpdateStepParam(
-                                                  step.id,
-                                                  "depositionMethod",
-                                                  {
-                                                    value: e.currentTarget.value,
-                                                    mode: "constant",
-                                                  },
-                                                )
-                                              }
-                                              styles={{ input: { fontWeight: 600 } }}
-                                              style={{ flex: 1 }}
-                                            />
-                                            <Group gap={6} wrap="nowrap">
+                                                styles={{ input: { fontWeight: 700 } }}
+                                                style={{ flex: 1 }}
+                                              />
+                                            ) : (
+                                              <Text size="sm" fw={700} truncate>
+                                                {step.depositionMethod?.value?.trim() ||
+                                                  step.name ||
+                                                  "Unnamed"}
+                                              </Text>
+                                            )}
+                                          </Group>
+                                          <Group gap={6} wrap="nowrap">
+                                            {selectedStepId === step.id && (
                                               <input
                                                 type="color"
                                                 value={step.color}
@@ -1357,48 +1585,7 @@ export function ProcessesPage() {
                                                   padding: 1,
                                                 }}
                                               />
-                                              <ActionIcon
-                                                size="xs"
-                                                variant="subtle"
-                                                color="red"
-                                                onClick={(e) => {
-                                                  e.stopPropagation()
-                                                  handleRemoveStep(step.id)
-                                                }}
-                                              >
-                                                <IconX size={12} />
-                                              </ActionIcon>
-                                            </Group>
-                                          </Group>
-
-                                          <Select
-                                            size="xs"
-                                            placeholder="Select material or solution"
-                                            value={getStepSourceValue(step)}
-                                            data={sourceOptions}
-                                            searchable
-                                            clearable
-                                            comboboxProps={{ withinPortal: false }}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(value) =>
-                                              handleUpdateStepSource(step.id, value)
-                                            }
-                                          />
-                                        </Stack>
-                                      ) : (
-                                        <>
-                                          <Group justify="space-between" wrap="nowrap" gap="xs">
-                                            {stage.alternatives.length > 1 && (
-                                              <Text size="xs" c="dimmed" style={{ fontWeight: 700, minWidth: 16 }}>
-                                                {String.fromCharCode(97 + altIdx)}
-                                              </Text>
                                             )}
-                                            <Text size="sm" fw={600} truncate>
-                                              {step.depositionMethod?.value?.trim() ||
-                                                step.name ||
-                                                "Unnamed"}
-                                              {`: ${getStepSourceLabel(step)}`}
-                                            </Text>
                                             <ActionIcon
                                               size="xs"
                                               variant="subtle"
@@ -1411,23 +1598,55 @@ export function ProcessesPage() {
                                               <IconX size={12} />
                                             </ActionIcon>
                                           </Group>
-                                          <Group justify="space-between" gap="xs" wrap="nowrap">
-                                            <Group gap={4} wrap="nowrap">
-                                              {STEP_CATEGORY_ICON_MAP[step.stepCategory]}
-                                              <Text size="xs" c="dimmed" truncate>
-                                                {STEP_CATEGORIES.find(c => c.value === step.stepCategory)?.label ?? step.stepCategory.replace(/_/g, " ")}
-                                              </Text>
-                                            </Group>
-                                            {countSpecifiedParams(step) > 0 && (
-                                              <Badge size="xs" variant="light" color="teal">
-                                                {countSpecifiedParams(step)} params
-                                              </Badge>
-                                            )}
-                                          </Group>
-                                        </>
-                                      )}
+                                        </Group>
+
+                                        <Box>
+                                          {selectedStepId === step.id ? (
+                                            <Select
+                                              size="xs"
+                                              placeholder="Select material"
+                                              value={getStepSourceValue(step)}
+                                              data={sourceOptions}
+                                              searchable
+                                              clearable
+                                              comboboxProps={{ withinPortal: false }}
+                                              onClick={(e) => e.stopPropagation()}
+                                              onChange={(value) =>
+                                                handleUpdateStepSource(step.id, value)
+                                              }
+                                            />
+                                          ) : (
+                                            <Stack gap={2}>
+                                              <Group justify="space-between" wrap="nowrap" gap="xs">
+                                                <Text size="xs" c="black" truncate style={{ flex: 1 }}>
+                                                  {getStepSourceLabel(step)}
+                                                </Text>
+                                                {parameterLines[0] !== "No parameters set" && (
+                                                  <Badge size="xs" variant="light" color="teal">
+                                                    {parameterLines.length} params
+                                                  </Badge>
+                                                )}
+                                              </Group>
+                                              <Stack gap={1}>
+                                                {parameterLines.map((line, lineIdx) => (
+                                                  <Text
+                                                    key={`${step.id}-param-line-${lineIdx}`}
+                                                    size="xs"
+                                                    c="dimmed"
+                                                    truncate
+                                                    style={{ whiteSpace: "nowrap" }}
+                                                  >
+                                                    {line}
+                                                  </Text>
+                                                ))}
+                                              </Stack>
+                                            </Stack>
+                                          )}
+                                        </Box>
+                                      </Stack>
                                     </Box>
-                                  ))}
+                                    )
+                                  })}
 
                                   <Menu shadow="md" width={240}>
                                     <Menu.Target>
@@ -1488,6 +1707,12 @@ export function ProcessesPage() {
                                   setDropStagePos(null)
                                 }}
                               />
+
+                              {selectedStepStagePos === stagePos && inlineStepDetailsPanel && (
+                                <Box mt="xs" mb="sm">
+                                  {inlineStepDetailsPanel}
+                                </Box>
+                              )}
                             </Box>
                           ))}
                         </Stack>
@@ -1523,137 +1748,6 @@ export function ProcessesPage() {
               </Stack>
             </Box>
 
-            {/* Bottom: Step Details (always visible) */}
-            <Paper
-              p="md"
-              radius={0}
-              style={{
-                backgroundColor: "transparent",
-              }}
-            >
-              <Stack gap="md">
-                {selectedStep ? (
-                  <>
-                    {selectedStepParameterSections && (
-                      <>
-                        {selectedStepParameterSections.deposition.length > 0 && (
-                          <Stack gap="xs">
-                            <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                              Deposition Parameters
-                            </Text>
-                            <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
-                              {selectedStepParameterSections.deposition.map((key) => {
-                                const definition = PROCESS_DETAIL_DEFINITIONS.get(key)
-                                if (!definition) return null
-                                return (
-                                  <Box
-                                    key={key}
-                                    p="xs"
-                                    style={{
-                                      borderRadius: 8,
-                                      border: `1px solid ${selectedStep.color}66`,
-                                      background: `linear-gradient(90deg, ${selectedStep.color}18 0%, transparent 100%)`,
-                                    }}
-                                  >
-                                    <ProcessParamInput
-                                      label={
-                                        selectedStepParameterSections.labelOverrides[key] ??
-                                        definition.label
-                                      }
-                                      param={selectedStep[key]}
-                                      onChange={(param) =>
-                                        handleUpdateStepParam(selectedStep.id, key, param)
-                                      }
-                                      placeholder={
-                                        selectedStepParameterSections.placeholderOverrides[key] ??
-                                        definition.placeholder
-                                      }
-                                      unit={definition.unit}
-                                      sourceSuggestions={getSourceSuggestions(key)}
-                                      type={definition.type ?? "text"}
-                                    />
-                                  </Box>
-                                )
-                              })}
-                            </SimpleGrid>
-                          </Stack>
-                        )}
-
-                        {selectedStepParameterSections.annealing.length > 0 && (
-                          <Stack gap="xs">
-                            <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                              Annealing Parameters
-                            </Text>
-                            <SimpleGrid cols={2} spacing="md" verticalSpacing="sm">
-                              {selectedStepParameterSections.annealing.map((key) => {
-                                const definition = PROCESS_DETAIL_DEFINITIONS.get(key)
-                                if (!definition) return null
-                                return (
-                                  <Box
-                                    key={key}
-                                    p="xs"
-                                    style={{
-                                      borderRadius: 8,
-                                      border: `1px solid ${selectedStep.color}66`,
-                                      background: `linear-gradient(90deg, ${selectedStep.color}18 0%, transparent 100%)`,
-                                    }}
-                                  >
-                                    <ProcessParamInput
-                                      label={
-                                        selectedStepParameterSections.labelOverrides[key] ??
-                                        definition.label
-                                      }
-                                      param={selectedStep[key]}
-                                      onChange={(param) =>
-                                        handleUpdateStepParam(selectedStep.id, key, param)
-                                      }
-                                      placeholder={
-                                        selectedStepParameterSections.placeholderOverrides[key] ??
-                                        definition.placeholder
-                                      }
-                                      unit={definition.unit}
-                                      sourceSuggestions={getSourceSuggestions(key)}
-                                      type={definition.type ?? "text"}
-                                    />
-                                  </Box>
-                                )
-                              })}
-                            </SimpleGrid>
-                          </Stack>
-                        )}
-                      </>
-                    )}
-
-                    {(noteEditorStepId === selectedStep.id ||
-                      Boolean(selectedStep.notes?.trim())) ? (
-                      <Textarea
-                        label="Notes"
-                        minRows={2}
-                        maxRows={4}
-                        value={selectedStep.notes ?? ""}
-                        onChange={(e) =>
-                          handleUpdateStepNotes(selectedStep.id, e.currentTarget.value)
-                        }
-                      />
-                    ) : (
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        leftSection={<IconPlus size={12} />}
-                        onClick={() => setNoteEditorStepId(selectedStep.id)}
-                        style={{ justifyContent: "flex-start", width: "fit-content" }}
-                      >
-                        Add Note
-                      </Button>
-                    )}
-                  </>
-                ) : (
-                  <Text size="sm" c="dimmed">
-                    Select a step to edit names, parameters, and notes.
-                  </Text>
-                )}
-              </Stack>
-            </Paper>
           </>
         ) : (
           <Box style={{ display: "grid", placeItems: "center", height: "100%" }}>

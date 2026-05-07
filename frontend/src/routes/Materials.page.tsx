@@ -86,6 +86,7 @@ export function MaterialsPage() {
     setPendingCollectionLink,
     activeCollectionId,
     activePlaneId,
+    activeEntity,
     setActiveEntity,
   } = useAppContext()
   const { getEntityColor, isEntityVisible, getEntityPlane, getEntityCollection } =
@@ -110,6 +111,9 @@ export function MaterialsPage() {
 
   useEffect(() => {
     if (!editingId) {
+      if (activeEntity?.kind === "material") {
+        return
+      }
       setActiveEntity(null)
       return
     }
@@ -123,7 +127,26 @@ export function MaterialsPage() {
     }
 
     setActiveEntity({ kind: "material", id: editingId })
-  }, [editingId, isEntityVisible, materials, setActiveEntity])
+  }, [activeEntity, editingId, isEntityVisible, materials, setActiveEntity])
+
+  useEffect(() => {
+    if (activeEntity?.kind !== "material") {
+      return
+    }
+    const material = materials.find((m) => m.id === activeEntity.id)
+    if (!material || !isEntityVisible("material", material.id)) {
+      return
+    }
+    setSelectedMaterialId(material.id)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      next.add(material.id)
+      return next
+    })
+    setEditingId(null)
+    setEditBuffer(null)
+    setActiveEntity(null)
+  }, [activeEntity, isEntityVisible, materials, setActiveEntity])
 
   // Auto-create material + link to collection when navigated from action bubble
   // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount

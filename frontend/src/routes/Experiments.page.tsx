@@ -19,10 +19,12 @@ import {
 } from "@mantine/core"
 import { modals } from "@mantine/modals"
 import {
+  IconCopy,
   IconInfoCircle,
   IconPlus,
   IconTrash,
 } from "@tabler/icons-react"
+import * as React from "react"
 import { useState } from "react"
 import {
   type Experiment,
@@ -616,6 +618,8 @@ export default function ExperimentsPage() {
     experiments,
     setExperiments,
     processes,
+    activeEntity,
+    setActiveEntity,
   } = useAppContext()
 
   const [selectedExpId, setSelectedExpId] = useState<string | null>(null)
@@ -627,6 +631,23 @@ export default function ExperimentsPage() {
   const selectedExperiment = experiments.find((e) => e.id === selectedExpId)
   const selectedProcess =
     selectedExperiment && processes.find((p) => p.id === selectedExperiment.processId)
+
+  React.useEffect(() => {
+    if (activeEntity?.kind !== "experiment") {
+      return
+    }
+    if (!experiments.some((e) => e.id === activeEntity.id)) {
+      return
+    }
+    setSelectedExpId(activeEntity.id)
+  }, [activeEntity, experiments])
+
+  React.useEffect(() => {
+    if (!selectedExpId) {
+      return
+    }
+    setActiveEntity({ kind: "experiment", id: selectedExpId })
+  }, [selectedExpId, setActiveEntity])
 
   // Create new experiment
   const handleNewExperiment = () => {
@@ -673,6 +694,63 @@ export default function ExperimentsPage() {
     })
   }
 
+  const handleCopyExperiment = (exp: Experiment) => {
+    const copy: Experiment = {
+      ...exp,
+      id: crypto.randomUUID(),
+      name: `${exp.name || "Experiment"} (Copy)`,
+      substrates: exp.substrates.map((substrate) => ({
+        ...substrate,
+        id: crypto.randomUUID(),
+        parameterValues: { ...(substrate.parameterValues ?? {}) },
+      })),
+      processingTimes: { ...(exp.processingTimes ?? {}) },
+      hasResults: false,
+    }
+    setExperiments((prev) => [...prev, copy])
+    setSelectedExpId(copy.id)
+  }
+
+  const groupedExperiments = React.useMemo(() => {
+    const processNameById = new Map(processes.map((p) => [p.id, p.name]))
+    const groups = new Map<string, Experiment[]>()
+
+    for (const exp of experiments) {
+      const key = exp.processId || "__unassigned__"
+      const list = groups.get(key)
+      if (list) {
+        list.push(exp)
+      } else {
+        groups.set(key, [exp])
+      }
+    }
+
+    return Array.from(groups.entries())
+      .sort((a, b) => {
+        const aName =
+          a[0] === "__unassigned__"
+            ? "Unassigned"
+            : (processNameById.get(a[0]) ?? "Unknown Process")
+        const bName =
+          b[0] === "__unassigned__"
+            ? "Unassigned"
+            : (processNameById.get(b[0]) ?? "Unknown Process")
+        return aName.localeCompare(bName)
+      })
+      .map(([processId, items]) => {
+        const processName =
+          processId === "__unassigned__"
+            ? "Unassigned"
+            : (processNameById.get(processId) ?? "Unknown Process")
+        const sortedItems = [...items].sort((a, b) => {
+          const byName = (a.name || "").localeCompare(b.name || "")
+          if (byName !== 0) return byName
+          return (a.date || "").localeCompare(b.date || "")
+        })
+        return { processId, processName, items: sortedItems }
+      })
+  }, [experiments, processes])
+
   return (
     <Group gap={0} align="flex-start" style={{ height: "100%" }}>
       {/* Left Sidebar - Experiment List */}
@@ -701,71 +779,100 @@ export default function ExperimentsPage() {
           </Text>
 
           <Stack gap="xs">
-            {experiments.map((exp) => {
-              const status = getExperimentStatus(exp)
-              const isSelected = exp.id === selectedExpId
+            {groupedExperiments.map((group) => (
+              <React.Fragment key={`process-group-${group.processId}`}>
+                <Text size="xs" fw={700} c="dimmed" tt="uppercase" mt="xs">
+                  {group.processName}
+                </Text>
+                {group.items.map((exp) => {
+                  const status = getExperimentStatus(exp)
+                  const isSelected = exp.id === selectedExpId
 
-              return (
-                <Paper
-                  key={exp.id}
-                  p="sm"
-                  withBorder
-                  style={{
-                    cursor: "pointer",
-                    background: isSelected
-                      ? "var(--mantine-color-blue-0)"
-                      : undefined,
-                    borderColor: isSelected ? "var(--mantine-color-blue-3)" : undefined,
-                  }}
-                  onClick={() => setSelectedExpId(exp.id)}
-                >
-                  <Group justify="space-between" gap="xs" mb={4}>
-                    <Text
-                      size="sm"
-                      fw={isSelected ? 600 : 500}
-                      lineClamp={1}
-                      style={{ flex: 1 }}
-                    >
-                      {exp.name || "Unnamed"}
-                    </Text>
-                    {status === "finished" && (
-                      <Badge size="xs" color="green">
-                        Done
-                      </Badge>
-                    )}
-                    {status === "ready" && (
-                      <Badge size="xs" color="blue">
-                        Ready
-                      </Badge>
-                    )}
-                    {status === "incomplete" && (
-                      <Badge size="xs" color="yellow">
-                        Draft
-                      </Badge>
-                    )}
-                  </Group>
-                  <Text size="xs" c="dimmed" lineClamp={1}>
-                    {exp.date}
-                  </Text>
-                  {isSelected && (
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      fullWidth
-                      mt="xs"
-                      leftSection={<IconTrash size={12} />}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDeleteExperiment(exp.id)
+                  return (
+                    <Paper
+                      key={exp.id}
+                      withBorder
+                      p="sm"
+                      radius="md"
+                      style={{
+                        cursor: "pointer",
+                        background: isSelected
+                          ? "var(--mantine-color-blue-0)"
+                          : undefined,
+                        borderColor: isSelected
+                          ? "var(--mantine-color-blue-4)"
+                          : undefined,
                       }}
+                      onClick={() => setSelectedExpId(exp.id)}
                     >
-                      Delete
-                    </Button>
-                  )}
-                </Paper>
-              )
-            })}
+                      <Group justify="space-between" wrap="nowrap">
+                        <Box style={{ flex: 1, minWidth: 0 }}>
+                          <Group gap="xs" mb={4}>
+                            <Text size="sm" fw={600} truncate>
+                              {exp.name || "Untitled"}
+                            </Text>
+                            <Badge
+                              size="xs"
+                              color={
+                                status === "finished"
+                                  ? "green"
+                                  : status === "ready"
+                                    ? "yellow"
+                                    : "red"
+                              }
+                              variant="dot"
+                            >
+                              {status === "finished"
+                                ? "Finished"
+                                : status === "ready"
+                                  ? "Ready"
+                                  : "Incomplete"}
+                            </Badge>
+                          </Group>
+                          <Group gap="xs">
+                            <Text size="xs" c="dimmed">
+                              {exp.date || "No date"}
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              •
+                            </Text>
+                            <Text size="xs" c="dimmed">
+                              {exp.substrates.length} substrate
+                              {exp.substrates.length !== 1 ? "s" : ""}
+                            </Text>
+                          </Group>
+                        </Box>
+
+                        <Group gap={2} wrap="nowrap">
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="teal"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCopyExperiment(exp)
+                            }}
+                          >
+                            <IconCopy size={14} />
+                          </ActionIcon>
+                          <ActionIcon
+                            size="sm"
+                            variant="subtle"
+                            color="red"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDeleteExperiment(exp.id)
+                            }}
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                    </Paper>
+                  )
+                })}
+              </React.Fragment>
+            ))}
           </Stack>
         </Stack>
       </Box>

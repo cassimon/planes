@@ -681,6 +681,7 @@ export function SolutionsPage() {
     setPendingCollectionLink,
     activeCollectionId,
     activePlaneId,
+    activeEntity,
     setActiveEntity,
   } = useAppContext()
   const {
@@ -717,6 +718,16 @@ export function SolutionsPage() {
 
     setActiveEntity({ kind: "solution", id: editingSolutionId })
   }, [editingSolutionId, isEntityVisible, setActiveEntity, solutions])
+
+  useEffect(() => {
+    if (activeEntity?.kind !== "solution") {
+      return
+    }
+    if (!isEntityVisible("solution", activeEntity.id)) {
+      return
+    }
+    setSelectedSolutionId(activeEntity.id)
+  }, [activeEntity, isEntityVisible])
 
   const materialOptions = useMemo(
     () =>
