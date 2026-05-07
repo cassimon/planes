@@ -5,12 +5,14 @@ import {
   IconFlask,
   IconNotebook,
   IconPlayerPlay,
+  IconStack3,
   IconUpload,
 } from "@tabler/icons-react"
 
 export const pageIcons = {
   "/materials": IconBox,
   "/solutions": IconFlask,
+  "/processes": IconStack3,
   "/experiments": IconPlayerPlay,
   "/results": IconDownload,
   "/analysis": IconChartBar,

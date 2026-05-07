@@ -78,7 +78,7 @@ export function MaterialsPage() {
     setMaterials,
     solutions,
     experiments,
-    results,
+    processes,
     planes,
     updateElement,
     removeCollectionRefs,
@@ -202,7 +202,7 @@ export function MaterialsPage() {
     const dependents = getDependentLocations("material", id, {
       solutions,
       experiments,
-      results,
+      processes,
       planes,
     })
     if (dependents.length > 0) {
@@ -286,7 +286,7 @@ export function MaterialsPage() {
       const dependents = getDependentLocations("material", id, {
         solutions,
         experiments,
-        results,
+        processes,
         planes,
       })
       if (dependents.length > 0) {
@@ -303,7 +303,7 @@ export function MaterialsPage() {
           getDependentLocations("material", id, {
             solutions,
             experiments,
-            results,
+            processes,
             planes,
           }).length > 0,
       )!
@@ -311,7 +311,7 @@ export function MaterialsPage() {
       const firstDeps = getDependentLocations("material", firstBlockedId, {
         solutions,
         experiments,
-        results,
+        processes,
         planes,
       })
       modals.open({

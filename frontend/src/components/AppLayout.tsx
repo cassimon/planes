@@ -37,6 +37,7 @@ const pages = [
   { label: "Organization", value: "/organization" as any },
   { label: "Materials", value: "/materials" as any },
   { label: "Solutions", value: "/solutions" as any },
+  { label: "Processes", value: "/processes" as any },
   { label: "Experiments", value: "/experiments" as any },
   { label: "Results", value: "/results" as any },
   { label: "Analysis", value: "/analysis" as any },
@@ -56,6 +57,7 @@ export function AppLayout() {
     experiments,
     materials,
     solutions,
+    processes,
     activeEntity,
     setActiveEntity,
     flushSave,
@@ -106,6 +108,9 @@ export function AppLayout() {
   // Accent color: collection color if selected, otherwise neutral
   const accentColor = activeCollection?.color || DEFAULT_ACCENT
 
+  // Reference processes for use in useMemos
+  const derivedProcesses = processes
+
   const activeEntityMatchesPage = useMemo(() => {
     if (!activeEntity) {
       return false
@@ -115,6 +120,9 @@ export function AppLayout() {
     }
     if (activeEntity.kind === "solution") {
       return location.pathname.startsWith("/solutions")
+    }
+    if (activeEntity.kind === "process") {
+      return location.pathname.startsWith("/processes")
     }
     return (
       location.pathname.startsWith("/experiments") ||
@@ -140,18 +148,22 @@ export function AppLayout() {
       name = materials.find((m) => m.id === activeEntity.id)?.name ?? null
     } else if (activeEntity.kind === "solution") {
       name = solutions.find((s) => s.id === activeEntity.id)?.name ?? null
+    } else if (activeEntity.kind === "process") {
+      name = derivedProcesses.find((p) => p.id === activeEntity.id)?.name ?? null
     }
     const iconPath =
       activeEntity.kind === "experiment"
         ? "/experiments"
         : activeEntity.kind === "material"
           ? "/materials"
-          : "/solutions"
+          : activeEntity.kind === "process"
+            ? "/processes"
+            : "/solutions"
     return {
       entityName: name,
       EntityIcon: pageIcons[iconPath as keyof typeof pageIcons] ?? null,
     }
-  }, [activeEntity, experiments, materials, solutions])
+  }, [activeEntity, experiments, materials, solutions, derivedProcesses])
 
   // When on the Organization page and a collection is selected, compute which
   // page paths have refs in that collection — all others are dimmed.
@@ -166,6 +178,9 @@ export function AppLayout() {
       }
       if (r.kind === "solution") {
         lit.add("/solutions")
+      }
+      if (r.kind === "process") {
+        lit.add("/processes")
       }
       if (r.kind === "experiment") {
         lit.add("/experiments")

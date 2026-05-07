@@ -21,6 +21,7 @@ import type {
   ExperimentResults,
   Material,
   Plane,
+  Process,
   Solution,
 } from "./AppContext"
 
@@ -131,6 +132,7 @@ export type AppSnapshot = {
   materials: Material[]
   solutions: Solution[]
   experiments: Experiment[]
+  processes: Process[]
   results: ExperimentResults[]
   planes: Plane[]
 }
@@ -170,7 +172,12 @@ export interface BackendAdapter {
   createExperiment(experiment: Experiment): Promise<Experiment>
   updateExperiment(experiment: Experiment): Promise<Experiment>
   deleteExperiment(id: string): Promise<void>
+  // ── Processes ──────────────────────────────────────────────────────────
 
+  getProcesses(): Promise<Process[]>
+  createProcess(process: Process): Promise<Process>
+  updateProcess(process: Process): Promise<Process>
+  deleteProcess(id: string): Promise<void>
   // ── Results ────────────────────────────────────────────────────────────────
 
   getResults(): Promise<ExperimentResults[]>
@@ -213,6 +220,7 @@ export class InMemoryBackend implements BackendAdapter {
       materials: initial?.materials ?? [],
       solutions: initial?.solutions ?? [],
       experiments: initial?.experiments ?? [],
+      processes: initial?.processes ?? [],
       results: initial?.results ?? [],
       planes: initial?.planes ?? [],
     }
@@ -229,6 +237,7 @@ export class InMemoryBackend implements BackendAdapter {
           materials: parsed.materials ?? this.data.materials,
           solutions: parsed.solutions ?? this.data.solutions,
           experiments: parsed.experiments ?? this.data.experiments,
+          processes: parsed.processes ?? this.data.processes,
           results: parsed.results ?? this.data.results,
           planes: parsed.planes ?? this.data.planes,
         }
@@ -305,6 +314,25 @@ export class InMemoryBackend implements BackendAdapter {
     this.data.experiments = this.data.experiments.filter((x) => x.id !== id)
   }
 
+  // ── Processes ──────────────────────────────────────────────────────────
+
+  async getProcesses() {
+    return [...this.data.processes]
+  }
+  async createProcess(p: Process) {
+    this.data.processes = [...this.data.processes, p]
+    return p
+  }
+  async updateProcess(p: Process) {
+    this.data.processes = this.data.processes.map((x) =>
+      x.id === p.id ? p : x,
+    )
+    return p
+  }
+  async deleteProcess(id: string) {
+    this.data.processes = this.data.processes.filter((x) => x.id !== id)
+  }
+
   // ── Results ────────────────────────────────────────────────────────────────
 
   async getResults() {
@@ -373,6 +401,7 @@ const EMPTY_SNAPSHOT: AppSnapshot = {
   materials: [],
   solutions: [],
   experiments: [],
+  processes: [],
   results: [],
   planes: [],
 }
@@ -430,6 +459,7 @@ export class HttpBackend implements BackendAdapter {
           Array.isArray(raw.materials) ||
           Array.isArray(raw.solutions) ||
           Array.isArray(raw.experiments) ||
+          Array.isArray(raw.processes) ||
           Array.isArray(raw.results) ||
           Array.isArray(raw.planes)
 
@@ -438,6 +468,7 @@ export class HttpBackend implements BackendAdapter {
             materials: raw.materials ?? [],
             solutions: raw.solutions ?? [],
             experiments: raw.experiments ?? [],
+            processes: raw.processes ?? [],
             results: raw.results ?? [],
             planes: raw.planes ?? [],
           }
@@ -614,7 +645,7 @@ export class HttpBackend implements BackendAdapter {
         exp.hasResults = experimentIdsWithResults.has(exp.id)
       }
 
-      this.data = { materials, solutions, experiments, results, planes }
+      this.data = { materials, solutions, experiments, processes: [], results, planes }
       // Check for emergency backup from beforeunload watchdog.
       const restoredFromBackup = this.restoreUnloadBackup()
       if (restoredFromBackup) {
@@ -676,6 +707,7 @@ export class HttpBackend implements BackendAdapter {
       materials: snapshot.materials.length,
       solutions: snapshot.solutions.length,
       experiments: snapshot.experiments.length,
+      processes: snapshot.processes.length,
       results: snapshot.results.length,
       planes: snapshot.planes.length,
       elements: snapshot.planes.reduce((n, p) => n + p.elements.length, 0),
@@ -763,6 +795,23 @@ export class HttpBackend implements BackendAdapter {
   }
   async deleteExperiment(id: string) {
     this.data.experiments = this.data.experiments.filter((x) => x.id !== id)
+  }
+
+  async getProcesses() {
+    return [...this.data.processes]
+  }
+  async createProcess(p: Process) {
+    this.data.processes = [...this.data.processes, p]
+    return p
+  }
+  async updateProcess(p: Process) {
+    this.data.processes = this.data.processes.map((x) =>
+      x.id === p.id ? p : x,
+    )
+    return p
+  }
+  async deleteProcess(id: string) {
+    this.data.processes = this.data.processes.filter((x) => x.id !== id)
   }
 
   async getResults() {

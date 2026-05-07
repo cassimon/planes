@@ -92,6 +92,74 @@ export type ExperimentLayer = {
   notes?: string
 }
 
+/** Process step category (menu options) */
+export type ProcessStepCategory =
+  | "wet_deposition"
+  | "dry_deposition"
+  | "surface_treatment"
+  | "doping_aging"
+  | "substrate_preparation"
+
+/** A single process step in a Process, reusing ProcessParam schema */
+export type ProcessStep = {
+  id: string
+  name: string // user-friendly label, e.g. "Perovskite Deposition"
+  stepCategory: ProcessStepCategory
+  color: string
+  materialId?: string // reference to Material
+  solutionId?: string // reference to Solution
+  // Parameters - all optional, encourage adding over requiring
+  depositionMethod?: ProcessParam
+  depositionStartTime?: ProcessParam
+  substrateTemp?: ProcessParam
+  depositionAtmosphere?: ProcessParam
+  depositionParameters?: ProcessParam
+  solutionVolume?: ProcessParam
+  dryingMethod?: ProcessParam
+  annealingStartTime?: ProcessParam
+  annealingTime?: ProcessParam
+  annealingTemp?: ProcessParam
+  annealingAtmosphere?: ProcessParam
+  notes?: string
+}
+
+/** A single stage in a process flow, containing one or more alternative steps */
+export type ProcessStage = {
+  index: number // 0-based, 0 is bottom
+  alternatives: ProcessStep[] // >= 1 step per stage (usually 1, multiple for alternatives)
+}
+
+/** An abstract thin-film deposition process template */
+export type Process = {
+  id: string
+  name: string
+  description?: string
+  stages: ProcessStage[] // ordered from bottom (index 0) upward
+}
+
+/** Helper to create a new process step */
+export function newProcessStep(
+  index: number,
+  category: ProcessStepCategory,
+): ProcessStep {
+  return {
+    id: crypto.randomUUID(),
+    name: `Step ${index + 1}`,
+    stepCategory: category,
+    color: LAYER_COLORS[index % LAYER_COLORS.length],
+  }
+}
+
+/** Helper to create a new process with initial stage */
+export function newProcess(): Process {
+  return {
+    id: crypto.randomUUID(),
+    name: "New Process",
+    description: "",
+    stages: [],
+  }
+}
+
 export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
   key: ProcessParameterKey
   label: string
@@ -198,13 +266,13 @@ export type Experiment = {
   deviceArea: number // cm²
   deviceType: "film" | "half" | "full" // test film, half device, or full device
   deviceLayoutImage?: string // base64 encoded image (jpg/png)
-  // Layer stack (ordered from substrate up)
-  layers: ExperimentLayer[]
+  // Link to exactly one Process
+  processId: string
   // Substrates in the experiment
   substrates: Substrate[]
   // Results uploaded (makes experiment "Finished")
   hasResults: boolean
-}
+} // NOTE: Layer stack is now managed in the linked Process
 
 /** Fields required for an experiment to be 'ready' */
 export function getExperimentMissingFields(exp: Experiment): string[] {
@@ -235,37 +303,54 @@ export function getExperimentStatus(
 }
 
 /**
- * Get all parameters marked for variation across all layers.
+ * Get all parameters marked for variation across all process steps.
+ * Returns array of { stepId, stepName, paramName, paramKey }
+ */
+export function getVariedParametersFromProcess(process: Process): Array<{
+  stepId: string
+  stepName: string
+  paramName: string
+  paramKey: string // "stepId:paramName"
+}> {
+  const varied: Array<{
+    stepId: string
+    stepName: string
+    paramName: string
+    paramKey: string
+  }> = []
+
+  process.stages.forEach((stage) => {
+    stage.alternatives.forEach((step) => {
+      PROCESS_PARAMETER_DEFINITIONS.forEach(({ key, label }) => {
+        const param = step[key as ProcessParameterKey]
+        if (param && param.mode === "variation") {
+          varied.push({
+            stepId: step.id,
+            stepName: step.name,
+            paramName: label,
+            paramKey: `${step.id}:${key}`,
+          })
+        }
+      })
+    })
+  })
+
+  return varied
+}
+
+/**
+ * Get all parameters marked for variation across all layers (legacy, for backward compat)
  * Returns array of { layerId, layerName, paramName, paramKey }
  */
-export function getVariedParameters(exp: Experiment): Array<{
+export function getVariedParameters(_exp: Experiment): Array<{
   layerId: string
   layerName: string
   paramName: string
   paramKey: string // "layerId:paramName"
 }> {
-  const varied: Array<{
-    layerId: string
-    layerName: string
-    paramName: string
-    paramKey: string
-  }> = []
-
-  exp.layers.forEach((layer) => {
-    PROCESS_PARAMETER_DEFINITIONS.forEach(({ key, label }) => {
-      const param = layer[key]
-      if (param && param.mode === "variation") {
-        varied.push({
-          layerId: layer.id,
-          layerName: layer.name,
-          paramName: label,
-          paramKey: `${layer.id}:${key}`,
-        })
-      }
-    })
-  })
-
-  return varied
+  // Experiments no longer directly own layers; this is now a no-op
+  // Kept for backward compatibility during migration
+  return []
 }
 
 const LAYER_COLORS = [
@@ -358,12 +443,13 @@ export function regenerateSubstrateNames(
   }))
 }
 
-export function newExperiment(): Experiment {
+export function newExperiment(processId: string): Experiment {
   return {
     id: crypto.randomUUID(),
     name: "New Experiment",
     description: "",
     date: new Date().toISOString().slice(0, 10),
+    processId, // required link to exactly one process
     architecture: "n-i-p",
     substrateMaterial: "Glass/ITO",
     substrateWidth: 2.5,
@@ -372,7 +458,6 @@ export function newExperiment(): Experiment {
     devicesPerSubstrate: 4,
     deviceArea: 0.09,
     deviceType: "film",
-    layers: [newLayer(0)],
     substrates: generateSubstrates(1),
     hasResults: false,
   }
@@ -555,10 +640,10 @@ export type CanvasLineElement = {
 
 /**
  * A Collection is a named folder placed on the canvas that groups references
- * to Materials, Solutions and (extensibly) other app entities.
+ * to Materials, Solutions, Processes, and other app entities.
  */
 export type CollectionRef = {
-  kind: "material" | "solution" | "experiment" | "result" | "analysis"
+  kind: "material" | "solution" | "experiment" | "result" | "analysis" | "process"
   id: string
 }
 
@@ -646,7 +731,7 @@ export {
 export type DependencyLocation = {
   planeName: string
   collectionName: string
-  itemKind: "solution" | "experiment" | "result"
+  itemKind: "solution" | "experiment" | "result" | "process"
   itemName: string
   itemId: string
 }
@@ -656,17 +741,18 @@ export type DependencyLocation = {
  * show the user where an item is still used before allowing deletion.
  *
  * Dependency graph:
- *   material  ← solution.components[].materialId, experiment.layers[].materialId
- *   solution  ← solution.components[].solutionId, experiment.layers[].solutionId
+ *   material  ← solution.components[].materialId, process.stages[].alternatives[].materialId (*no materialId yet in ProcessStep*)
+ *   solution  ← solution.components[].solutionId, process.stages[].alternatives[].solutionId (*no solutionId yet in ProcessStep*)
  *   experiment ← result.experimentId
+ *   process   ← experiment.processId
  */
 export function getDependentLocations(
-  kind: "material" | "solution" | "experiment",
+  kind: "material" | "solution" | "experiment" | "process",
   id: string,
   data: {
     solutions: Solution[]
     experiments: Experiment[]
-    results: ExperimentResults[]
+    processes: Process[]
     planes: Plane[]
   },
 ): DependencyLocation[] {
@@ -707,17 +793,7 @@ export function getDependentLocations(
         })
       }
     }
-    for (const exp of data.experiments) {
-      if (exp.layers.some((l) => l.materialId === id)) {
-        const host = findHost("experiment", exp.id)
-        locations.push({
-          ...host,
-          itemKind: "experiment",
-          itemName: exp.name,
-          itemId: exp.id,
-        })
-      }
-    }
+    // Materials may be used in process steps (future); add process checks here if/when ProcessStep gets materialId
   } else if (kind === "solution") {
     for (const sol of data.solutions) {
       if (sol.components.some((c) => c.solutionId === id)) {
@@ -730,26 +806,16 @@ export function getDependentLocations(
         })
       }
     }
+    // Solutions may be used in process steps (future); add process checks here if/when ProcessStep gets solutionId
+  } else if (kind === "process") {
     for (const exp of data.experiments) {
-      if (exp.layers.some((l) => l.solutionId === id)) {
+      if (exp.processId === id) {
         const host = findHost("experiment", exp.id)
         locations.push({
           ...host,
           itemKind: "experiment",
           itemName: exp.name,
           itemId: exp.id,
-        })
-      }
-    }
-  } else if (kind === "experiment") {
-    for (const res of data.results) {
-      if (res.experimentId === id) {
-        const host = findHost("result", res.id)
-        locations.push({
-          ...host,
-          itemKind: "result",
-          itemName: `Result ${res.id.slice(0, 6)}`,
-          itemId: res.id,
         })
       }
     }
@@ -768,6 +834,8 @@ type AppContextValue = {
   setSolutions: React.Dispatch<React.SetStateAction<Solution[]>>
   experiments: Experiment[]
   setExperiments: React.Dispatch<React.SetStateAction<Experiment[]>>
+  processes: Process[]
+  setProcesses: React.Dispatch<React.SetStateAction<Process[]>>
   results: ExperimentResults[]
   setResults: React.Dispatch<React.SetStateAction<ExperimentResults[]>>
   planes: Plane[]
@@ -852,11 +920,11 @@ type AppContextValue = {
 
   /** The single entity currently focused in a page's detail view */
   activeEntity: {
-    kind: "experiment" | "material" | "solution"
+    kind: "experiment" | "material" | "solution" | "process"
     id: string
   } | null
   setActiveEntity: (
-    e: { kind: "experiment" | "material" | "solution"; id: string } | null,
+    e: { kind: "experiment" | "material" | "solution" | "process"; id: string } | null,
   ) => void
 
   /** Immediately persist the current state (call before logout). */
@@ -893,6 +961,7 @@ export function AppProvider({
   const [materials, setMaterials] = useState<Material[]>([])
   const [solutions, setSolutions] = useState<Solution[]>([])
   const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [processes, setProcesses] = useState<Process[]>([])
   const [results, setResults] = useState<ExperimentResults[]>([])
   const [planes, setPlanes] = useState<Plane[]>([newPlane("Plane 1")])
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(
@@ -906,7 +975,7 @@ export function AppProvider({
     requestId: string
   } | null>(null)
   const [activeEntity, setActiveEntity] = useState<{
-    kind: "experiment" | "material" | "solution"
+    kind: "experiment" | "material" | "solution" | "process"
     id: string
   } | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -916,10 +985,11 @@ export function AppProvider({
     materials,
     solutions,
     experiments,
+    processes,
     results,
     planes,
   })
-  stateRef.current = { materials, solutions, experiments, results, planes }
+  stateRef.current = { materials, solutions, experiments, processes, results, planes }
   const dirtyRef = useRef(false)
   const saveTimeoutRef = useRef<number | null>(null)
   const hydratedRef = useRef(false)
@@ -974,6 +1044,8 @@ export function AppProvider({
         snapshot.solutions.length,
         "experiments:",
         snapshot.experiments.length,
+        "processes:",
+        snapshot.processes.length,
         "results:",
         snapshot.results.length,
         "planes:",
@@ -987,6 +1059,9 @@ export function AppProvider({
       }
       if (snapshot.experiments.length > 0) {
         setExperiments(snapshot.experiments)
+      }
+      if (snapshot.processes.length > 0) {
+        setProcesses(snapshot.processes)
       }
       if (snapshot.results.length > 0) {
         setResults(snapshot.results)
@@ -1013,7 +1088,7 @@ export function AppProvider({
     }
     scheduleSave()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, scheduleSave, materials, solutions, experiments, results, planes])
+  }, [loaded, scheduleSave, materials, solutions, experiments, processes, results, planes])
 
   // ── Periodic safety flush + unload / visibility watchdog ──────────────────
 
@@ -1288,6 +1363,8 @@ export function AppProvider({
         setSolutions,
         experiments,
         setExperiments,
+        processes,
+        setProcesses,
         results,
         setResults,
         planes,

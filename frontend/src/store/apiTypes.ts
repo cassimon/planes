@@ -174,24 +174,7 @@ export function apiExperimentToExperiment(api: ApiExperiment): Experiment {
     devicesPerSubstrate: 4,
     deviceArea: api.active_area_cm2 ?? 0.09,
     deviceType: (api.device_type as "film" | "half" | "full") ?? "film",
-    layers: api.layers.map((l, i) => ({
-      id: l.id,
-      name: l.name,
-      color: ["#FF6B6B", "#4ECDC4", "#45B7D1"][i % 3],
-      layerType: l.layer_type
-        ? l.layer_type === "perovskite"
-          ? "perovskite"
-          : (l.layer_type as
-              | "etl"
-              | "htl"
-              | "perovskite"
-              | "additional"
-              | "back_contact")
-        : undefined,
-      materialId: l.material_id ?? undefined,
-      solutionId: l.solution_id ?? undefined,
-      notes: l.notes ?? undefined,
-    })),
+    processId: "",
     substrates: api.substrates.map((s) => ({
       id: s.id,
       name: s.name,
@@ -328,17 +311,7 @@ export function experimentToApiCreate(e: Experiment) {
       name: s.name,
       thickness_nm: null,
     })),
-    layers: e.layers.map((l) => ({
-      name: l.name,
-      layer_type: l.layerType || null,
-      material_id: l.materialId || null,
-      solution_id: l.solutionId || null,
-      temperature: null,
-      temperature_unit: "°C",
-      duration: null,
-      duration_unit: "min",
-      notes: l.notes || null,
-    })),
+    layers: [],
   }
 }
 

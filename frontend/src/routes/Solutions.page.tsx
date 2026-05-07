@@ -673,7 +673,7 @@ export function SolutionsPage() {
     solutions,
     setSolutions,
     experiments,
-    results,
+    processes,
     planes,
     updateElement,
     removeCollectionRefs,
@@ -876,7 +876,7 @@ export function SolutionsPage() {
     const dependents = getDependentLocations("solution", id, {
       solutions,
       experiments,
-      results,
+      processes,
       planes,
     })
     if (dependents.length > 0) {

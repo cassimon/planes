@@ -38,6 +38,7 @@ import {
   IconPlus,
   IconPointer,
   IconSeparatorVertical,
+  IconStack3,
   IconUnderline,
   IconX,
 } from "@tabler/icons-react"
@@ -948,6 +949,7 @@ function CollectionEl({
     material: "/materials",
     solution: "/solutions",
     experiment: "/experiments",
+    process: "/processes",
     result: "/results",
     analysis: "/analysis",
   }
@@ -1199,6 +1201,7 @@ const REF_ICONS: Record<
   material: { Icon: IconBox, color: "teal" },
   solution: { Icon: IconFlask, color: "blue" },
   experiment: { Icon: IconPlayerPlay, color: "grape" },
+  process: { Icon: IconStack3, color: "gray" },
   result: { Icon: IconDownload, color: "orange" },
   analysis: { Icon: IconChartBar, color: "red" },
 }
