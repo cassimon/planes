@@ -174,7 +174,7 @@ function ProcessParamInput({
   placeholder?: string
   unit?: string
   initialParam?: ProcessParam
-  sourceSuggestions?: Array<{ label: string; param: ProcessParam }>
+  sourceSuggestions?: Array<{ name: string; origin: string; param: ProcessParam }>
   type?: "text" | "number" | "datetime-local"
 }) {
   const [expanded, setExpanded] = useState(Boolean(param))
@@ -197,12 +197,12 @@ function ProcessParamInput({
           }}
           style={{ justifyContent: "flex-start" }}
         >
-          Add {label}
+          {`Add ${label}`.replace(/\s*\([^)]*\)/g, "")}
         </Button>
 
         {sourceSuggestions.map((source) => (
           <Button
-            key={`${source.label}:${source.param.mode}:${source.param.value}`}
+            key={`${source.name}:${source.origin}:${source.param.mode}:${source.param.value}`}
             variant="subtle"
             size="xs"
             color="teal"
@@ -213,7 +213,7 @@ function ProcessParamInput({
             }}
             style={{ justifyContent: "flex-start" }}
           >
-            as {source.label}
+            {`as: ${source.name} of ${source.origin}`}
           </Button>
         ))}
       </Group>
@@ -749,12 +749,12 @@ export function ProcessesPage() {
   }, [selectedProcess, selectedStep])
 
   const getSourceSuggestions = useCallback(
-    (key: ProcessParameterKey): Array<{ label: string; param: ProcessParam }> => {
+    (key: ProcessParameterKey): Array<{ name: string; origin: string; param: ProcessParam }> => {
       if (!selectedProcess || !selectedStep || selectedStageIndex < 0) {
         return []
       }
       const seen = new Set<string>()
-      const suggestions: Array<{ label: string; param: ProcessParam }> = []
+      const suggestions: Array<{ name: string; origin: string; param: ProcessParam }> = []
 
       for (let i = selectedStageIndex - 1; i >= 0; i--) {
         const stage = selectedProcess.stages[i]
@@ -768,8 +768,16 @@ export function ProcessesPage() {
             continue
           }
           seen.add(signature)
+          const origin = step.materialId
+            ? (materials.find((material) => material.id === step.materialId)?.name ||
+              "Unnamed material")
+            : step.solutionId
+              ? (solutions.find((solution) => solution.id === step.solutionId)?.name ||
+                "Unnamed solution")
+              : "No material"
           suggestions.push({
-            label: step.name || `Step ${i + 1}`,
+            name: step.depositionMethod?.value?.trim() || step.name || `Step ${i + 1}`,
+            origin,
             param: { ...stepParam },
           })
           if (suggestions.length >= 4) {
@@ -780,7 +788,7 @@ export function ProcessesPage() {
 
       return suggestions
     },
-    [selectedProcess, selectedStageIndex, selectedStep],
+    [materials, selectedProcess, selectedStageIndex, selectedStep, solutions],
   )
 
   const displayedStages = useMemo(() => {
@@ -909,6 +917,7 @@ export function ProcessesPage() {
 
   const inlineStepDetailsPanel = selectedStep ? (
     <Paper
+      data-step-details="true"
       p="md"
       radius="md"
       withBorder
@@ -1375,6 +1384,7 @@ export function ProcessesPage() {
                         const target = e.target as HTMLElement
                         if (
                           target.closest('[data-step-box="true"]') ||
+                          target.closest('[data-step-details="true"]') ||
                           target.closest('[role="listbox"]') ||
                           target.closest('[role="option"]') ||
                           target.closest('.mantine-Select-dropdown')

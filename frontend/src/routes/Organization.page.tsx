@@ -34,9 +34,11 @@ import {
   IconLetterT,
   IconMinus,
   IconNote,
+  IconPencil,
   IconPlayerPlay,
   IconPlus,
   IconPointer,
+  IconSquare,
   IconSeparatorVertical,
   IconStack3,
   IconUnderline,
@@ -704,85 +706,169 @@ const LINE_COLORS = [
 function LineOverlay({
   lines,
   pan,
+  canMove,
+  activeId,
+  setActiveId,
   onUpdate,
   onDelete,
 }: {
   lines: CanvasLineElement[]
   pan: Vec2
+  canMove: boolean
+  activeId: string | null
+  setActiveId: (id: string | null) => void
   onUpdate: (el: CanvasLineElement) => void
   onDelete: (id: string) => void
 }) {
   const [hovered, setHovered] = useState<string | null>(null)
+  const moveRef = useRef<{
+    id: string
+    mouse: Vec2
+    origin: Vec2[]
+  } | null>(null)
 
-  const cycleColor = (line: CanvasLineElement) => {
-    const idx = LINE_COLORS.indexOf(line.color || LINE_COLORS[0])
-    const next = LINE_COLORS[(idx + 1) % LINE_COLORS.length]
-    onUpdate({ ...line, color: next })
+  const toPath = (line: CanvasLineElement): string => {
+    if (line.points.length < 2) {
+      return ""
+    }
+    if (line.kind === "rectangle") {
+      const a = line.points[0]
+      const b = line.points[line.points.length - 1]
+      const x1 = a.x + pan.x
+      const y1 = a.y + pan.y
+      const x2 = b.x + pan.x
+      const y2 = b.y + pan.y
+      return `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2} L ${x1} ${y2} Z`
+    }
+    return line.points
+      .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x + pan.x} ${p.y + pan.y}`)
+      .join(" ")
   }
 
+  const boundsOf = (line: CanvasLineElement) => {
+    const xs = line.points.map((p) => p.x + pan.x)
+    const ys = line.points.map((p) => p.y + pan.y)
+    return {
+      left: Math.min(...xs),
+      right: Math.max(...xs),
+      top: Math.min(...ys),
+      bottom: Math.max(...ys),
+    }
+  }
+
+  const activeLine = lines.find((l) => l.id === activeId)
+  const activeBounds = activeLine ? boundsOf(activeLine) : null
+
   return (
-    <svg
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        inset: 0,
-        width: "100%",
-        height: "100%",
-        overflow: "visible",
-        pointerEvents: "none",
-      }}
-    >
-      {lines.map((line) => {
-        if (line.points.length < 2) {
-          return null
-        }
-        const d = line.points
-          .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x + pan.x} ${p.y + pan.y}`)
-          .join(" ")
-        const color = line.color || LINE_COLORS[0]
-        return (
-          <g key={line.id}>
-            {/* hit-area */}
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: SVG path used as interactive canvas element */}
-            <path
-              d={d}
-              stroke="transparent"
-              strokeWidth={12}
-              fill="none"
-              style={{ pointerEvents: "stroke", cursor: "pointer" }}
-              onMouseEnter={() => setHovered(line.id)}
-              onMouseLeave={() => setHovered(null)}
-              onClick={(e) => {
-                if (e.shiftKey) {
-                  cycleColor(line)
-                } else {
-                  modals.openConfirmModal({
-                    title: "Delete line",
-                    children: (
-                      <Text size="sm">
-                        Remove this line? (Shift+click to change color)
-                      </Text>
-                    ),
-                    labels: { confirm: "Delete", cancel: "Cancel" },
-                    confirmProps: { color: "red" },
-                    onConfirm: () => onDelete(line.id),
+    <>
+      <svg
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          overflow: "visible",
+          pointerEvents: "none",
+        }}
+      >
+        {lines.map((line) => {
+          if (line.points.length < 2) {
+            return null
+          }
+          const d = toPath(line)
+          const color = line.color || LINE_COLORS[0]
+          const strokeWidth = line.strokeWidth || 2
+          return (
+            <g key={line.id}>
+              {/* biome-ignore lint/a11y/noStaticElementInteractions: SVG path used as interactive canvas element */}
+              <path
+                d={d}
+                stroke="transparent"
+                strokeWidth={Math.max(12, strokeWidth + 8)}
+                fill="none"
+                style={{ pointerEvents: "stroke", cursor: canMove ? "grab" : "pointer" }}
+                onMouseEnter={() => setHovered(line.id)}
+                onMouseLeave={() => setHovered(null)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setActiveId(line.id)
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  setActiveId(line.id)
+                  if (!canMove) {
+                    return
+                  }
+                  ;(e.target as SVGPathElement).setPointerCapture(e.pointerId)
+                  moveRef.current = {
+                    id: line.id,
+                    mouse: { x: e.clientX, y: e.clientY },
+                    origin: line.points.map((p) => ({ ...p })),
+                  }
+                }}
+                onPointerMove={(e) => {
+                  if (!moveRef.current || moveRef.current.id !== line.id) {
+                    return
+                  }
+                  e.stopPropagation()
+                  const dx = e.clientX - moveRef.current.mouse.x
+                  const dy = e.clientY - moveRef.current.mouse.y
+                  onUpdate({
+                    ...line,
+                    points: moveRef.current.origin.map((p) => ({
+                      x: snapToGrid(p.x + dx),
+                      y: snapToGrid(p.y + dy),
+                    })),
                   })
+                }}
+                onPointerUp={(e) => {
+                  e.stopPropagation()
+                  moveRef.current = null
+                }}
+              />
+              <path
+                d={d}
+                stroke={
+                  activeId === line.id
+                    ? "var(--mantine-color-blue-6)"
+                    : hovered === line.id
+                      ? "var(--mantine-color-red-5)"
+                      : color
                 }
-              }}
-            />
-            <path
-              d={d}
-              stroke={
-                hovered === line.id ? "var(--mantine-color-red-5)" : color
-              }
-              strokeWidth={2}
-              fill="none"
-              style={{ pointerEvents: "none" }}
-            />
-          </g>
-        )
-      })}
-    </svg>
+                strokeWidth={strokeWidth}
+                fill="none"
+                style={{ pointerEvents: "none" }}
+              />
+            </g>
+          )
+        })}
+      </svg>
+
+      {activeLine && activeBounds && (
+        <ActionIcon
+          size="xs"
+          variant="filled"
+          color="red"
+          radius="xl"
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            onDelete(activeLine.id)
+            setActiveId(null)
+          }}
+          style={{
+            position: "absolute",
+            left: activeBounds.right + 6,
+            top: activeBounds.top - 10,
+            zIndex: 5,
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+          }}
+        >
+          <IconX size={10} />
+        </ActionIcon>
+      )}
+    </>
   )
 }
 
@@ -2130,6 +2216,8 @@ type CanvasTool =
   | "text"
   | "plaintext"
   | "line"
+  | "pen"
+  | "rectangle"
   | "collection"
 
 function PlaneCanvas({
@@ -2190,8 +2278,11 @@ function PlaneCanvas({
   const [editingPlaintextId, setEditingPlaintextId] = useState<string | null>(
     null,
   )
+  const [activeDrawId, setActiveDrawId] = useState<string | null>(null)
+  const [strokeWidth, setStrokeWidth] = useState<number>(2)
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
   const drawingLineId = useRef<string | null>(null)
+  const drawingKindRef = useRef<"line" | "pen" | "rectangle" | null>(null)
   const plaintextEditingRef = useRef(false)
 
   // ── Collection fusion state ────────────────────────────────────────────────────────────────
@@ -2536,6 +2627,7 @@ function PlaneCanvas({
     // clicking bare canvas background deselects active collection and pans
     if (tool === "select") {
       setActiveCollectionId(null)
+      setActiveDrawId(null)
       if (e.target === e.currentTarget) {
         isPanning.current = true
         panStart.current = {
@@ -2593,7 +2685,12 @@ function PlaneCanvas({
 
     // For placement tools, only act on the bare canvas background - bail if clicking on an existing element
     const isPlacementTool =
-      tool === "text" || tool === "plaintext" || tool === "collection"
+      tool === "text" ||
+      tool === "plaintext" ||
+      tool === "collection" ||
+      tool === "line" ||
+      tool === "pen" ||
+      tool === "rectangle"
     if (isPlacementTool && e.target !== e.currentTarget) {
       return
     }
@@ -2632,8 +2729,33 @@ function PlaneCanvas({
       updateElement(plane.id, {
         ...el,
         color: selectedColor,
+        strokeWidth,
+        kind: "line",
       } as CanvasLineElement)
       drawingLineId.current = el.id
+      drawingKindRef.current = "line"
+    } else if (tool === "pen") {
+      const el = addLineElement(plane.id, pos)
+      updateElement(plane.id, {
+        ...el,
+        points: [pos, pos],
+        color: selectedColor,
+        strokeWidth,
+        kind: "pen",
+      } as CanvasLineElement)
+      drawingLineId.current = el.id
+      drawingKindRef.current = "pen"
+    } else if (tool === "rectangle") {
+      const el = addLineElement(plane.id, pos)
+      updateElement(plane.id, {
+        ...el,
+        points: [pos, pos],
+        color: selectedColor,
+        strokeWidth,
+        kind: "rectangle",
+      } as CanvasLineElement)
+      drawingLineId.current = el.id
+      drawingKindRef.current = "rectangle"
     }
   }
 
@@ -2671,15 +2793,25 @@ function PlaneCanvas({
     } else if (mouseCanvasPos !== null) {
       setMouseCanvasPos(null)
     }
-    if (tool === "line" && drawingLineId.current) {
+    if (
+      (tool === "line" || tool === "pen" || tool === "rectangle") &&
+      drawingLineId.current
+    ) {
       const pos = canvasCoords(e, containerRef, pan)
       const existing = plane.elements.find(
         (el) => el.id === drawingLineId.current,
       ) as CanvasLineElement | undefined
       if (existing && existing.points.length >= 2) {
-        // Update the last point (the "live" end)
-        const newPoints = [...existing.points]
-        newPoints[newPoints.length - 1] = pos
+        let newPoints = [...existing.points]
+        if (drawingKindRef.current === "pen") {
+          const last = newPoints[newPoints.length - 1]
+          if (!last || last.x !== pos.x || last.y !== pos.y) {
+            newPoints = [...newPoints, pos]
+          }
+        } else {
+          // Update the last point (the "live" end)
+          newPoints[newPoints.length - 1] = pos
+        }
         updateElement(plane.id, {
           ...existing,
           points: newPoints,
@@ -2694,9 +2826,15 @@ function PlaneCanvas({
       panStart.current = null
       return
     }
-    if (tool === "line" && drawingLineId.current) {
-      // Finalize the line (the second point was already placed via onMouseMove)
+    if (
+      (tool === "line" || tool === "pen" || tool === "rectangle") &&
+      drawingLineId.current
+    ) {
+      // Finalize the drawn element.
+      const finishedId = drawingLineId.current
       drawingLineId.current = null
+      drawingKindRef.current = null
+      setActiveDrawId(finishedId)
       setTool("select")
     }
   }
@@ -2975,6 +3113,56 @@ function PlaneCanvas({
             <IconMinus size={16} />
           </ActionIcon>
         </Tooltip>
+        <Tooltip label="Free draw" position="bottom">
+          <ActionIcon
+            variant={tool === "pen" ? "filled" : "subtle"}
+            style={toolStyle("pen")}
+            onClick={() => setTool("pen")}
+          >
+            <IconPencil size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Draw rectangle" position="bottom">
+          <ActionIcon
+            variant={tool === "rectangle" ? "filled" : "subtle"}
+            style={toolStyle("rectangle")}
+            onClick={() => setTool("rectangle")}
+          >
+            <IconSquare size={16} />
+          </ActionIcon>
+        </Tooltip>
+
+        {(tool === "line" || tool === "pen" || tool === "rectangle") && (
+          <>
+            <Divider orientation="vertical" />
+            <Tooltip label="Line strength" position="bottom">
+              <Group gap={4}>
+                {[1, 2, 4, 6].map((w) => (
+                  <ActionIcon
+                    key={w}
+                    variant={strokeWidth === w ? "filled" : "subtle"}
+                    color={strokeWidth === w ? "blue" : "gray"}
+                    onClick={() => {
+                      setStrokeWidth(w)
+                      if (activeDrawId) {
+                        const active = plane.elements.find(
+                          (e) => e.id === activeDrawId && e.type === "line",
+                        ) as CanvasLineElement | undefined
+                        if (active) {
+                          updateElement(plane.id, { ...active, strokeWidth: w })
+                        }
+                      }
+                    }}
+                  >
+                    <Text size="xs" fw={700}>
+                      {w}
+                    </Text>
+                  </ActionIcon>
+                ))}
+              </Group>
+            </Tooltip>
+          </>
+        )}
         <Tooltip label="Add Collection folder" position="bottom">
           <ActionIcon
             variant={tool === "collection" ? "filled" : "subtle"}
@@ -3090,6 +3278,9 @@ function PlaneCanvas({
           <LineOverlay
             lines={lines}
             pan={pan}
+            canMove={tool === "select"}
+            activeId={activeDrawId}
+            setActiveId={setActiveDrawId}
             onUpdate={(el) => updateElement(plane.id, el)}
             onDelete={(id) => deleteElement(plane.id, id)}
           />
@@ -3358,11 +3549,80 @@ function PlaneCanvas({
                         updateElement(plane.id, {
                           ...el,
                           color: selectedColor,
+                          strokeWidth,
+                          kind: "line",
                         } as CanvasLineElement)
                         drawingLineId.current = el.id
+                        drawingKindRef.current = "line"
                         setElementPickerOpen(false)
                         setElementPickerPos(null)
                         setTool("line")
+                      },
+                    },
+                    {
+                      label: "Free Draw",
+                      Icon: IconPencil,
+                      action: () => {
+                        const pos = canvasCoords(
+                          {
+                            clientX:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .left || 0) + elementPickerPos.x,
+                            clientY:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .top || 0) + elementPickerPos.y,
+                          } as MouseEvent<HTMLDivElement>,
+                          containerRef,
+                          pan,
+                        )
+                        const el = addLineElement(plane.id, pos)
+                        updateElement(plane.id, {
+                          ...el,
+                          points: [pos, pos],
+                          color: selectedColor,
+                          strokeWidth,
+                          kind: "pen",
+                        } as CanvasLineElement)
+                        drawingLineId.current = el.id
+                        drawingKindRef.current = "pen"
+                        setElementPickerOpen(false)
+                        setElementPickerPos(null)
+                        setTool("pen")
+                      },
+                    },
+                    {
+                      label: "Draw Rectangle",
+                      Icon: IconSquare,
+                      action: () => {
+                        const pos = canvasCoords(
+                          {
+                            clientX:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .left || 0) + elementPickerPos.x,
+                            clientY:
+                              (containerRef.current
+                                ?.getBoundingClientRect()
+                                .top || 0) + elementPickerPos.y,
+                          } as MouseEvent<HTMLDivElement>,
+                          containerRef,
+                          pan,
+                        )
+                        const el = addLineElement(plane.id, pos)
+                        updateElement(plane.id, {
+                          ...el,
+                          points: [pos, pos],
+                          color: selectedColor,
+                          strokeWidth,
+                          kind: "rectangle",
+                        } as CanvasLineElement)
+                        drawingLineId.current = el.id
+                        drawingKindRef.current = "rectangle"
+                        setElementPickerOpen(false)
+                        setElementPickerPos(null)
+                        setTool("rectangle")
                       },
                     },
                   ] as const

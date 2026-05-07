@@ -640,6 +640,8 @@ export type CanvasLineElement = {
   type: "line"
   points: Vec2[] // sequence of absolute canvas coordinates
   color?: string
+  kind?: "line" | "pen" | "rectangle"
+  strokeWidth?: number
 }
 
 /**
