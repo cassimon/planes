@@ -222,7 +222,14 @@ def create_nomad_metadata_yaml(
         logger.warning(f"No frontend data found for experiment {experiment_id}, using database fields")
         
         # Fall back to database fields if frontend_data is empty
-        if experiment.layers:
+        process_steps = []
+        if getattr(experiment, "process", None) and getattr(experiment.process, "steps", None):
+            process_steps = sorted(
+                list(experiment.process.steps),
+                key=lambda step: (step.level, str(step.id)),
+            )
+
+        if process_steps:
             exp_data = {
                 "name": experiment.name,
                 "description": experiment.description or "",
@@ -230,10 +237,10 @@ def create_nomad_metadata_yaml(
                 "substrateMaterial": "Unknown",  # Not stored directly in Experiment model
                 "layers": [
                     {
-                        "id": str(layer.id),
-                        "name": layer.name,
-                        "layerType": layer.layer_type,
-                        "color": "#888888",
+                        "id": str(step.id),
+                        "name": step.name,
+                        "layerType": step.step_category,
+                        "color": step.color or "#888888",
                         "depositionMethod": {"value": "Unknown"},
                         "substrateTemp": None,
                         "depositionAtmosphere": None,
@@ -243,7 +250,7 @@ def create_nomad_metadata_yaml(
                         "annealingTemp": None,
                         "annealingAtmosphere": None,
                     }
-                    for layer in experiment.layers
+                    for step in process_steps
                 ]
             }
         else:

@@ -17,8 +17,9 @@ from app.models import (
     Material,
     Solution,
     SolutionComponent,
+    Process,
+    ProcessStep,
     Experiment,
-    ExperimentLayer,
     Substrate,
     ExperimentResults,
     MeasurementFile,
@@ -70,6 +71,11 @@ def _safe_datetime(val: Any) -> datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _extract_overflow(payload: dict[str, Any], known_keys: set[str]) -> dict[str, Any] | None:
+    overflow = {k: v for k, v in payload.items() if k not in known_keys}
+    return overflow or None
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +136,54 @@ def read_state(session: SessionDep, current_user: CurrentUser) -> Any:
                 "numSubstrates": 1, "devicesPerSubstrate": 4,
                 "deviceArea": e.active_area_cm2 or 0.09,
                 "deviceType": e.device_type or "film",
-                "layers": [], "substrates": [], "hasResults": False,
+                "processId": str(e.process_id) if e.process_id else "",
+                "substrates": [], "hasResults": False,
             })
+
+    # --- Processes ---
+    processes_db = session.exec(select(Process).where(Process.owner_id == uid)).all()
+    processes_out = []
+    for p in processes_db:
+        if p.frontend_data:
+            processes_out.append(p.frontend_data)
+            continue
+
+        steps_db = session.exec(
+            select(ProcessStep)
+            .where(ProcessStep.process_id == p.id)
+            .order_by(ProcessStep.level.asc(), ProcessStep.name.asc())
+        ).all()
+
+        stages_map: dict[int, list[dict[str, Any]]] = {}
+        for step in steps_db:
+            step_payload = (
+                dict(step.frontend_data)
+                if step.frontend_data
+                else {
+                    "id": str(step.id),
+                    "name": step.name,
+                    "stepCategory": step.step_category or "wet_deposition",
+                    "color": step.color or "#6f7cc3",
+                    "materialId": str(step.material_id) if step.material_id else None,
+                    "solutionId": str(step.solution_id) if step.solution_id else None,
+                    "notes": step.notes,
+                }
+            )
+            stages_map.setdefault(step.level, []).append(step_payload)
+
+        stages = [
+            {"index": level, "alternatives": alternatives}
+            for level, alternatives in sorted(stages_map.items(), key=lambda kv: kv[0])
+        ]
+
+        processes_out.append(
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "description": p.description or "",
+                "stages": stages,
+            }
+        )
 
     # --- Results ---
     results_db = session.exec(select(ExperimentResults).where(ExperimentResults.owner_id == uid)).all()
@@ -170,15 +222,20 @@ def read_state(session: SessionDep, current_user: CurrentUser) -> Any:
     data = {
         "materials": materials_out,
         "solutions": solutions_out,
+        "processes": processes_out,
         "experiments": experiments_out,
         "results": results_out,
         "planes": planes_out,
     }
 
     logger.info(
-        "GET /state/ user=%s — materials=%d solutions=%d experiments=%d "
+        "GET /state/ user=%s — materials=%d solutions=%d processes=%d experiments=%d "
         "results=%d planes=%d",
-        uid, len(materials_out), len(solutions_out), len(experiments_out),
+        uid,
+        len(materials_out),
+        len(solutions_out),
+        len(processes_out),
+        len(experiments_out),
         len(results_out), len(planes_out),
     )
 
@@ -207,11 +264,12 @@ def update_state(
     data = body.data or {}
 
     logger.info(
-        "PUT /state/ user=%s — materials=%d solutions=%d experiments=%d "
+        "PUT /state/ user=%s — materials=%d solutions=%d processes=%d experiments=%d "
         "results=%d planes=%d",
         uid,
         len(data.get("materials", [])),
         len(data.get("solutions", [])),
+        len(data.get("processes", [])),
         len(data.get("experiments", [])),
         len(data.get("results", [])),
         len(data.get("planes", [])),
@@ -316,7 +374,49 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
         session.delete(existing_sols[old_id])
 
     # ------------------------------------------------------------------
-    # 3. Experiments (with layers + substrates)
+    # 3. Processes (with steps)
+    # ------------------------------------------------------------------
+    incoming_processes = data.get("processes", [])
+    incoming_proc_ids: set[_uuid.UUID] = set()
+
+    existing_procs = {
+        p.id: p
+        for p in session.exec(select(Process).where(Process.owner_id == uid)).all()
+    }
+
+    for p_data in incoming_processes:
+        pid = _uuid_or_gen(p_data.get("id"))
+        incoming_proc_ids.add(pid)
+        overflow_data = _extract_overflow(
+            p_data,
+            {"id", "name", "description", "stages"},
+        )
+        if pid in existing_procs:
+            proc = existing_procs[pid]
+            proc.name = p_data.get("name") or proc.name
+            proc.description = p_data.get("description")
+            proc.frontend_data = p_data
+            proc.overflow_data = overflow_data
+            flag_modified(proc, "frontend_data")
+            session.add(proc)
+        else:
+            proc = Process(
+                id=pid,
+                owner_id=uid,
+                name=p_data.get("name", ""),
+                description=p_data.get("description"),
+                frontend_data=p_data,
+                overflow_data=overflow_data,
+            )
+            session.add(proc)
+        session.flush()  # ensure process exists for FK
+        _sync_process_steps(session, pid, p_data.get("stages", []))
+
+    for old_id in set(existing_procs) - incoming_proc_ids:
+        session.delete(existing_procs[old_id])
+
+    # ------------------------------------------------------------------
+    # 4. Experiments (with substrates, linked to process)
     # ------------------------------------------------------------------
     incoming_experiments = data.get("experiments", [])
     incoming_exp_ids: set[_uuid.UUID] = set()
@@ -328,6 +428,27 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
 
     for e_data in incoming_experiments:
         eid = _uuid_or_gen(e_data.get("id"))
+        process_id_str = e_data.get("processId") or e_data.get("process_id")
+        process_id: _uuid.UUID | None = None
+        if process_id_str:
+            try:
+                parsed_process_id = _uuid.UUID(process_id_str)
+                if parsed_process_id in incoming_proc_ids:
+                    process_id = parsed_process_id
+            except (ValueError, AttributeError):
+                process_id = None
+
+        overflow_data = _extract_overflow(
+            e_data,
+            {
+                "id", "name", "description", "date", "endDate", "architecture",
+                "substrateMaterial", "substrateWidth", "substrateLength", "numSubstrates",
+                "devicesPerSubstrate", "deviceArea", "deviceType", "deviceLayoutImage",
+                "processId", "process_id", "substrates", "processingTimes", "hasResults",
+                "notes",
+            },
+        )
+
         incoming_exp_ids.add(eid)
         if eid in existing_exps:
             exp = existing_exps[eid]
@@ -335,7 +456,9 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
             exp.description = e_data.get("description")
             exp.device_type = e_data.get("deviceType") or e_data.get("device_type")
             exp.active_area_cm2 = _safe_float(e_data.get("deviceArea") or e_data.get("active_area_cm2"))
+            exp.process_id = process_id
             exp.frontend_data = e_data
+            exp.overflow_data = overflow_data
             flag_modified(exp, "frontend_data")
             session.add(exp)
         else:
@@ -346,18 +469,19 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
                 description=e_data.get("description"),
                 device_type=e_data.get("deviceType") or e_data.get("device_type"),
                 active_area_cm2=_safe_float(e_data.get("deviceArea") or e_data.get("active_area_cm2")),
+                process_id=process_id,
                 frontend_data=e_data,
+                overflow_data=overflow_data,
             )
             session.add(exp)
         session.flush()  # ensure eid exists for FK
-        _sync_experiment_layers(session, eid, e_data.get("layers", []))
         _sync_experiment_substrates(session, eid, e_data.get("substrates", []))
 
     for old_id in set(existing_exps) - incoming_exp_ids:
         session.delete(existing_exps[old_id])
 
     # ------------------------------------------------------------------
-    # 4. Results
+    # 5. Results
     # ------------------------------------------------------------------
     incoming_results = data.get("results", [])
     incoming_res_ids: set[_uuid.UUID] = set()
@@ -383,12 +507,21 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
         if exp_id not in incoming_exp_ids:
             logger.warning(f"Skipping result for non-existent experiment: {exp_id}")
             continue
+
+        overflow_data = _extract_overflow(
+            r_data,
+            {
+                "id", "experimentId", "experiment_id", "notes", "files",
+                "deviceGroups", "groupingStrategy", "matchingStrategy", "updatedAt",
+            },
+        )
             
         incoming_res_ids.add(rid)
         if rid in existing_res:
             res = existing_res[rid]
             res.experiment_id = exp_id
             res.frontend_data = r_data
+            res.overflow_data = overflow_data
             flag_modified(res, "frontend_data")
             session.add(res)
         else:
@@ -397,6 +530,7 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
                 owner_id=uid,
                 experiment_id=exp_id,
                 frontend_data=r_data,
+                overflow_data=overflow_data,
             )
             session.add(res)
 
@@ -404,7 +538,7 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
         session.delete(existing_res[old_id])
 
     # ------------------------------------------------------------------
-    # 5. Planes + CanvasElements
+    # 6. Planes + CanvasElements
     # ------------------------------------------------------------------
     incoming_planes = data.get("planes", [])
     incoming_plane_ids: set[_uuid.UUID] = set()
@@ -438,7 +572,7 @@ def _do_sync(session: SessionDep, uid: _uuid.UUID, data: dict) -> UserStatePubli
         session.delete(existing_planes[old_id])
 
     # ------------------------------------------------------------------
-    # 6. Persist the JSON blob too (backwards-compat + timestamp)
+    # 7. Persist the JSON blob too (backwards-compat + timestamp)
     # ------------------------------------------------------------------
     us = session.exec(select(UserState).where(UserState.owner_id == uid)).first()
     now = datetime.now(timezone.utc)
@@ -502,30 +636,93 @@ def _sync_solution_components(
         session.delete(existing[old_id])
 
 
-def _sync_experiment_layers(
-    session: SessionDep, experiment_id: _uuid.UUID, layers: list[dict],
+def _sync_process_steps(
+    session: SessionDep, process_id: _uuid.UUID, stages: list[dict],
 ) -> None:
     existing = {
-        l.id: l
-        for l in session.exec(
-            select(ExperimentLayer).where(ExperimentLayer.experiment_id == experiment_id)
+        s.id: s
+        for s in session.exec(
+            select(ProcessStep).where(ProcessStep.process_id == process_id)
         ).all()
     }
     incoming_ids: set[_uuid.UUID] = set()
-    for l_data in layers:
-        lid = _uuid_or_gen(l_data.get("id"))
-        incoming_ids.add(lid)
-        if lid in existing:
-            layer = existing[lid]
-            layer.name = l_data.get("name") or layer.name
-            session.add(layer)
-        else:
-            layer = ExperimentLayer(
-                id=lid,
-                experiment_id=experiment_id,
-                name=l_data.get("name", "Layer"),
+    for stage in stages:
+        level = int(stage.get("index", 0) or 0)
+        for step_data in stage.get("alternatives", []):
+            sid = _uuid_or_gen(step_data.get("id"))
+            incoming_ids.add(sid)
+
+            material_id = None
+            material_id_raw = step_data.get("materialId") or step_data.get("material_id")
+            if material_id_raw:
+                try:
+                    material_id = _uuid.UUID(material_id_raw)
+                except (ValueError, AttributeError):
+                    material_id = None
+
+            solution_id = None
+            solution_id_raw = step_data.get("solutionId") or step_data.get("solution_id")
+            if solution_id_raw:
+                try:
+                    solution_id = _uuid.UUID(solution_id_raw)
+                except (ValueError, AttributeError):
+                    solution_id = None
+
+            overflow_data = _extract_overflow(
+                step_data,
+                {
+                    "id", "name", "stepCategory", "step_category", "color",
+                    "materialId", "material_id", "solutionId", "solution_id",
+                    "notes", "depositionMethod", "depositionStartTime", "substrateTemp",
+                    "depositionAtmosphere", "depositionParameters", "solutionVolume",
+                    "dryingMethod", "annealingStartTime", "annealingTime",
+                    "annealingTemp", "annealingAtmosphere",
+                },
             )
-            session.add(layer)
+
+            param_keys = [
+                "depositionMethod", "depositionStartTime", "substrateTemp",
+                "depositionAtmosphere", "depositionParameters", "solutionVolume",
+                "dryingMethod", "annealingStartTime", "annealingTime",
+                "annealingTemp", "annealingAtmosphere",
+            ]
+            params = {
+                k: step_data.get(k)
+                for k in param_keys
+                if step_data.get(k) is not None
+            }
+
+            if sid in existing:
+                step = existing[sid]
+                step.name = step_data.get("name") or step.name
+                step.level = level
+                step.step_category = step_data.get("stepCategory") or step_data.get("step_category")
+                step.color = step_data.get("color")
+                step.material_id = material_id
+                step.solution_id = solution_id
+                step.notes = step_data.get("notes")
+                step.parameters = params or None
+                step.overflow_data = overflow_data
+                step.frontend_data = step_data
+                flag_modified(step, "frontend_data")
+                session.add(step)
+            else:
+                step = ProcessStep(
+                    id=sid,
+                    process_id=process_id,
+                    name=step_data.get("name", "Step"),
+                    level=level,
+                    step_category=step_data.get("stepCategory") or step_data.get("step_category"),
+                    color=step_data.get("color"),
+                    material_id=material_id,
+                    solution_id=solution_id,
+                    notes=step_data.get("notes"),
+                    parameters=params or None,
+                    overflow_data=overflow_data,
+                    frontend_data=step_data,
+                )
+                session.add(step)
+
     for old_id in set(existing) - incoming_ids:
         session.delete(existing[old_id])
 
@@ -543,15 +740,29 @@ def _sync_experiment_substrates(
     for s_data in substrates:
         sid = _uuid_or_gen(s_data.get("id"))
         incoming_ids.add(sid)
+        overflow_data = _extract_overflow(
+            s_data,
+            {"id", "name", "notes", "thicknessNm", "thickness_nm", "parameterValues"},
+        )
         if sid in existing:
             sub = existing[sid]
             sub.name = s_data.get("name") or sub.name
+            if "thicknessNm" in s_data or "thickness_nm" in s_data:
+                sub.thickness_nm = _safe_float(
+                    s_data.get("thicknessNm") or s_data.get("thickness_nm"),
+                )
+            sub.overflow_data = overflow_data
             session.add(sub)
         else:
             sub = Substrate(
                 id=sid,
                 experiment_id=experiment_id,
                 name=s_data.get("name", ""),
+                thickness_nm=_safe_float(
+                    s_data.get("thicknessNm") or s_data.get("thickness_nm"),
+                    default=0.0,
+                ) if ("thicknessNm" in s_data or "thickness_nm" in s_data) else None,
+                overflow_data=overflow_data,
             )
             session.add(sub)
     for old_id in set(existing) - incoming_ids:
@@ -633,6 +844,7 @@ def get_bulk_state(session: SessionDep, current_user: CurrentUser) -> Any:
     return BulkStateResponse(
         materials=session.exec(select(Material).where(Material.owner_id == uid)).all(),
         solutions=session.exec(select(Solution).where(Solution.owner_id == uid)).all(),
+        processes=session.exec(select(Process).where(Process.owner_id == uid)).all(),
         experiments=session.exec(select(Experiment).where(Experiment.owner_id == uid)).all(),
         results=session.exec(select(ExperimentResults).where(ExperimentResults.owner_id == uid)).all(),
         planes=session.exec(select(Plane).where(Plane.owner_id == uid)).all(),

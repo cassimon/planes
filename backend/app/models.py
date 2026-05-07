@@ -59,6 +59,7 @@ class User(UserBase, table=True):
     items: list["Item"] = Relationship(back_populates="owner", cascade_delete=True)
     materials: list["Material"] = Relationship(back_populates="owner", cascade_delete=True)
     solutions: list["Solution"] = Relationship(back_populates="owner", cascade_delete=True)
+    processes: list["Process"] = Relationship(back_populates="owner", cascade_delete=True)
     experiments: list["Experiment"] = Relationship(back_populates="owner", cascade_delete=True)
     results: list["ExperimentResults"] = Relationship(back_populates="owner", cascade_delete=True)
     planes: list["Plane"] = Relationship(back_populates="owner", cascade_delete=True)
@@ -237,10 +238,98 @@ class SolutionsPublic(SQLModel):
     count: int
 
 
+# Process
+class ProcessStepBase(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+    level: int = Field(default=0, ge=0)
+    step_category: str | None = Field(default=None, max_length=50)
+    color: str | None = Field(default=None, max_length=50)
+    material_id: uuid.UUID | None = Field(
+        default=None, foreign_key="material.id", ondelete="SET NULL"
+    )
+    solution_id: uuid.UUID | None = Field(
+        default=None, foreign_key="solution.id", ondelete="SET NULL"
+    )
+    notes: str | None = None
+    parameters: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    overflow_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+
+
+class ProcessStepCreate(ProcessStepBase):
+    pass
+
+
+class ProcessStep(ProcessStepBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    process_id: uuid.UUID = Field(
+        foreign_key="process.id", nullable=False, ondelete="CASCADE"
+    )
+    frontend_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    process: Optional["Process"] = Relationship(back_populates="steps")
+
+
+class ProcessStepPublic(ProcessStepBase):
+    id: uuid.UUID
+
+
+class ProcessBase(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    overflow_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+
+
+class ProcessCreate(ProcessBase):
+    steps: list[ProcessStepCreate] = []
+
+
+class ProcessUpdate(ProcessBase):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class Process(ProcessBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    owner_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE"
+    )
+    owner: User | None = Relationship(back_populates="processes")
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),
+    )
+    frontend_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    steps: list[ProcessStep] = Relationship(back_populates="process", cascade_delete=True)
+    experiments: list["Experiment"] = Relationship(back_populates="process")
+
+
+class ProcessPublic(ProcessBase):
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    created_at: datetime | None = None
+    steps: list[ProcessStepPublic]
+
+
+class ProcessesPublic(SQLModel):
+    data: list[ProcessPublic]
+    count: int
+
+
 # Experiment
 class SubstrateBase(SQLModel):
     name: str = Field(min_length=1, max_length=255)
     thickness_nm: float | None = None
+    overflow_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
 
 
 class SubstrateCreate(SubstrateBase):
@@ -259,34 +348,6 @@ class SubstratePublic(SubstrateBase):
     id: uuid.UUID
 
 
-class ExperimentLayerBase(SQLModel):
-    name: str = Field(min_length=1, max_length=255)
-    layer_type: str | None = Field(default=None, max_length=50)  # etl, htl, perovskite, additional, back_contact
-    material_id: uuid.UUID | None = Field(default=None, foreign_key="material.id", ondelete="SET NULL")
-    solution_id: uuid.UUID | None = Field(default=None, foreign_key="solution.id", ondelete="SET NULL")
-    temperature: float | None = None
-    temperature_unit: str = Field(default="°C", max_length=50)
-    duration: float | None = None
-    duration_unit: str = Field(default="min", max_length=50)
-    notes: str | None = None
-
-
-class ExperimentLayerCreate(ExperimentLayerBase):
-    pass
-
-
-class ExperimentLayer(ExperimentLayerBase, table=True):
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    experiment_id: uuid.UUID = Field(
-        foreign_key="experiment.id", nullable=False, ondelete="CASCADE"
-    )
-    experiment: Optional["Experiment"] = Relationship(back_populates="layers")
-
-
-class ExperimentLayerPublic(ExperimentLayerBase):
-    id: uuid.UUID
-
-
 class ExperimentBase(SQLModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -296,8 +357,8 @@ class ExperimentBase(SQLModel):
 
 
 class ExperimentCreate(ExperimentBase):
+    process_id: uuid.UUID | None = None
     substrates: list[SubstrateCreate] = []
-    layers: list[ExperimentLayerCreate] = []
 
 
 class ExperimentUpdate(ExperimentBase):
@@ -314,13 +375,20 @@ class Experiment(ExperimentBase, table=True):
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
     )
+    process_id: uuid.UUID | None = Field(
+        default=None, foreign_key="process.id", ondelete="SET NULL"
+    )
     frontend_data: dict[str, Any] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)
     )
+    overflow_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    process: Process | None = Relationship(back_populates="experiments")
     substrates: list[Substrate] = Relationship(
         back_populates="experiment", cascade_delete=True
     )
-    layers: list[ExperimentLayer] = Relationship(
+    results: list["ExperimentResults"] = Relationship(
         back_populates="experiment", cascade_delete=True
     )
 
@@ -328,9 +396,9 @@ class Experiment(ExperimentBase, table=True):
 class ExperimentPublic(ExperimentBase):
     id: uuid.UUID
     owner_id: uuid.UUID
+    process_id: uuid.UUID | None = None
     created_at: datetime | None = None
     substrates: list[SubstratePublic]
-    layers: list[ExperimentLayerPublic]
 
 
 class ExperimentsPublic(SQLModel):
@@ -404,12 +472,16 @@ class ExperimentResults(ExperimentResultsBase, table=True):
     owner_id: uuid.UUID = Field(
         foreign_key="user.id", nullable=False, ondelete="CASCADE"
     )
+    experiment: Experiment | None = Relationship(back_populates="results")
     owner: User | None = Relationship(back_populates="results")
     created_at: datetime | None = Field(
         default_factory=get_datetime_utc,
         sa_type=DateTime(timezone=True),
     )
     frontend_data: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSONB, nullable=True)
+    )
+    overflow_data: dict[str, Any] | None = Field(
         default=None, sa_column=Column(JSONB, nullable=True)
     )
     measurement_files: list[MeasurementFile] = Relationship(
@@ -535,6 +607,7 @@ class BulkStateResponse(SQLModel):
     """Full application state for bulk loading."""
     materials: list[MaterialPublic]
     solutions: list[SolutionPublic]
+    processes: list[ProcessPublic]
     experiments: list[ExperimentPublic]
     results: list[ExperimentResultsPublic]
     planes: list[PlanePublic]

@@ -21,8 +21,6 @@ from app.models import (
     Experiment,
     ExperimentCreate,
     ExperimentUpdate,
-    ExperimentLayer,
-    ExperimentLayerCreate,
     Substrate,
     SubstrateCreate,
     ExperimentResults,
@@ -179,12 +177,6 @@ def create_experiment(
             substrate_in, update={"experiment_id": db_experiment.id}
         )
         db_experiment.substrates.append(substrate)
-    # Create layers
-    for layer_in in experiment_in.layers:
-        layer = ExperimentLayer.model_validate(
-            layer_in, update={"experiment_id": db_experiment.id}
-        )
-        db_experiment.layers.append(layer)
     session.add(db_experiment)
     session.commit()
     session.refresh(db_experiment)

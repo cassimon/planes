@@ -30,10 +30,34 @@ import {
   type Experiment,
   getExperimentStatus,
   newExperiment,
+  PROCESS_PARAMETER_DEFINITIONS,
   type Process,
+  type ProcessParameterKey,
   type ProcessStep,
   useAppContext,
 } from "../store/AppContext"
+
+type SubstrateGeneratorConfig = {
+  namePrefix: string
+  includeDate: boolean
+  includeExperimentName: boolean
+  addCount: number
+}
+
+function buildGeneratedSubstrateName(
+  index: number,
+  experiment: Experiment,
+  generatorConfig: SubstrateGeneratorConfig,
+) {
+  const parts: string[] = [generatorConfig.namePrefix || "substrate"]
+  if (generatorConfig.includeDate && experiment.date) {
+    parts.push(experiment.date)
+  }
+  if (generatorConfig.includeExperimentName && experiment.name) {
+    parts.push(experiment.name.replace(/\s+/g, "_"))
+  }
+  return `${parts.join("_")}_${index}`
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Edit SubstrateName Generator (simplified display above table)
@@ -42,21 +66,20 @@ import {
 function SubstrateNameGenerator({
   experiment,
   process,
+  generatorConfig,
+  onChangeGeneratorConfig,
   nextStepDefaults,
   onChangeNextStepDefault,
   onUpdate,
 }: {
   experiment: Experiment
   process: Process
+  generatorConfig: SubstrateGeneratorConfig
+  onChangeGeneratorConfig: (patch: Partial<SubstrateGeneratorConfig>) => void
   nextStepDefaults: Record<number, string>
   onChangeNextStepDefault: (stageIndex: number, value: string) => void
   onUpdate: (exp: Experiment) => void
 }) {
-  const [generatorName, setGeneratorName] = useState("substrate")
-  const [addCount, setAddCount] = useState(5)
-  const [includeDate, setIncludeDate] = useState(false)
-  const [includeExpName, setIncludeExpName] = useState(false)
-
   const buildDefaultStageValues = () => {
     const values: Record<string, string> = {}
     process.stages.forEach((stage, idx) => {
@@ -68,30 +91,11 @@ function SubstrateNameGenerator({
   }
 
   const buildSubstrateName = (index: number) => {
-    const parts: string[] = [generatorName || "substrate"]
-    if (includeDate && experiment.date) {
-      parts.push(experiment.date)
-    }
-    if (includeExpName && experiment.name) {
-      parts.push(experiment.name.replace(/\s+/g, "_"))
-    }
-    return `${parts.join("_")}_${index}`
+    return buildGeneratedSubstrateName(index, experiment, generatorConfig)
   }
 
-  const handleAddOne = () => {
-    const newSubstrates = [
-      ...experiment.substrates,
-      {
-        id: crypto.randomUUID(),
-        name: buildSubstrateName(experiment.substrates.length + 1),
-        parameterValues: buildDefaultStageValues(),
-      },
-    ]
-    onUpdate({ ...experiment, numSubstrates: newSubstrates.length, substrates: newSubstrates })
-  }
-
-  const handleAddMultiple = () => {
-    const count = Math.max(1, addCount)
+  const handleAddSubstrates = () => {
+    const count = Math.max(1, generatorConfig.addCount)
     const newSubstrates = [
       ...experiment.substrates,
       ...Array.from({ length: count }, (_, i) => ({
@@ -115,51 +119,39 @@ function SubstrateNameGenerator({
       mb="md"
       style={{ background: "var(--mantine-color-blue-0)" }}
     >
-      <Group justify="space-between" align="flex-end" mb="sm">
-        <Box style={{ flex: 1 }}>
-          <Text size="sm" fw={600} mb="xs">
-            Substrate Name Generator
-          </Text>
-          <Group gap="sm" align="flex-end">
-            <TextInput
-              label="Name Prefix"
-              placeholder="e.g. substrate"
-              size="sm"
-              value={generatorName}
-              onChange={(e) => setGeneratorName(e.currentTarget.value)}
-              style={{ flex: 1, maxWidth: 200 }}
-            />
-            <Checkbox
-              label="Include Date"
-              checked={includeDate}
-              onChange={(e) => setIncludeDate(e.currentTarget.checked)}
-            />
-            <Checkbox
-              label="Include Experiment Name"
-              checked={includeExpName}
-              onChange={(e) => setIncludeExpName(e.currentTarget.checked)}
-            />
-            <Button
-              size="sm"
-              variant="light"
-              leftSection={<IconPlus size={14} />}
-              onClick={handleAddOne}
-            >
-              Add 1
-            </Button>
-            <Button
-              size="sm"
-              variant="light"
-              leftSection={<IconPlus size={14} />}
-              onClick={handleAddMultiple}
-            >
-              Add Multiple
-            </Button>
-          </Group>
-        </Box>
-        <Text size="xs" c="dimmed">
-          Total: {experiment.substrates.length}
-        </Text>
+      <Text size="sm" fw={600} mb="xs">
+        Substrate Name Generator
+      </Text>
+      <Group gap="sm" align="flex-end" wrap="nowrap">
+        <TextInput
+          label="Name Prefix"
+          placeholder="e.g. substrate"
+          size="sm"
+          value={generatorConfig.namePrefix}
+          onChange={(e) => onChangeGeneratorConfig({ namePrefix: e.currentTarget.value })}
+          style={{ flex: 1, minWidth: 180 }}
+        />
+        <Checkbox
+          label="Include Date"
+          checked={generatorConfig.includeDate}
+          onChange={(e) => onChangeGeneratorConfig({ includeDate: e.currentTarget.checked })}
+        />
+        <Checkbox
+          label="Include Experiment Name"
+          checked={generatorConfig.includeExperimentName}
+          onChange={(e) =>
+            onChangeGeneratorConfig({ includeExperimentName: e.currentTarget.checked })
+          }
+        />
+        <NumberInput
+          label="How Many"
+          size="sm"
+          min={1}
+          max={200}
+          value={generatorConfig.addCount}
+          onChange={(v) => onChangeGeneratorConfig({ addCount: Number(v) || 1 })}
+          style={{ width: 120 }}
+        />
       </Group>
 
       <Divider my="sm" />
@@ -167,7 +159,7 @@ function SubstrateNameGenerator({
       <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb="xs">
         Default Values For Next Added Substrates
       </Text>
-      <Group gap="sm" align="flex-end" wrap="wrap" mb="sm">
+      <Group gap="sm" align="flex-end" wrap="wrap">
         {process.stages.map((stage, idx) => (
           <Select
             key={`default-stage-${idx}`}
@@ -192,23 +184,15 @@ function SubstrateNameGenerator({
         ))}
       </Group>
 
-      <Group gap="sm" align="flex-end">
-        <NumberInput
-          label="Add Multiple"
-          size="sm"
-          min={1}
-          max={200}
-          value={addCount}
-          onChange={(v) => setAddCount(Number(v) || 1)}
-          style={{ width: 140 }}
-        />
+      <Group justify="flex-end" mt="sm">
         <Button
-          size="sm"
-          variant="light"
-          leftSection={<IconPlus size={14} />}
-          onClick={handleAddMultiple}
+          size="md"
+          variant="filled"
+          leftSection={<IconPlus size={16} />}
+          onClick={handleAddSubstrates}
+          style={{ minWidth: 140 }}
         >
-          Add Multiple
+          Add
         </Button>
       </Group>
     </Paper>
@@ -344,14 +328,21 @@ function ProcessStepSelector({
 function ExperimentGrid({
   experiment,
   process,
+  generatorConfig,
+  nextStepDefaults,
   onUpdate,
+  onUpdateProcess,
 }: {
   experiment: Experiment
   process: Process
+  generatorConfig: SubstrateGeneratorConfig
+  nextStepDefaults: Record<number, string>
   onUpdate: (exp: Experiment) => void
+  onUpdateProcess: (process: Process) => void
 }) {
   const [variationTarget, setVariationTarget] = useState<string | null>(null)
   const [variationParam, setVariationParam] = useState<string | null>(null)
+  const nameInputRefs = React.useRef<Array<HTMLInputElement | null>>([])
 
   const getStageSelection = (substrateId: string, stageIndex: number): string | null => {
     const substrate = experiment.substrates.find((s) => s.id === substrateId)
@@ -395,6 +386,97 @@ function ExperimentGrid({
         [stageKey]: value,
       },
     })
+  }
+
+  const buildDefaultStageValues = () => {
+    const values: Record<string, string> = {}
+    process.stages.forEach((stage, idx) => {
+      values[`stageSelection:${idx}`] = nextStepDefaults[idx] ?? stage.alternatives[0]?.id ?? "SKIP"
+    })
+    return values
+  }
+
+  const focusNameInput = (index: number) => {
+    const nextInput = nameInputRefs.current[index]
+    if (!nextInput) return
+    nextInput.focus()
+    nextInput.select()
+  }
+
+  const handleSubstrateNameChange = (substrateId: string, name: string) => {
+    onUpdate({
+      ...experiment,
+      substrates: experiment.substrates.map((substrate) =>
+        substrate.id === substrateId ? { ...substrate, name } : substrate,
+      ),
+    })
+  }
+
+  const handleDuplicateSubstrate = (substrateId: string) => {
+    const source = experiment.substrates.find((substrate) => substrate.id === substrateId)
+    if (!source) return
+    const duplicateIndex = experiment.substrates.length + 1
+    const duplicate = {
+      ...source,
+      id: crypto.randomUUID(),
+      name: buildGeneratedSubstrateName(duplicateIndex, experiment, generatorConfig),
+      parameterValues: {
+        ...buildDefaultStageValues(),
+        ...(source.parameterValues ?? {}),
+      },
+    }
+    const newSubstrates = [...experiment.substrates, duplicate]
+    onUpdate({ ...experiment, numSubstrates: newSubstrates.length, substrates: newSubstrates })
+  }
+
+  const handleAddVariation = () => {
+    if (!variationTarget || !variationParam) return
+    const [stageIndexRaw, stepId] = variationTarget.split(":")
+    const stageIndex = Number(stageIndexRaw)
+    const paramKey = variationParam as ProcessParameterKey
+    const targetStep = process.stages[stageIndex]?.alternatives.find((step) => step.id === stepId)
+    if (!targetStep) return
+
+    const baseValue = targetStep[paramKey]?.value ?? ""
+
+    const updatedProcess: Process = {
+      ...process,
+      stages: process.stages.map((stage, idx) =>
+        idx !== stageIndex
+          ? stage
+          : {
+              ...stage,
+              alternatives: stage.alternatives.map((step) =>
+                step.id !== stepId
+                  ? step
+                  : {
+                      ...step,
+                      [paramKey]: {
+                        ...(step[paramKey] ?? { value: baseValue, mode: "variation" }),
+                        value: step[paramKey]?.value ?? baseValue,
+                        mode: "variation",
+                      },
+                    },
+              ),
+            },
+      ),
+    }
+
+    const updatedExperiment: Experiment = {
+      ...experiment,
+      substrates: experiment.substrates.map((substrate) => ({
+        ...substrate,
+        parameterValues: {
+          ...(substrate.parameterValues ?? {}),
+          [`${stepId}:${paramKey}`]: substrate.parameterValues?.[`${stepId}:${paramKey}`] ?? baseValue,
+        },
+      })),
+    }
+
+    onUpdateProcess(updatedProcess)
+    onUpdate(updatedExperiment)
+    setVariationTarget(null)
+    setVariationParam(null)
   }
 
   return (
@@ -473,7 +555,27 @@ function ExperimentGrid({
                     background: "var(--mantine-color-gray-0)",
                   }}
                 >
-                  {substrate.name}
+                  <TextInput
+                    ref={(node) => {
+                      nameInputRefs.current[experiment.substrates.findIndex((s) => s.id === substrate.id)] = node
+                    }}
+                    size="xs"
+                    variant="unstyled"
+                    value={substrate.name}
+                    onChange={(e) => handleSubstrateNameChange(substrate.id, e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      const currentIndex = experiment.substrates.findIndex((s) => s.id === substrate.id)
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        focusNameInput(currentIndex + 1)
+                      }
+                      if (e.key === "Tab") {
+                        e.preventDefault()
+                        focusNameInput(e.shiftKey ? currentIndex - 1 : currentIndex + 1)
+                      }
+                    }}
+                    styles={{ input: { fontWeight: 500 } }}
+                  />
                 </td>
 
                 {process.stages.map((stage, stageIdx) => (
@@ -500,16 +602,28 @@ function ExperimentGrid({
                     textAlign: "center",
                   }}
                 >
-                  <Tooltip label="Remove substrate">
-                    <ActionIcon
-                      size="sm"
-                      variant="subtle"
-                      color="red"
-                      onClick={() => handleRemoveSubstrate(substrate.id)}
-                    >
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  </Tooltip>
+                  <Group justify="center" gap={2} wrap="nowrap">
+                    <Tooltip label="Duplicate substrate">
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="teal"
+                        onClick={() => handleDuplicateSubstrate(substrate.id)}
+                      >
+                        <IconCopy size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                    <Tooltip label="Remove substrate">
+                      <ActionIcon
+                        size="sm"
+                        variant="subtle"
+                        color="red"
+                        onClick={() => handleRemoveSubstrate(substrate.id)}
+                      >
+                        <IconTrash size={14} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Group>
                 </td>
               </tr>
             ))}
@@ -585,15 +699,16 @@ function ExperimentGrid({
               placeholder="Select parameter..."
               value={variationParam}
               onChange={setVariationParam}
-              data={[
-                { value: "depositionParameters", label: "Deposition Parameters" },
-                { value: "annealingTemp", label: "Annealing Temperature" },
-                { value: "annealingTime", label: "Annealing Time" },
-                { value: "substrateTemp", label: "Substrate Temperature" },
-              ]}
+              data={PROCESS_PARAMETER_DEFINITIONS.filter(
+                ({ key }) => key !== "depositionStartTime" && key !== "annealingStartTime",
+              ).map(({ key, label }) => ({ value: key, label }))}
               size="sm"
             />
-            <Button size="sm" disabled={!variationTarget || !variationParam}>
+            <Button
+              size="sm"
+              disabled={!variationTarget || !variationParam}
+              onClick={handleAddVariation}
+            >
               Add Variation
             </Button>
           </Stack>
@@ -618,12 +733,22 @@ export default function ExperimentsPage() {
     experiments,
     setExperiments,
     processes,
+    setProcesses,
     activeEntity,
     setActiveEntity,
   } = useAppContext()
 
   const [selectedExpId, setSelectedExpId] = useState<string | null>(null)
   const [recipeModalOpen, setRecipeModalOpen] = useState(false)
+  const [newExperimentProcessId, setNewExperimentProcessId] = useState<string | null>(
+    null,
+  )
+  const [generatorConfig, setGeneratorConfig] = useState<SubstrateGeneratorConfig>({
+    namePrefix: "substrate",
+    includeDate: false,
+    includeExperimentName: false,
+    addCount: 5,
+  })
   const [nextStepDefaults, setNextStepDefaults] = useState<Record<number, string>>(
     {},
   )
@@ -649,13 +774,25 @@ export default function ExperimentsPage() {
     setActiveEntity({ kind: "experiment", id: selectedExpId })
   }, [selectedExpId, setActiveEntity])
 
+  React.useEffect(() => {
+    if (processes.length === 0) {
+      setNewExperimentProcessId(null)
+      return
+    }
+    if (
+      !newExperimentProcessId ||
+      !processes.some((process) => process.id === newExperimentProcessId)
+    ) {
+      setNewExperimentProcessId(processes[0].id)
+    }
+  }, [newExperimentProcessId, processes])
+
   // Create new experiment
   const handleNewExperiment = () => {
-    // Create with temporary processId, will be set via modal
-    const newExp = newExperiment("") // Will update after recipe selection
+    if (!newExperimentProcessId) return
+    const newExp = newExperiment(newExperimentProcessId)
     setExperiments((prev) => [...prev, newExp])
     setSelectedExpId(newExp.id)
-    setRecipeModalOpen(true)
   }
 
   // Select recipe after creation
@@ -673,6 +810,12 @@ export default function ExperimentsPage() {
   // Update experiment
   const handleUpdateExperiment = (exp: Experiment) => {
     setExperiments((prev) => prev.map((e) => (e.id === exp.id ? exp : e)))
+  }
+
+  const handleUpdateProcess = (updatedProcess: Process) => {
+    setProcesses((prev) =>
+      prev.map((process) => (process.id === updatedProcess.id ? updatedProcess : process)),
+    )
   }
 
   // Delete experiment
@@ -756,8 +899,8 @@ export default function ExperimentsPage() {
       {/* Left Sidebar - Experiment List */}
       <Box
         style={{
-          width: "20%",
-          minWidth: 250,
+          width: "16%",
+          minWidth: 220,
           background: "var(--mantine-color-gray-0)",
           borderRight: "1px solid var(--mantine-color-gray-2)",
           display: "flex",
@@ -766,10 +909,24 @@ export default function ExperimentsPage() {
         }}
       >
         <Stack gap="sm" p="md" style={{ flex: 1, overflowY: "auto" }}>
+          <Select
+            label="Process"
+            placeholder="Select process..."
+            size="xs"
+            searchable
+            data={processes.map((process) => ({
+              value: process.id,
+              label: process.name || "Untitled",
+            }))}
+            value={newExperimentProcessId}
+            onChange={setNewExperimentProcessId}
+          />
+
           <Button
             fullWidth
             leftSection={<IconPlus size={16} />}
             onClick={handleNewExperiment}
+            disabled={!newExperimentProcessId || processes.length === 0}
           >
             New Experiment
           </Button>
@@ -1007,6 +1164,10 @@ export default function ExperimentsPage() {
             <SubstrateNameGenerator
               experiment={selectedExperiment}
               process={selectedProcess}
+              generatorConfig={generatorConfig}
+              onChangeGeneratorConfig={(patch) =>
+                setGeneratorConfig((prev) => ({ ...prev, ...patch }))
+              }
               nextStepDefaults={nextStepDefaults}
               onChangeNextStepDefault={(stageIndex, value) =>
                 setNextStepDefaults((prev) => ({ ...prev, [stageIndex]: value }))
@@ -1022,7 +1183,10 @@ export default function ExperimentsPage() {
               <ExperimentGrid
                 experiment={selectedExperiment}
                 process={selectedProcess}
+                generatorConfig={generatorConfig}
+                nextStepDefaults={nextStepDefaults}
                 onUpdate={handleUpdateExperiment}
+                onUpdateProcess={handleUpdateProcess}
               />
             </Paper>
 
