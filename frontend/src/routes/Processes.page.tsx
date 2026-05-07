@@ -18,6 +18,7 @@ import {
   Textarea,
   Tooltip,
 } from "@mantine/core"
+import { modals } from "@mantine/modals"
 import {
   IconAtom,
   IconChevronDown,
@@ -35,11 +36,13 @@ import {
 } from "@tabler/icons-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   exportProcessProtocolAsDocx,
   exportProcessProtocolAsPdf,
 } from "@/lib/processExport"
 import {
+  getDependentLocations,
   type ProcessParam,
   PROCESS_PARAMETER_DEFINITIONS,
   type Process,
@@ -290,6 +293,7 @@ export function ProcessesPage() {
 
   const {
     materials,
+    experiments,
     processes,
     setProcesses,
     setExperiments,
@@ -433,6 +437,7 @@ export function ProcessesPage() {
   const handleSpawnExperiment = (process: Process) => {
     const exp = newExperiment(process.id)
     setExperiments((prev) => [...prev, exp])
+    setActiveEntity({ kind: "experiment", id: exp.id })
     void navigate({ to: "/experiments" })
   }
 
@@ -471,6 +476,27 @@ export function ProcessesPage() {
   }
 
   const handleDeleteProcess = (id: string) => {
+    const proc = processes.find((p) => p.id === id)
+    const dependents = getDependentLocations("process", id, {
+      solutions,
+      experiments,
+      processes,
+      planes,
+    })
+
+    if (dependents.length > 0) {
+      modals.open({
+        title: "Cannot delete process",
+        children: (
+          <DependencyBlockModal
+            itemName={proc?.name ?? id}
+            dependents={dependents}
+          />
+        ),
+      })
+      return
+    }
+
     setProcesses((prev) => prev.filter((p) => p.id !== id))
     removeCollectionRefs("process", [id])
     if (selectedProcess?.id === id) {

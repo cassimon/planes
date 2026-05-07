@@ -264,7 +264,8 @@ export function apiPlaneToPlane(api: ApiPlane): Plane {
         position: { x: e.x, y: e.y },
         size: { x: e.width, y: e.height },
         content: e.content ?? "",
-        color: e.color ?? undefined,
+        color: e.color ?? "#000000",
+        formatting: parsed?.formatting ?? {},
       }
     }),
   }

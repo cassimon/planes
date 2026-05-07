@@ -946,6 +946,7 @@ type AppContextValue = {
 const AppContext = createContext<AppContextValue | null>(null)
 
 const DEFAULT_BACKEND = new InMemoryBackend({ planes: [newPlane("Plane 1")] })
+const INITIAL_PLANES = [newPlane("Plane 1")]
 
 /** Auto-save interval in milliseconds */
 const SAVE_INTERVAL_MS = 30_000
@@ -975,11 +976,13 @@ export function AppProvider({
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [processes, setProcesses] = useState<Process[]>([])
   const [results, setResults] = useState<ExperimentResults[]>([])
-  const [planes, setPlanes] = useState<Plane[]>([newPlane("Plane 1")])
+  const [planes, setPlanes] = useState<Plane[]>(INITIAL_PLANES)
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(
     null,
   )
-  const [activePlaneId, setActivePlaneId] = useState<string | null>(null)
+  const [activePlaneId, setActivePlaneId] = useState<string | null>(
+    INITIAL_PLANES[0]?.id ?? null,
+  )
   const [pendingCollectionLink, setPendingCollectionLink] = useState<{
     collectionId: string
     planeId: string
@@ -1080,6 +1083,11 @@ export function AppProvider({
       }
       if (snapshot.planes.length > 0) {
         setPlanes(snapshot.planes)
+        setActivePlaneId((current) =>
+          current && snapshot.planes.some((plane) => plane.id === current)
+            ? current
+            : snapshot.planes[0]?.id ?? null,
+        )
       }
       setLoaded(true)
     })

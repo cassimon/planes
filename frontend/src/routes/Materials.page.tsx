@@ -126,11 +126,16 @@ export function MaterialsPage() {
       return
     }
 
-    setActiveEntity({ kind: "material", id: editingId })
+    if (activeEntity?.kind !== "material" || activeEntity.id !== editingId) {
+      setActiveEntity({ kind: "material", id: editingId })
+    }
   }, [activeEntity, editingId, isEntityVisible, materials, setActiveEntity])
 
   useEffect(() => {
     if (activeEntity?.kind !== "material") {
+      return
+    }
+    if (editingId === activeEntity.id) {
       return
     }
     const material = materials.find((m) => m.id === activeEntity.id)
@@ -146,7 +151,7 @@ export function MaterialsPage() {
     setEditingId(null)
     setEditBuffer(null)
     setActiveEntity(null)
-  }, [activeEntity, isEntityVisible, materials, setActiveEntity])
+  }, [activeEntity, editingId, isEntityVisible, materials, setActiveEntity])
 
   // Auto-create material + link to collection when navigated from action bubble
   // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount

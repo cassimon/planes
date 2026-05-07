@@ -12,6 +12,7 @@ import {
   rem,
   ScrollArea,
   Stack,
+  Table,
   Tabs,
   Text,
   Textarea,
@@ -61,6 +62,7 @@ import {
   type CanvasPlainTextElement,
   type CanvasTextElement,
   type CollectionRef,
+  getDependentLocations,
   type Plane,
   type TextFormatting,
   useAppContext,
@@ -2228,6 +2230,16 @@ function PlaneCanvas({
   onHoveredPlaneTabChange?: (id: string | null) => void
 }) {
   const {
+    materials,
+    setMaterials,
+    solutions,
+    setSolutions,
+    experiments,
+    setExperiments,
+    processes,
+    setProcesses,
+    results,
+    setResults,
     updateElement,
     deleteElement,
     addTextElement,
@@ -2239,6 +2251,7 @@ function PlaneCanvas({
     setActiveCollectionId,
     activeCollectionId,
     planes,
+    removeCollectionRefs,
     copyElementToPlane,
     moveElementToPlane,
   } = useAppContext()
@@ -2507,6 +2520,238 @@ function PlaneCanvas({
     updatePlane({ ...plane, elements: newElements })
     setDividingCollection(null)
   }
+
+  const getRefDisplayName = useCallback(
+    (ref: CollectionRef): string => {
+      if (ref.kind === "material") {
+        const m = materials.find((x) => x.id === ref.id)
+        return m ? m.name || m.inventoryLabel || m.casNumber || m.id : ref.id
+      }
+      if (ref.kind === "solution") {
+        const s = solutions.find((x) => x.id === ref.id)
+        return s ? s.name || s.id : ref.id
+      }
+      if (ref.kind === "process") {
+        const p = processes.find((x) => x.id === ref.id)
+        return p ? p.name || p.id : ref.id
+      }
+      if (ref.kind === "experiment") {
+        const e = experiments.find((x) => x.id === ref.id)
+        return e ? e.name || e.id : ref.id
+      }
+      if (ref.kind === "result") {
+        const r = results.find((x) => x.id === ref.id)
+        if (!r) {
+          return ref.id
+        }
+        const exp = experiments.find((x) => x.id === r.experimentId)
+        return `Results${exp ? ` for ${exp.name || exp.id}` : ""}`
+      }
+      return `Analysis ${ref.id}`
+    },
+    [materials, solutions, processes, experiments, results],
+  )
+
+  const handleDeleteCollection = useCallback(
+    (collection: CanvasCollectionElement) => {
+      const dedup = new Map<string, CollectionRef>()
+      for (const ref of collection.refs) {
+        dedup.set(`${ref.kind}:${ref.id}`, ref)
+      }
+      const refs = [...dedup.values()]
+
+      const plannedDelete: Record<CollectionRef["kind"], Set<string>> = {
+        material: new Set(),
+        solution: new Set(),
+        experiment: new Set(),
+        result: new Set(),
+        analysis: new Set(),
+        process: new Set(),
+      }
+      for (const ref of refs) {
+        plannedDelete[ref.kind].add(ref.id)
+      }
+
+      const blocked: {
+        ref: CollectionRef
+        name: string
+        dependents: ReturnType<typeof getDependentLocations>
+      }[] = []
+
+      for (const ref of refs) {
+        if (
+          ref.kind !== "material" &&
+          ref.kind !== "solution" &&
+          ref.kind !== "process" &&
+          ref.kind !== "experiment"
+        ) {
+          continue
+        }
+        const dependents = getDependentLocations(ref.kind, ref.id, {
+          solutions,
+          experiments,
+          processes,
+          planes,
+        }).filter(
+          (dep) => !plannedDelete[dep.itemKind].has(dep.itemId),
+        )
+        if (dependents.length > 0) {
+          blocked.push({
+            ref,
+            name: getRefDisplayName(ref),
+            dependents,
+          })
+        }
+      }
+
+      if (blocked.length > 0) {
+        modals.open({
+          title: "Cannot delete collection",
+          size: "lg",
+          children: (
+            <>
+              <Text size="sm" mb="sm">
+                This collection cannot be deleted because the following elements
+                still have dependencies.
+              </Text>
+              <Table withTableBorder withColumnBorders>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Element</Table.Th>
+                    <Table.Th>Type</Table.Th>
+                    <Table.Th>Blocking Dependencies</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {blocked.map((b) => (
+                    <Table.Tr key={`${b.ref.kind}:${b.ref.id}`}>
+                      <Table.Td>{b.name}</Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed" tt="capitalize">
+                          {b.ref.kind}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>{b.dependents.length}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </>
+          ),
+        })
+        return
+      }
+
+      modals.openConfirmModal({
+        title: "Delete collection",
+        size: "lg",
+        children: (
+          <>
+            <Text size="sm" mb="sm">
+              Deleting this collection will delete the following elements:
+            </Text>
+            {refs.length > 0 ? (
+              <ScrollArea.Autosize mah={280}>
+                <Table withTableBorder withColumnBorders>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Element</Table.Th>
+                      <Table.Th>Type</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {refs.map((ref) => (
+                      <Table.Tr key={`${ref.kind}:${ref.id}`}>
+                        <Table.Td>{getRefDisplayName(ref)}</Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed" tt="capitalize">
+                            {ref.kind}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea.Autosize>
+            ) : (
+              <Text size="sm" c="dimmed">
+                This collection is empty.
+              </Text>
+            )}
+          </>
+        ),
+        labels: { confirm: "Delete", cancel: "Cancel" },
+        confirmProps: { color: "red" },
+        onConfirm: () => {
+          const idsByKind: Record<CollectionRef["kind"], Set<string>> = {
+            material: new Set(),
+            solution: new Set(),
+            experiment: new Set(),
+            result: new Set(),
+            analysis: new Set(),
+            process: new Set(),
+          }
+
+          for (const ref of refs) {
+            idsByKind[ref.kind].add(ref.id)
+          }
+
+          if (idsByKind.material.size > 0) {
+            const ids = [...idsByKind.material]
+            setMaterials((prev) => prev.filter((m) => !ids.includes(m.id)))
+            removeCollectionRefs("material", ids)
+          }
+          if (idsByKind.solution.size > 0) {
+            const ids = [...idsByKind.solution]
+            setSolutions((prev) => prev.filter((s) => !ids.includes(s.id)))
+            removeCollectionRefs("solution", ids)
+          }
+          if (idsByKind.process.size > 0) {
+            const ids = [...idsByKind.process]
+            setProcesses((prev) => prev.filter((p) => !ids.includes(p.id)))
+            removeCollectionRefs("process", ids)
+          }
+          if (idsByKind.experiment.size > 0) {
+            const ids = [...idsByKind.experiment]
+            setExperiments((prev) => prev.filter((e) => !ids.includes(e.id)))
+            removeCollectionRefs("experiment", ids)
+          }
+          if (idsByKind.result.size > 0) {
+            const ids = [...idsByKind.result]
+            setResults((prev) => prev.filter((r) => !ids.includes(r.id)))
+            removeCollectionRefs("result", ids)
+          }
+          if (idsByKind.analysis.size > 0) {
+            removeCollectionRefs("analysis", [...idsByKind.analysis])
+          }
+
+          deleteElement(plane.id, collection.id)
+          if (activeCollectionId === collection.id) {
+            setActiveCollectionId(null)
+          }
+        },
+      })
+    },
+    [
+      deleteElement,
+      experiments,
+      getRefDisplayName,
+      activeCollectionId,
+      materials,
+      plane.id,
+      planes,
+      processes,
+      removeCollectionRefs,
+      results,
+      setActiveCollectionId,
+      setExperiments,
+      setMaterials,
+      setProcesses,
+      setResults,
+      setSolutions,
+      solutions,
+    ],
+  )
 
   // Find active collection's color
   const activeCollection = plane.elements.find(
@@ -3346,20 +3591,7 @@ function PlaneCanvas({
                   el={el as CanvasCollectionElement}
                   planeId={plane.id}
                   onUpdate={(updated) => updateElement(plane.id, updated)}
-                  onDelete={() =>
-                    modals.openConfirmModal({
-                      title: "Delete Collection",
-                      children: (
-                        <Text size="sm">
-                          Delete this collection? Its references will be removed
-                          but Materials/Solutions remain unchanged.
-                        </Text>
-                      ),
-                      labels: { confirm: "Delete", cancel: "Cancel" },
-                      confirmProps: { color: "red" },
-                      onConfirm: () => deleteElement(plane.id, el.id),
-                    })
-                  }
+                  onDelete={() => handleDeleteCollection(el as CanvasCollectionElement)}
                   pan={pan}
                   isFuseCandidate={fuseCandidate?.dstId === el.id}
                   onDragPositionUpdate={(pos) =>
@@ -4083,11 +4315,11 @@ export function OrganizationPage() {
     null,
   )
 
-  // Do NOT auto-select a plane — null means "General" view
-  // Only reset if the *selected* plane was deleted
+  // Keep the user on a concrete plane; if the current plane disappears,
+  // fall back to the first available plane.
   useEffect(() => {
     if (activePlaneId && !planes.find((p) => p.id === activePlaneId)) {
-      setActivePlaneId(null)
+      setActivePlaneId(planes[0]?.id ?? null)
     }
   }, [planes, activePlaneId, setActivePlaneId])
 
@@ -4108,7 +4340,8 @@ export function OrganizationPage() {
       onConfirm: () => {
         deletePlane(id)
         if (activePlaneId === id) {
-          setActivePlaneId(null) // Go back to General view
+          const remainingPlanes = planes.filter((plane) => plane.id !== id)
+          setActivePlaneId(remainingPlanes[0]?.id ?? null)
         }
       },
     })
