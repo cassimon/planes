@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Alert,
   Badge,
   Box,
   Button,
@@ -29,7 +28,6 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCopy,
-  IconInfoCircle,
   IconPencil,
   IconPlus,
   IconTrash,
@@ -38,6 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
+import { SelectCollectionModal, type CollectionConfirmParams } from "../components/SelectCollectionModal"
 import {
   getDependentLocations,
   type Material,
@@ -47,6 +46,7 @@ import {
   type SolutionComponent,
   useAppContext,
   useEntityCollection,
+  type CanvasCollectionElement,
 } from "../store/AppContext"
 
 function toDateTimeLocalValue(isoValue: string | undefined): string {
@@ -722,6 +722,7 @@ export function SolutionsPage() {
   const returnSolutionIdRef = useRef<string | null>(null)
   const returnToProcessIdRef = useRef<string | null>(null)
   const navigate = useNavigate()
+  const [collectionModalOpen, setCollectionModalOpen] = useState(false)
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
@@ -729,6 +730,7 @@ export function SolutionsPage() {
 
   useEffect(() => {
     if (!editingSolutionId) {
+      if (activeEntity?.kind === "process") return
       setActiveEntity(null)
       return
     }
@@ -852,21 +854,25 @@ export function SolutionsPage() {
     }
   }
 
-  const addSolution = () => {
+  const doAddSolution = ({ planeId, collection }: CollectionConfirmParams) => {
     const s = newSolution()
     setSolutions((prev) => [...prev, s])
+    updateElement(planeId, {
+      ...collection,
+      refs: [...collection.refs, { kind: "solution" as const, id: s.id }],
+    })
+  }
+
+  const addSolution = () => {
     if (activeCollectionId && activePlaneId) {
       const plane = planes.find((p) => p.id === activePlaneId)
-      if (plane) {
-        const col = plane.elements.find((e) => e.id === activeCollectionId)
-        if (col && col.type === "collection") {
-          updateElement(activePlaneId, {
-            ...col,
-            refs: [...col.refs, { kind: "solution" as const, id: s.id }],
-          })
-        }
+      const col = plane?.elements.find((e) => e.id === activeCollectionId)
+      if (col && col.type === "collection") {
+        doAddSolution({ planeId: activePlaneId, collectionId: activeCollectionId, collection: col as CanvasCollectionElement })
+        return
       }
     }
+    setCollectionModalOpen(true)
   }
 
   // Auto-create solution + link to collection when navigated from action bubble
@@ -1001,26 +1007,19 @@ export function SolutionsPage() {
   }
 
   return (
+    <>
     <Container fluid>
       <Group justify="space-between" mb="md" mt="md">
         <Title order={2}>Solutions</Title>
         <Button
           leftSection={<IconPlus size={16} />}
           onClick={addSolution}
-          disabled={!activeCollectionId}
         >
           New Solution
         </Button>
       </Group>
 
-      {!activeCollectionId && (
-        <Alert icon={<IconInfoCircle size={16} />} color="blue" mb="md">
-          Select or create a collection in the Organization tab to add
-          solutions.
-        </Alert>
-      )}
-
-      {visibleSolutions.length === 0 && activeCollectionId && (
+      {visibleSolutions.length === 0 && (
         <Text c="dimmed">
           {solutions.length === 0
             ? 'No solutions yet. Click "New Solution" to get started.'
@@ -1161,5 +1160,12 @@ export function SolutionsPage() {
         })()}
       </Stack>
     </Container>
+    <SelectCollectionModal
+      opened={collectionModalOpen}
+      onClose={() => setCollectionModalOpen(false)}
+      onConfirm={doAddSolution}
+      confirmLabel="Add Solution"
+    />
+  </>
   )
 }

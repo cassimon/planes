@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Alert,
   Badge,
   Box,
   Button,
@@ -20,15 +19,12 @@ import {
 } from "@mantine/core"
 import { modals } from "@mantine/modals"
 import {
-  IconAd,
   IconAtom,
   IconChevronDown,
   IconCopy,
   IconDownload,
   IconDroplet,
-  IconInfoCircle,
   IconLayersIntersect,
-  IconLink,
   IconPlayerPlay,
   IconPlus,
   IconRowInsertTop,
@@ -55,8 +51,10 @@ import {
   newExperiment,
   newProcess,
   newProcessStep,
+  type CanvasCollectionElement,
 } from "@/store/AppContext"
 import { useAppContext, useEntityCollection } from "@/store/AppContext"
+import { SelectCollectionModal, type CollectionConfirmParams } from "@/components/SelectCollectionModal"
 
 const STEP_CATEGORIES: Array<{ value: ProcessStepCategory; label: string; icon: React.ReactNode }> = [
   { value: "wet_deposition", label: "Wet Deposition", icon: <IconDroplet size={14} /> },
@@ -335,6 +333,7 @@ export function ProcessesPage() {
   const [isExportingDocx, setIsExportingDocx] = useState(false)
   const [substrateSelectingIdx, setSubstrateSelectingIdx] = useState<number | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
+  const [collectionModalOpen, setCollectionModalOpen] = useState(false)
 
   const selectProcess = useCallback(
     (id: string | null) => {
@@ -464,24 +463,27 @@ export function ProcessesPage() {
     return stagePos >= 0 ? stagePos : null
   }, [selectedProcess, selectedStepId])
 
-  const handleCreateProcess = () => {
+  const doCreateProcess = ({ planeId, collection }: CollectionConfirmParams) => {
     const newProc = newProcess()
     setProcesses((prev) => [...prev, newProc])
     selectProcess(newProc.id)
     setSelectedStepId(null)
-    // Link to active collection if one is selected
+    updateElement(planeId, {
+      ...collection,
+      refs: [...collection.refs, { kind: "process" as const, id: newProc.id }],
+    })
+  }
+
+  const handleCreateProcess = () => {
     if (activeCollectionId && activePlaneId) {
       const plane = planes.find((p) => p.id === activePlaneId)
-      if (plane) {
-        const col = plane.elements.find((e) => e.id === activeCollectionId)
-        if (col && col.type === "collection") {
-          updateElement(activePlaneId, {
-            ...col,
-            refs: [...col.refs, { kind: "process" as const, id: newProc.id }],
-          })
-        }
+      const col = plane?.elements.find((e) => e.id === activeCollectionId)
+      if (col && col.type === "collection") {
+        doCreateProcess({ planeId: activePlaneId, collectionId: activeCollectionId, collection: col as CanvasCollectionElement })
+        return
       }
     }
+    setCollectionModalOpen(true)
   }
 
   const handleSpawnExperiment = (process: Process) => {
@@ -937,6 +939,7 @@ export function ProcessesPage() {
     () =>
       materials
         .filter((material) => isEntityVisible("material", material.id))
+        .filter((material) => (material.category ?? "chemical_compound") !== "substrate_material")
         .map((material) => ({
           value: `material:${material.id}`,
           label: material.name || "Unnamed material",
@@ -1226,6 +1229,7 @@ export function ProcessesPage() {
   ) : null
 
   return (
+    <>
     <Box style={{ display: "grid", gridTemplateColumns: "250px 1fr", height: "100%" }}>
       {/* Left Sidebar: Process List */}
       <Paper p="md" radius={0} style={{ borderRight: "1px solid var(--mantine-color-gray-3)" }}>
@@ -1240,20 +1244,9 @@ export function ProcessesPage() {
             onClick={handleCreateProcess}
             fullWidth
             leftSection={<IconPlus size={16} />}
-            disabled={!activeCollectionId}
           >
             New Process
           </Button>
-
-          {!activeCollectionId && (
-            <Alert
-              icon={<IconInfoCircle size={16} />}
-              color="blue"
-              radius="sm"
-            >
-              Select a collection in the Organization tab to add processes.
-            </Alert>
-          )}
 
           <Divider />
           <ScrollArea style={{ flex: 1 }}>
@@ -1473,6 +1466,7 @@ export function ProcessesPage() {
                           </Text>
                         </Box>
                         <Group gap={2} wrap="nowrap">
+                          {process.substrateIds.length > 0 && process.stages.length > 0 && (
                           <Tooltip label="New experiment" withArrow>
                             <ActionIcon
                               size="sm"
@@ -1486,6 +1480,7 @@ export function ProcessesPage() {
                               <IconPlayerPlay size={14} />
                             </ActionIcon>
                           </Tooltip>
+                          )}
                           <ActionIcon
                             size="sm"
                             variant="subtle"
@@ -2203,7 +2198,6 @@ export function ProcessesPage() {
               <Button
                 onClick={handleCreateProcess}
                 leftSection={<IconPlus size={16} />}
-                disabled={!activeCollectionId}
               >
                 New Process
               </Button>
@@ -2212,5 +2206,13 @@ export function ProcessesPage() {
         )}
       </Box>
     </Box>
+
+    <SelectCollectionModal
+      opened={collectionModalOpen}
+      onClose={() => setCollectionModalOpen(false)}
+      onConfirm={doCreateProcess}
+      confirmLabel="Add Process"
+    />
+  </>
   )
 }

@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Alert,
   Box,
   Button,
   Container,
@@ -21,7 +20,6 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconCopy,
-  IconInfoCircle,
   IconPencil,
   IconPlus,
   IconSelector,
@@ -31,7 +29,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
+import { SelectCollectionModal, type CollectionConfirmParams } from "../components/SelectCollectionModal"
 import {
+  type CanvasCollectionElement,
   getDependentLocations,
   type MaterialCategory,
   type Material,
@@ -89,16 +89,6 @@ const CATEGORY_COLUMNS: Record<MaterialCategory, Column[]> = {
   substrate_material: SUBSTRATE_COLUMNS,
 }
 
-const ALL_FREE_TEXT_KEYS: Array<keyof Material> = [
-  "name",
-  "supplier",
-  "supplierNumber",
-  "casNumber",
-  "pubchemCid",
-  "inventoryLabel",
-  "purity",
-]
-
 type SortState = { key: keyof Material; direction: "asc" | "desc" } | null
 
 function SortIcon({
@@ -149,6 +139,8 @@ export function MaterialsPage() {
   const returnToRef = useRef<string | null>(null)
   const returnToProcessIdRef = useRef<string | null>(null)
   const navigate = useNavigate()
+  const [collectionModalOpen, setCollectionModalOpen] = useState(false)
+  const pendingCategoryRef = useRef<MaterialCategory | null>(null)
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
@@ -161,7 +153,7 @@ export function MaterialsPage() {
 
   useEffect(() => {
     if (!editingId) {
-      if (activeEntity?.kind === "material") {
+      if (activeEntity?.kind === "material" || activeEntity?.kind === "process") {
         return
       }
       setActiveEntity(null)
@@ -364,23 +356,35 @@ export function MaterialsPage() {
     })
   }
 
-  const addMaterial = (category: MaterialCategory) => {
+  const doAddMaterial = (category: MaterialCategory, { planeId, collection }: CollectionConfirmParams) => {
     const m = newMaterial(category)
     setMaterials((prev) => [...prev, m])
-    // Link to active collection if one is selected
+    updateElement(planeId, {
+      ...collection,
+      refs: [...collection.refs, { kind: "material" as const, id: m.id }],
+    })
+    startEdit(m)
+  }
+
+  const addMaterial = (category: MaterialCategory) => {
     if (activeCollectionId && activePlaneId) {
       const plane = planes.find((p) => p.id === activePlaneId)
-      if (plane) {
-        const col = plane.elements.find((e) => e.id === activeCollectionId)
-        if (col && col.type === "collection") {
-          updateElement(activePlaneId, {
-            ...col,
-            refs: [...col.refs, { kind: "material" as const, id: m.id }],
-          })
-        }
+      const col = plane?.elements.find((e) => e.id === activeCollectionId)
+      if (col && col.type === "collection") {
+        doAddMaterial(category, { planeId: activePlaneId, collectionId: activeCollectionId, collection: col as CanvasCollectionElement })
+        return
       }
     }
-    startEdit(m)
+    pendingCategoryRef.current = category
+    setCollectionModalOpen(true)
+  }
+
+  const handleCollectionConfirmed = (params: CollectionConfirmParams) => {
+    const category = pendingCategoryRef.current
+    pendingCategoryRef.current = null
+    if (category) {
+      doAddMaterial(category, params)
+    }
   }
 
   const commitEdit = () => {
@@ -695,7 +699,6 @@ export function MaterialsPage() {
           <Button
             leftSection={<IconPlus size={16} />}
             onClick={() => addMaterial(category)}
-            disabled={!activeCollectionId}
             size="xs"
           >
             {CATEGORY_ADD_LABEL[category]}
@@ -777,13 +780,6 @@ export function MaterialsPage() {
         </Group>
       </Group>
 
-      {!activeCollectionId && (
-        <Alert icon={<IconInfoCircle size={16} />} color="blue" mb="md">
-          Select or create a collection in the Organization tab to add
-          materials.
-        </Alert>
-      )}
-
       {renderCategoryTable("chemical_compound")}
       {renderCategoryTable("commercial_mixture")}
       {renderCategoryTable("substrate_material")}
@@ -795,6 +791,13 @@ export function MaterialsPage() {
           </Text>
         </Box>
       )}
+
+      <SelectCollectionModal
+        opened={collectionModalOpen}
+        onClose={() => setCollectionModalOpen(false)}
+        onConfirm={handleCollectionConfirmed}
+        confirmLabel="Add Material"
+      />
     </Container>
   )
 }

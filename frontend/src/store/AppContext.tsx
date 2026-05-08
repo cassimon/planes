@@ -263,6 +263,7 @@ export type DeviceArchitecture =
 export type Substrate = {
   id: string
   name: string // e.g. "substrate_1", "substrate_2"
+  substrateMaterialId?: string
   notes?: string
   // Per-substrate parameter values for variation mode
   // Key format: "layerId:paramName", Value: string
@@ -475,11 +476,11 @@ export function newExperiment(processId: string): Experiment {
     substrateMaterial: "Glass/ITO",
     substrateWidth: 2.5,
     substrateLength: 2.5,
-    numSubstrates: 1,
+    numSubstrates: 0,
     devicesPerSubstrate: 4,
     deviceArea: 0.09,
     deviceType: "film",
-    substrates: generateSubstrates(1),
+    substrates: [],
     processingTimes: {},
     hasResults: false,
   }
@@ -1225,7 +1226,10 @@ export function AppProvider({
   }, [])
 
   const deletePlane = useCallback((id: string) => {
-    setPlanes((prev) => prev.filter((p) => p.id !== id))
+    setPlanes((prev) => {
+      if (prev.length <= 1) return prev // never delete the last plane
+      return prev.filter((p) => p.id !== id)
+    })
   }, [])
 
   // ── Element mutations ──────────────────────────────────────────────────────
