@@ -582,6 +582,134 @@ export function ProcessesPage() {
     setSelectedStepId(null)
   }
 
+  const commitProcessUpdate = useCallback(
+    (updated: Process, nextSelectedStepId: string | null) => {
+      setProcesses((prev) =>
+        prev.map((p) => (p.id === updated.id ? updated : p)),
+      )
+      selectProcess(updated.id)
+      setSelectedStepId(nextSelectedStepId)
+    },
+    [selectProcess, setProcesses],
+  )
+
+  const addCopiedProcessToCollection = useCallback(
+    (sourceProcessId: string, copy: Process) => {
+      const owner = getEntityCollection("process", sourceProcessId)
+      if (owner) {
+        updateElement(owner.plane.id, {
+          ...owner.collection,
+          refs: [...owner.collection.refs, { kind: "process" as const, id: copy.id }],
+        })
+      }
+    },
+    [getEntityCollection, updateElement],
+  )
+
+  const runGuardedStepStructureEdit = useCallback(
+    (
+      buildUpdatedProcess: (process: Process) => {
+        updated: Process
+        nextSelectedStepId: string | null
+      } | null,
+    ) => {
+      if (!selectedProcess) {
+        return
+      }
+
+      const dependentExperiments = experiments.filter(
+        (experiment) => experiment.processId === selectedProcess.id,
+      )
+
+      const applyToCurrentProcess = () => {
+        const result = buildUpdatedProcess(selectedProcess)
+        if (!result) {
+          return
+        }
+        commitProcessUpdate(result.updated, result.nextSelectedStepId)
+      }
+
+      if (dependentExperiments.length === 0) {
+        applyToCurrentProcess()
+        return
+      }
+
+      const modalId = `guard-process-edit-${crypto.randomUUID()}`
+      const applyToCopiedProcess = () => {
+        const copyBase: Process = {
+          ...selectedProcess,
+          id: crypto.randomUUID(),
+          name: `${selectedProcess.name} (copy)`,
+          stages: selectedProcess.stages.map((stage) => ({
+            ...stage,
+            alternatives: stage.alternatives.map((step) => ({ ...step })),
+          })),
+        }
+        const result = buildUpdatedProcess(copyBase)
+        if (!result) {
+          return
+        }
+        setProcesses((prev) => [...prev, result.updated])
+        addCopiedProcessToCollection(selectedProcess.id, result.updated)
+        selectProcess(result.updated.id)
+        setSelectedStepId(result.nextSelectedStepId)
+      }
+
+      modals.open({
+        modalId,
+        title: "Edit process with dependent experiments?",
+        children: (
+          <Stack gap="md">
+            <Text size="sm">
+              Are you sure you want to edit this process because the following experiments depend on it?
+            </Text>
+            <Text size="sm" c="dimmed">
+              Altering the process could change or delete information in these experiments. It is highly recommended to edit a copy of the process instead.
+            </Text>
+            <Stack gap={4}>
+              {dependentExperiments.map((experiment) => (
+                <Text key={experiment.id} size="sm">
+                  {experiment.name || "Unnamed experiment"}
+                </Text>
+              ))}
+            </Stack>
+            <Group justify="flex-end" gap="sm">
+              <Button variant="default" onClick={() => modals.close(modalId)}>
+                Cancel
+              </Button>
+              <Button
+                variant="filled"
+                onClick={() => {
+                  modals.close(modalId)
+                  applyToCopiedProcess()
+                }}
+              >
+                Edit a copy (recommended)
+              </Button>
+              <Button
+                color="red"
+                onClick={() => {
+                  modals.close(modalId)
+                  applyToCurrentProcess()
+                }}
+              >
+                Edit process (not recommended)
+              </Button>
+            </Group>
+          </Stack>
+        ),
+      })
+    },
+    [
+      addCopiedProcessToCollection,
+      commitProcessUpdate,
+      experiments,
+      selectedProcess,
+      selectProcess,
+      setProcesses,
+    ],
+  )
+
   const handleAddProcessStep = (category: ProcessStepCategory) => {
     if (!selectedProcess) return
     const nextIndex = selectedProcess.stages.length
@@ -690,23 +818,19 @@ export function ProcessesPage() {
   }
 
   const handleRemoveStep = (stepId: string) => {
-    if (!selectedProcess) return
-    const updated: Process = {
-      ...selectedProcess,
-      stages: selectedProcess.stages
-        .map((stage) => ({
-          ...stage,
-          alternatives: stage.alternatives.filter((s) => s.id !== stepId),
-        }))
-        .filter((stage) => stage.alternatives.length > 0)
-        .map((stage, idx) => ({ ...stage, index: idx })),
-    }
-    setProcesses((prev) =>
-      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
-    )
-    if (selectedStepId === stepId) {
-      setSelectedStepId(null)
-    }
+    runGuardedStepStructureEdit((process) => ({
+      updated: {
+        ...process,
+        stages: process.stages
+          .map((stage) => ({
+            ...stage,
+            alternatives: stage.alternatives.filter((s) => s.id !== stepId),
+          }))
+          .filter((stage) => stage.alternatives.length > 0)
+          .map((stage, idx) => ({ ...stage, index: idx })),
+      },
+      nextSelectedStepId: selectedStepId === stepId ? null : selectedStepId,
+    }))
   }
 
   const moveStepToAlternativeStage = (
@@ -717,46 +841,46 @@ export function ProcessesPage() {
     if (!selectedProcess || fromStagePos === targetStagePos) {
       return
     }
+    runGuardedStepStructureEdit((process) => {
+      const stages = process.stages.map((stage) => ({
+        ...stage,
+        alternatives: [...stage.alternatives],
+      }))
 
-    const stages = selectedProcess.stages.map((stage) => ({
-      ...stage,
-      alternatives: [...stage.alternatives],
-    }))
+      const source = stages[fromStagePos]
+      if (!source) {
+        return null
+      }
 
-    const source = stages[fromStagePos]
-    if (!source) {
-      return
-    }
+      const movingIdx = source.alternatives.findIndex((step) => step.id === stepId)
+      if (movingIdx < 0) {
+        return null
+      }
 
-    const movingIdx = source.alternatives.findIndex((step) => step.id === stepId)
-    if (movingIdx < 0) {
-      return
-    }
+      const [movingStep] = source.alternatives.splice(movingIdx, 1)
+      const sourceEmptied = source.alternatives.length === 0
+      if (sourceEmptied) {
+        stages.splice(fromStagePos, 1)
+      }
 
-    const [movingStep] = source.alternatives.splice(movingIdx, 1)
-    const sourceEmptied = source.alternatives.length === 0
-    if (sourceEmptied) {
-      stages.splice(fromStagePos, 1)
-    }
+      let adjustedTarget = targetStagePos
+      if (sourceEmptied && fromStagePos < targetStagePos) {
+        adjustedTarget -= 1
+      }
+      if (adjustedTarget < 0 || adjustedTarget >= stages.length) {
+        return null
+      }
 
-    let adjustedTarget = targetStagePos
-    if (sourceEmptied && fromStagePos < targetStagePos) {
-      adjustedTarget -= 1
-    }
-    if (adjustedTarget < 0 || adjustedTarget >= stages.length) {
-      return
-    }
+      stages[adjustedTarget].alternatives.push(movingStep)
 
-    stages[adjustedTarget].alternatives.push(movingStep)
-
-    const updated: Process = {
-      ...selectedProcess,
-      stages: stages.map((stage, index) => ({ ...stage, index })),
-    }
-    setProcesses((prev) =>
-      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
-    )
-    setSelectedStepId(stepId)
+      return {
+        updated: {
+          ...process,
+          stages: stages.map((stage, index) => ({ ...stage, index })),
+        },
+        nextSelectedStepId: stepId,
+      }
+    })
   }
 
   const moveStepToNewStageAt = (
@@ -768,43 +892,44 @@ export function ProcessesPage() {
       return
     }
 
-    const stages = selectedProcess.stages.map((stage) => ({
-      ...stage,
-      alternatives: [...stage.alternatives],
-    }))
-    const source = stages[fromStagePos]
-    if (!source) {
-      return
-    }
-    const movingIdx = source.alternatives.findIndex((step) => step.id === stepId)
-    if (movingIdx < 0) {
-      return
-    }
-    const [movingStep] = source.alternatives.splice(movingIdx, 1)
-    const sourceEmptied = source.alternatives.length === 0
-    if (sourceEmptied) {
-      stages.splice(fromStagePos, 1)
-    }
+    runGuardedStepStructureEdit((process) => {
+      const stages = process.stages.map((stage) => ({
+        ...stage,
+        alternatives: [...stage.alternatives],
+      }))
+      const source = stages[fromStagePos]
+      if (!source) {
+        return null
+      }
+      const movingIdx = source.alternatives.findIndex((step) => step.id === stepId)
+      if (movingIdx < 0) {
+        return null
+      }
+      const [movingStep] = source.alternatives.splice(movingIdx, 1)
+      const sourceEmptied = source.alternatives.length === 0
+      if (sourceEmptied) {
+        stages.splice(fromStagePos, 1)
+      }
 
-    let adjustedInsert = insertIndex
-    if (sourceEmptied && fromStagePos < insertIndex) {
-      adjustedInsert -= 1
-    }
-    adjustedInsert = Math.max(0, Math.min(stages.length, adjustedInsert))
+      let adjustedInsert = insertIndex
+      if (sourceEmptied && fromStagePos < insertIndex) {
+        adjustedInsert -= 1
+      }
+      adjustedInsert = Math.max(0, Math.min(stages.length, adjustedInsert))
 
-    stages.splice(adjustedInsert, 0, {
-      index: adjustedInsert,
-      alternatives: [movingStep],
+      stages.splice(adjustedInsert, 0, {
+        index: adjustedInsert,
+        alternatives: [movingStep],
+      })
+
+      return {
+        updated: {
+          ...process,
+          stages: stages.map((stage, index) => ({ ...stage, index })),
+        },
+        nextSelectedStepId: stepId,
+      }
     })
-
-    const updated: Process = {
-      ...selectedProcess,
-      stages: stages.map((stage, index) => ({ ...stage, index })),
-    }
-    setProcesses((prev) =>
-      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
-    )
-    setSelectedStepId(stepId)
   }
 
   useEffect(() => {
@@ -1621,6 +1746,29 @@ export function ProcessesPage() {
                             </Text>
 
                             <Box style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+                              {subIds.length === 0 && substrateSelectingIdx !== -1 ? (
+                                <Group justify="center">
+                                  {visibleSubstrateOptions.length > 0 ? (
+                                    <Button
+                                      size="xs"
+                                      variant="subtle"
+                                      leftSection={<IconPlus size={14} />}
+                                      onClick={() => setSubstrateSelectingIdx(-1)}
+                                    >
+                                      Choose Substrate
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="xs"
+                                      variant="subtle"
+                                      leftSection={<IconRowInsertTop size={14} />}
+                                      onClick={handleCreateSubstrateMaterial}
+                                    >
+                                      New Substrate Material
+                                    </Button>
+                                  )}
+                                </Group>
+                              ) : (
                               <Group
                                 justify="center"
                                 gap="sm"
@@ -1760,6 +1908,7 @@ export function ProcessesPage() {
                                   </Box>
                                 )}
                               </Group>
+                              )}
                             </Box>
 
                             <Box
@@ -1770,7 +1919,7 @@ export function ProcessesPage() {
                                 justifyContent: "flex-start",
                               }}
                             >
-                              {substrateSelectingIdx !== -1 ? (
+                              {substrateSelectingIdx !== -1 && subIds.length > 0 ? (
                                 availableForNew.length > 0 ? (
                                   <Button
                                     size="xs"
@@ -1778,9 +1927,7 @@ export function ProcessesPage() {
                                     leftSection={<IconPlus size={14} />}
                                     onClick={() => setSubstrateSelectingIdx(-1)}
                                   >
-                                    {subIds.length === 0
-                                      ? "Choose Substrate"
-                                      : "Choose Alternative Substrate"}
+                                    Choose Alternative Substrate
                                   </Button>
                                 ) : (
                                   <Button
@@ -1800,7 +1947,7 @@ export function ProcessesPage() {
                         )
                       })()}
 
-                      {selectedProcess.stages.length > 0 ? (
+                    {selectedProcess.stages.length > 0 ? (
                         <Stack gap="xs">
                           <Box
                             style={{
@@ -2146,44 +2293,56 @@ export function ProcessesPage() {
                     </Box>
 
                     {(selectedProcess.substrateIds ?? []).length > 0 && (
-                      <Group justify="center" gap="sm">
-                        <Menu shadow="md" width={240}>
-                          <Menu.Target>
-                            <Button
-                              size="xs"
-                              variant="subtle"
-                              leftSection={<IconPlus size={14} />}
-                            >
-                              Add Next Step
-                            </Button>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            {STEP_CATEGORIES.map((category) => (
-                              <Menu.Item
-                                key={`next-${category.value}`}
-                                leftSection={category.icon}
-                                onClick={() => handleAddProcessStep(category.value)}
+                      <Box
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: selectedProcess.stages.length === 0 ? "center" : "flex-start",
+                          flex: selectedProcess.stages.length === 0 ? 1 : undefined,
+                          minHeight: selectedProcess.stages.length === 0 ? 200 : undefined,
+                          gap: 16,
+                        }}
+                      >
+                        <Group justify="center" gap="sm">
+                          <Menu shadow="md" width={240}>
+                            <Menu.Target>
+                              <Button
+                                size="xs"
+                                variant="subtle"
+                                leftSection={<IconPlus size={14} />}
                               >
-                                {category.label}
-                              </Menu.Item>
-                            ))}
-                          </Menu.Dropdown>
-                        </Menu>
-                      </Group>
-                    )}
+                                Add Next Step
+                              </Button>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              {STEP_CATEGORIES.map((category) => (
+                                <Menu.Item
+                                  key={`next-${category.value}`}
+                                  leftSection={category.icon}
+                                  onClick={() => handleAddProcessStep(category.value)}
+                                >
+                                  {category.label}
+                                </Menu.Item>
+                              ))}
+                            </Menu.Dropdown>
+                          </Menu>
+                        </Group>
 
-                    {hasBothSubstrateAndStep && (
-                      <Group justify="center" mt="md">
-                        <Button
-                          size="lg"
-                          color="green"
-                          variant="subtle"
-                          leftSection={<IconPlayerPlay size={20} />}
-                          onClick={() => handleSpawnExperiment(selectedProcess)}
-                        >
-                          Create Experiment from Process
-                        </Button>
-                      </Group>
+                        {hasBothSubstrateAndStep && (
+                          <Group justify="center">
+                            <Button
+                              size="lg"
+                              color="green"
+                              variant="subtle"
+                              leftSection={<IconPlayerPlay size={20} />}
+                              onClick={() => handleSpawnExperiment(selectedProcess)}
+                            >
+                              Create Experiment from Process
+                            </Button>
+                          </Group>
+                        )}
+                      </Box>
                     )}
                   </Stack>
                 </Box>
