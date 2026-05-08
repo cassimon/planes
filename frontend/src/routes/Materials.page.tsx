@@ -29,6 +29,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
@@ -45,7 +46,6 @@ type Column = {
 }
 
 const COMMON_COLUMNS: Column[] = [
-  { key: "type", label: "Type" },
   { key: "name", label: "Name" },
   { key: "supplier", label: "Supplier" },
   { key: "supplierNumber", label: "Supplier Number" },
@@ -90,7 +90,6 @@ const CATEGORY_COLUMNS: Record<MaterialCategory, Column[]> = {
 }
 
 const ALL_FREE_TEXT_KEYS: Array<keyof Material> = [
-  "type",
   "name",
   "supplier",
   "supplierNumber",
@@ -123,6 +122,7 @@ export function MaterialsPage() {
   const {
     materials,
     setMaterials,
+    setProcesses,
     solutions,
     experiments,
     processes,
@@ -146,6 +146,9 @@ export function MaterialsPage() {
     null,
   )
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
+  const returnToRef = useRef<string | null>(null)
+  const returnToProcessIdRef = useRef<string | null>(null)
+  const navigate = useNavigate()
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
@@ -213,11 +216,46 @@ export function MaterialsPage() {
     }
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
-    const { collectionId, planeId, materialCategory } = pendingCollectionLink
+    const { collectionId, planeId, materialCategory, processAttachment, returnTo } = pendingCollectionLink
     setPendingCollectionLink(null)
+
+    if (returnTo) returnToRef.current = returnTo
+    if (returnTo && processAttachment?.processId) {
+      returnToProcessIdRef.current = processAttachment.processId
+    }
 
     const m = newMaterial(materialCategory)
     setMaterials((prev) => [...prev, m])
+
+    if (processAttachment) {
+      setProcesses((prev) =>
+        prev.map((process) => {
+          if (process.id !== processAttachment.processId) {
+            return process
+          }
+          if (processAttachment.target === "substrate") {
+            const substrateIds = process.substrateIds ?? []
+            return substrateIds.includes(m.id)
+              ? process
+              : { ...process, substrateIds: [...substrateIds, m.id] }
+          }
+          if (processAttachment.target === "step-material" && processAttachment.stepId) {
+            return {
+              ...process,
+              stages: process.stages.map((stage) => ({
+                ...stage,
+                alternatives: stage.alternatives.map((step) =>
+                  step.id === processAttachment.stepId
+                    ? { ...step, materialId: m.id, solutionId: undefined }
+                    : step,
+                ),
+              })),
+            }
+          }
+          return process
+        }),
+      )
+    }
 
     const plane = planes.find((p) => p.id === planeId)
     if (plane) {
@@ -349,22 +387,29 @@ export function MaterialsPage() {
     if (!editBuffer) {
       return
     }
+    if (!(editBuffer.name ?? "").trim()) {
+      cancelEdit(editBuffer.id)
+      return
+    }
     setMaterials((prev) =>
       prev.map((m) => (m.id === editBuffer.id ? editBuffer : m)),
     )
     setEditingId(null)
     setEditBuffer(null)
+    if (returnToRef.current) {
+      const route = returnToRef.current
+      const processId = returnToProcessIdRef.current
+      returnToRef.current = null
+      returnToProcessIdRef.current = null
+      if (processId) setActiveEntity({ kind: "process", id: processId })
+      void navigate({ to: route as never })
+    }
   }
 
   const cancelEdit = (id: string) => {
     const original = materials.find((m) => m.id === id)
-    if (
-      original &&
-      !ALL_FREE_TEXT_KEYS.some((k) => String(original[k] ?? "").trim()) &&
-      !original.stateAtRt &&
-      !original.substrateRigidity
-    ) {
-      // Row was never filled — remove it
+    if (original && !(original.name ?? "").trim()) {
+      // Row has no name — remove it
       setMaterials((prev) => prev.filter((m) => m.id !== id))
       removeCollectionRefs("material", [id])
     }

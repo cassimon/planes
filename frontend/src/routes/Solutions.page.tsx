@@ -36,6 +36,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
@@ -690,6 +691,7 @@ export function SolutionsPage() {
     materials,
     solutions,
     setSolutions,
+    setProcesses,
     experiments,
     processes,
     planes,
@@ -716,6 +718,10 @@ export function SolutionsPage() {
     null,
   )
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
+  const returnToRef = useRef<string | null>(null)
+  const returnSolutionIdRef = useRef<string | null>(null)
+  const returnToProcessIdRef = useRef<string | null>(null)
+  const navigate = useNavigate()
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
@@ -831,6 +837,19 @@ export function SolutionsPage() {
       }
       return current === id ? null : current
     })
+    if (
+      !isEditing &&
+      id === returnSolutionIdRef.current &&
+      returnToRef.current
+    ) {
+      const route = returnToRef.current
+      returnToRef.current = null
+      returnSolutionIdRef.current = null
+      const processId = returnToProcessIdRef.current
+      returnToProcessIdRef.current = null
+      if (processId) setActiveEntity({ kind: "process", id: processId })
+      void navigate({ to: route as never })
+    }
   }
 
   const addSolution = () => {
@@ -862,11 +881,39 @@ export function SolutionsPage() {
     }
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
-    const { collectionId, planeId } = pendingCollectionLink
+    const { collectionId, planeId, processAttachment, returnTo } = pendingCollectionLink
     setPendingCollectionLink(null)
 
     const s = newSolution()
     setSolutions((prev) => [...prev, s])
+
+    if (returnTo) {
+      returnToRef.current = returnTo
+      returnSolutionIdRef.current = s.id
+      if (processAttachment?.processId) {
+        returnToProcessIdRef.current = processAttachment.processId
+      }
+    }
+
+    if (processAttachment?.target === "step-solution" && processAttachment.stepId) {
+      setProcesses((prev) =>
+        prev.map((process) =>
+          process.id === processAttachment.processId
+            ? {
+                ...process,
+                stages: process.stages.map((stage) => ({
+                  ...stage,
+                  alternatives: stage.alternatives.map((step) =>
+                    step.id === processAttachment.stepId
+                      ? { ...step, solutionId: s.id, materialId: undefined }
+                      : step,
+                  ),
+                })),
+              }
+            : process,
+        ),
+      )
+    }
 
     const plane = planes.find((p) => p.id === planeId)
     if (plane) {

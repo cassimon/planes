@@ -151,6 +151,7 @@ export type Process = {
   id: string
   name: string
   description?: string
+  substrateIds: string[] // references to substrate Materials
   stages: ProcessStage[] // ordered from bottom (index 0) upward
 }
 
@@ -173,6 +174,7 @@ export function newProcess(): Process {
     id: crypto.randomUUID(),
     name: "New Process",
     description: "",
+    substrateIds: [],
     stages: [],
   }
 }
@@ -937,6 +939,13 @@ type AppContextValue = {
     planeId: string
     kind: CollectionRef["kind"]
     materialCategory?: MaterialCategory
+    processAttachment?: {
+      processId: string
+      target: "substrate" | "step-material" | "step-solution"
+      stepId?: string
+    }
+    /** If set, navigate back to this route after the auto-created item is saved. */
+    returnTo?: string
     requestId: string
   } | null
   setPendingCollectionLink: (
@@ -945,6 +954,13 @@ type AppContextValue = {
       planeId: string
       kind: CollectionRef["kind"]
       materialCategory?: MaterialCategory
+      processAttachment?: {
+        processId: string
+        target: "substrate" | "step-material" | "step-solution"
+        stepId?: string
+      }
+      /** If set, navigate back to this route after the auto-created item is saved. */
+      returnTo?: string
       requestId: string
     } | null,
   ) => void
@@ -1007,6 +1023,12 @@ export function AppProvider({
     planeId: string
     kind: CollectionRef["kind"]
     materialCategory?: MaterialCategory
+    processAttachment?: {
+      processId: string
+      target: "substrate" | "step-material" | "step-solution"
+      stepId?: string
+    }
+    returnTo?: string
     requestId: string
   } | null>(null)
   const [activeEntity, setActiveEntity] = useState<{

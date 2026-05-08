@@ -20,6 +20,7 @@ import {
 } from "@mantine/core"
 import { modals } from "@mantine/modals"
 import {
+  IconAd,
   IconAtom,
   IconChevronDown,
   IconCopy,
@@ -27,8 +28,10 @@ import {
   IconDroplet,
   IconInfoCircle,
   IconLayersIntersect,
+  IconLink,
   IconPlayerPlay,
   IconPlus,
+  IconRowInsertTop,
   IconSparkles,
   IconSquare,
   IconTrash,
@@ -70,6 +73,12 @@ const STEP_CATEGORY_ICON_MAP: Record<ProcessStepCategory, React.ReactNode> = {
   doping_aging: <IconAtom size={14} />,
   substrate_preparation: <IconSquare size={14} />,
 }
+
+const SUBSTRATE_COLOR = "#6e8c9e"
+const ROW_ACTION_SLOT_WIDTH = 220
+const NEW_CHEMICAL_OPTION = "action:new-material:chemical_compound"
+const NEW_COMMERCIAL_MIXTURE_OPTION = "action:new-material:commercial_mixture"
+const NEW_SOLUTION_OPTION = "action:new-solution"
 
 const STEP_COLOR_PALETTE = [
   "#d96c4f",
@@ -324,6 +333,7 @@ export function ProcessesPage() {
   const [dropInsertIndex, setDropInsertIndex] = useState<number | null>(null)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [isExportingDocx, setIsExportingDocx] = useState(false)
+  const [substrateSelectingIdx, setSubstrateSelectingIdx] = useState<number | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
 
   const selectProcess = useCallback(
@@ -392,6 +402,46 @@ export function ProcessesPage() {
         ? processes.find((p) => p.id === activeEntity.id) ?? null
         : null,
     [activeEntity, processes],
+  )
+
+  const launchLinkedCreation = useCallback(
+    (config: {
+      kind: "material" | "solution"
+      route: "/materials" | "/solutions"
+      materialCategory?: "chemical_compound" | "commercial_mixture" | "substrate_material"
+      processAttachment: {
+        target: "substrate" | "step-material" | "step-solution"
+        stepId?: string
+      }
+    }) => {
+      if (!selectedProcess) {
+        return
+      }
+
+      const owner = getEntityCollection("process", selectedProcess.id)
+      setPendingCollectionLink({
+        collectionId: owner?.collection.id ?? activeCollectionId ?? "",
+        planeId: owner?.plane.id ?? activePlaneId ?? "",
+        kind: config.kind,
+        materialCategory: config.materialCategory,
+        processAttachment: {
+          processId: selectedProcess.id,
+          target: config.processAttachment.target,
+          stepId: config.processAttachment.stepId,
+        },
+        returnTo: "/processes",
+        requestId: crypto.randomUUID(),
+      })
+      void navigate({ to: config.route })
+    },
+    [
+      activeCollectionId,
+      activePlaneId,
+      getEntityCollection,
+      navigate,
+      selectedProcess,
+      setPendingCollectionLink,
+    ],
   )
 
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
@@ -774,10 +824,64 @@ export function ProcessesPage() {
     )
   }, [selectedProcess, selectedStep])
 
-  const hasAtLeastOneStep = useMemo(() => {
+  const hasBothSubstrateAndStep = useMemo(() => {
     if (!selectedProcess) return false
-    return selectedProcess.stages.some((stage) => stage.alternatives.length > 0)
+    const hasSubstrate = (selectedProcess.substrateIds ?? []).length > 0
+    const hasStep = selectedProcess.stages.some((stage) => stage.alternatives.length > 0)
+    return hasSubstrate && hasStep
   }, [selectedProcess])
+
+  const handleAddSubstrate = (substrateId: string) => {
+    if (!selectedProcess) return
+    const updated: Process = {
+      ...selectedProcess,
+      substrateIds: [...(selectedProcess.substrateIds ?? []), substrateId],
+    }
+    setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
+  }
+
+  const handleRemoveSubstrate = (substrateId: string) => {
+    if (!selectedProcess) return
+    const currentIds = selectedProcess.substrateIds ?? []
+    // Block: cannot remove the last substrate while steps exist
+    if (currentIds.length === 1 && selectedProcess.stages.length > 0) return
+    const updated: Process = {
+      ...selectedProcess,
+      substrateIds: currentIds.filter((id) => id !== substrateId),
+    }
+    setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
+    setSubstrateSelectingIdx(null)
+  }
+
+  const handleReplaceSubstrate = (index: number, substrateId: string) => {
+    if (!selectedProcess) return
+    const ids = [...(selectedProcess.substrateIds ?? [])]
+    ids[index] = substrateId
+    const updated: Process = { ...selectedProcess, substrateIds: ids }
+    setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
+  }
+
+  const handleCreateSubstrateMaterial = useCallback(() => {
+    launchLinkedCreation({
+      kind: "material",
+      route: "/materials",
+      materialCategory: "substrate_material",
+      processAttachment: { target: "substrate" },
+    })
+  }, [launchLinkedCreation])
+
+  const getSubstrateLabel = useCallback(
+    (substrateId: string | undefined) => {
+      if (!substrateId) return null
+      const substrate = materials.find((m) => m.id === substrateId)
+      if (!substrate) return null
+      return {
+        name: substrate.name || "Unnamed substrate",
+        rigidity: substrate.substrateRigidity || "—",
+      }
+    },
+    [materials],
+  )
 
   const getSourceSuggestions = useCallback(
     (key: ProcessParameterKey): Array<{ name: string; origin: string; param: ProcessParam }> => {
@@ -840,6 +944,22 @@ export function ProcessesPage() {
     [isEntityVisible, materials],
   )
 
+  const visibleSubstrateOptions = useMemo(
+    () =>
+      materials
+        .filter(
+          (material) =>
+            material.category === "substrate_material" &&
+            isEntityVisible("material", material.id),
+        )
+        .map((material) => ({
+          value: material.id,
+          label: material.name || "Unnamed substrate",
+          rigidity: material.substrateRigidity,
+        })),
+    [isEntityVisible, materials],
+  )
+
   const visibleSolutionOptions = useMemo(
     () =>
       solutions
@@ -861,6 +981,9 @@ export function ProcessesPage() {
         ...option,
         label: `Solution: ${option.label}`,
       })),
+      { value: NEW_CHEMICAL_OPTION, label: "Add New Chemical" },
+      { value: NEW_COMMERCIAL_MIXTURE_OPTION, label: "Add New Com. Mixture" },
+      { value: NEW_SOLUTION_OPTION, label: "Add New Solution" },
     ],
     [visibleMaterialOptions, visibleSolutionOptions],
   )
@@ -896,6 +1019,36 @@ export function ProcessesPage() {
 
   const handleUpdateStepSource = (stepId: string, sourceValue: string | null) => {
     if (!selectedProcess) return
+
+    if (sourceValue === NEW_CHEMICAL_OPTION) {
+      launchLinkedCreation({
+        kind: "material",
+        route: "/materials",
+        materialCategory: "chemical_compound",
+        processAttachment: { target: "step-material", stepId },
+      })
+      return
+    }
+
+    if (sourceValue === NEW_COMMERCIAL_MIXTURE_OPTION) {
+      launchLinkedCreation({
+        kind: "material",
+        route: "/materials",
+        materialCategory: "commercial_mixture",
+        processAttachment: { target: "step-material", stepId },
+      })
+      return
+    }
+
+    if (sourceValue === NEW_SOLUTION_OPTION) {
+      launchLinkedCreation({
+        kind: "solution",
+        route: "/solutions",
+        processAttachment: { target: "step-solution", stepId },
+      })
+      return
+    }
+
     const [kind, id] = sourceValue?.split(":") ?? []
     const updated: Process = {
       ...selectedProcess,
@@ -1385,6 +1538,12 @@ export function ProcessesPage() {
                   variant="light"
                   leftSection={<IconPlayerPlay size={18} />}
                   onClick={() => handleSpawnExperiment(selectedProcess)}
+                  disabled={!hasBothSubstrateAndStep}
+                  title={
+                    !hasBothSubstrateAndStep
+                      ? "Select both a substrate and add at least one step to create an experiment"
+                      : ""
+                  }
                 >
                   Create Experiment from Process
                 </Button>
@@ -1433,16 +1592,220 @@ export function ProcessesPage() {
                         }
                         if (!target.closest('[data-step-box="true"]')) {
                           setSelectedStepId(null)
+                          setSubstrateSelectingIdx(null)
                         }
                       }}
                     >
-                      {selectedProcess.stages.length === 0 ? (
-                        <Box style={{ minHeight: 120, display: "grid", placeItems: "center" }}>
-                          <Text size="sm" c="dimmed">
-                            Empty process board
-                          </Text>
-                        </Box>
-                      ) : (
+                      {/* Substrate Row – same visual structure as a steps row */}
+                      {(() => {
+                        const subIds = selectedProcess.substrateIds ?? []
+                        const isLastSubstrate = subIds.length === 1
+                        const hasSteps = selectedProcess.stages.length > 0
+                        const availableForNew = visibleSubstrateOptions.filter(
+                          (opt) => !subIds.includes(opt.value),
+                        )
+                        return (
+                          <Box
+                            style={{
+                              minHeight: 96,
+                              borderRadius: 10,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              padding: "8px 12px",
+                            }}
+                          >
+                            <Text
+                              size="xl"
+                              fw={700}
+                              w={84}
+                              ta="left"
+                              style={{ color: "var(--mantine-color-gray-5)", flexShrink: 0 }}
+                            >
+                              Substrate
+                            </Text>
+
+                            <Box style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+                              <Group
+                                justify="center"
+                                gap="sm"
+                                wrap="nowrap"
+                                style={{ width: "fit-content", minWidth: "100%", margin: "0 auto" }}
+                              >
+                                {subIds.map((subId, idx) => {
+                                  const label = getSubstrateLabel(subId)
+                                  const isActive = substrateSelectingIdx === idx
+                                  const cannotRemove = isLastSubstrate && hasSteps
+                                  const replacementOptions = visibleSubstrateOptions.filter(
+                                    (opt) => !subIds.includes(opt.value) || opt.value === subId,
+                                  )
+                                  return (
+                                    <Box
+                                      key={subId}
+                                      data-step-box="true"
+                                      onClick={() => setSubstrateSelectingIdx(idx)}
+                                      style={{
+                                        width: 260,
+                                        minHeight: 92,
+                                        borderRadius: 8,
+                                        padding: "10px 12px",
+                                        display: "flex",
+                                        flexDirection: "column",
+                                        justifyContent: "space-between",
+                                        cursor: "default",
+                                        userSelect: "none",
+                                        background: `linear-gradient(90deg, ${SUBSTRATE_COLOR}2E 0%, transparent 100%)`,
+                                        border: isActive
+                                          ? `2px solid ${SUBSTRATE_COLOR}`
+                                          : "1px solid var(--mantine-color-gray-3)",
+                                      }}
+                                    >
+                                      <Stack gap={6}>
+                                        <Group justify="space-between" wrap="nowrap" gap="xs">
+                                          <Group gap={6} wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                                            <IconSquare size={14} />
+                                            <Text size="sm" fw={700} truncate>
+                                              {label?.name ?? "Unnamed"}
+                                            </Text>
+                                          </Group>
+                                          <Tooltip
+                                            label="Remove all steps first before removing the last substrate"
+                                            disabled={!cannotRemove}
+                                            withArrow
+                                          >
+                                            <ActionIcon
+                                              size="xs"
+                                              variant="subtle"
+                                              color={cannotRemove ? "gray" : "red"}
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                if (!cannotRemove) handleRemoveSubstrate(subId)
+                                              }}
+                                            >
+                                              <IconX size={12} />
+                                            </ActionIcon>
+                                          </Tooltip>
+                                        </Group>
+
+                                        <Box>
+                                          {isActive ? (
+                                            <Select
+                                              size="xs"
+                                              placeholder="Select substrate"
+                                              value={subId}
+                                              data={replacementOptions.map((opt) => ({
+                                                value: opt.value,
+                                                label: opt.label,
+                                              }))}
+                                              searchable
+                                              clearable
+                                              comboboxProps={{ withinPortal: false }}
+                                              onClick={(e) => e.stopPropagation()}
+                                              onChange={(value) => {
+                                                if (value) {
+                                                  handleReplaceSubstrate(idx, value)
+                                                } else {
+                                                  handleRemoveSubstrate(subId)
+                                                }
+                                                setSubstrateSelectingIdx(null)
+                                              }}
+                                            />
+                                          ) : (
+                                            <Text size="xs" c="dimmed">
+                                              {label?.rigidity === "flexible"
+                                                ? "Flexible"
+                                                : label?.rigidity === "rigid"
+                                                  ? "Rigid"
+                                                  : "—"}
+                                            </Text>
+                                          )}
+                                        </Box>
+                                      </Stack>
+                                    </Box>
+                                  )
+                                })}
+
+                                {substrateSelectingIdx === -1 && (
+                                  <Box
+                                    data-step-box="true"
+                                    style={{
+                                      width: 260,
+                                      minHeight: 92,
+                                      borderRadius: 8,
+                                      padding: "10px 12px",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      justifyContent: "space-between",
+                                      background: `linear-gradient(90deg, ${SUBSTRATE_COLOR}2E 0%, transparent 100%)`,
+                                      border: `2px solid ${SUBSTRATE_COLOR}`,
+                                    }}
+                                  >
+                                    <Stack gap={6}>
+                                      <Group gap={6} wrap="nowrap">
+                                        <IconSquare size={14} />
+                                        <Text size="sm" fw={700} c="dimmed">New substrate</Text>
+                                      </Group>
+                                      <Select
+                                        size="xs"
+                                        placeholder="Select substrate"
+                                        data={availableForNew.map((opt) => ({
+                                          value: opt.value,
+                                          label: opt.label,
+                                        }))}
+                                        searchable
+                                        clearable
+                                        comboboxProps={{ withinPortal: false }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onChange={(value) => {
+                                          if (value) handleAddSubstrate(value)
+                                          setSubstrateSelectingIdx(null)
+                                        }}
+                                      />
+                                    </Stack>
+                                  </Box>
+                                )}
+                              </Group>
+                            </Box>
+
+                            <Box
+                              style={{
+                                width: ROW_ACTION_SLOT_WIDTH,
+                                flexShrink: 0,
+                                display: "flex",
+                                justifyContent: "flex-start",
+                              }}
+                            >
+                              {substrateSelectingIdx !== -1 ? (
+                                availableForNew.length > 0 ? (
+                                  <Button
+                                    size="xs"
+                                    variant="subtle"
+                                    leftSection={<IconPlus size={14} />}
+                                    onClick={() => setSubstrateSelectingIdx(-1)}
+                                  >
+                                    {subIds.length === 0
+                                      ? "Choose Substrate"
+                                      : "Choose Alternative Substrate"}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="xs"
+                                    variant="subtle"
+                                    leftSection={<IconRowInsertTop size={14} />}
+                                    onClick={handleCreateSubstrateMaterial}
+                                  >
+                                    New Substrate Material
+                                  </Button>
+                                )
+                              ) : (
+                                <span />
+                              )}
+                            </Box>
+                          </Box>
+                        )
+                      })()}
+
+                      {selectedProcess.stages.length > 0 ? (
                         <Stack gap="xs">
                           <Box
                             style={{
@@ -1482,7 +1845,6 @@ export function ProcessesPage() {
                                   borderRadius: 10,
                                   display: "flex",
                                   alignItems: "center",
-                                  justifyContent: "center",
                                   gap: 8,
                                   padding: "8px 12px",
                                   background:
@@ -1520,13 +1882,14 @@ export function ProcessesPage() {
                                   #{displayIndex + 1}
                                 </Text>
 
-                                <Group
-                                  justify="center"
-                                  gap="sm"
-                                  wrap="nowrap"
-                                  style={{ flex: 1 }}
-                                >
-                                  {stage.alternatives.map((step, altIdx) => {
+                                <Box style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+                                  <Group
+                                    justify="center"
+                                    gap="sm"
+                                    wrap="nowrap"
+                                    style={{ width: "fit-content", minWidth: "100%", margin: "0 auto" }}
+                                  >
+                                    {stage.alternatives.map((step, altIdx) => {
                                     const parameterLines = getParameterFlowLines(step)
                                     const isSelected = selectedStepId === step.id
                                     const cardMinHeight = isSelected
@@ -1660,6 +2023,14 @@ export function ProcessesPage() {
                                               searchable
                                               clearable
                                               comboboxProps={{ withinPortal: false }}
+                                              renderOption={({ option }) => (
+                                                <Text
+                                                  size="xs"
+                                                  fw={option.value.startsWith("action:") ? 700 : 400}
+                                                >
+                                                  {option.label}
+                                                </Text>
+                                              )}
                                               onClick={(e) => e.stopPropagation()}
                                               onChange={(value) =>
                                                 handleUpdateStepSource(step.id, value)
@@ -1697,7 +2068,17 @@ export function ProcessesPage() {
                                     </Box>
                                     )
                                   })}
+                                  </Group>
+                                </Box>
 
+                                <Box
+                                  style={{
+                                    width: ROW_ACTION_SLOT_WIDTH,
+                                    flexShrink: 0,
+                                    display: "flex",
+                                    justifyContent: "flex-start",
+                                  }}
+                                >
                                   <Menu shadow="md" width={240}>
                                     <Menu.Target>
                                       <Button
@@ -1725,7 +2106,7 @@ export function ProcessesPage() {
                                       ))}
                                     </Menu.Dropdown>
                                   </Menu>
-                                </Group>
+                                </Box>
                               </Box>
 
                               <Box
@@ -1766,35 +2147,37 @@ export function ProcessesPage() {
                             </Box>
                           ))}
                         </Stack>
-                      )}
+                      ) : null}
                     </Box>
 
-                    <Group justify="center" gap="sm">
-                      <Menu shadow="md" width={240}>
-                        <Menu.Target>
-                          <Button
-                            size="xs"
-                            variant="subtle"
-                            leftSection={<IconPlus size={14} />}
-                          >
-                            Add Next Step
-                          </Button>
-                        </Menu.Target>
-                        <Menu.Dropdown>
-                          {STEP_CATEGORIES.map((category) => (
-                            <Menu.Item
-                              key={`next-${category.value}`}
-                              leftSection={category.icon}
-                              onClick={() => handleAddProcessStep(category.value)}
+                    {(selectedProcess.substrateIds ?? []).length > 0 && (
+                      <Group justify="center" gap="sm">
+                        <Menu shadow="md" width={240}>
+                          <Menu.Target>
+                            <Button
+                              size="xs"
+                              variant="subtle"
+                              leftSection={<IconPlus size={14} />}
                             >
-                              {category.label}
-                            </Menu.Item>
-                          ))}
-                        </Menu.Dropdown>
-                      </Menu>
-                    </Group>
+                              Add Next Step
+                            </Button>
+                          </Menu.Target>
+                          <Menu.Dropdown>
+                            {STEP_CATEGORIES.map((category) => (
+                              <Menu.Item
+                                key={`next-${category.value}`}
+                                leftSection={category.icon}
+                                onClick={() => handleAddProcessStep(category.value)}
+                              >
+                                {category.label}
+                              </Menu.Item>
+                            ))}
+                          </Menu.Dropdown>
+                        </Menu>
+                      </Group>
+                    )}
 
-                    {hasAtLeastOneStep && (
+                    {hasBothSubstrateAndStep && (
                       <Group justify="center" mt="md">
                         <Button
                           size="lg"

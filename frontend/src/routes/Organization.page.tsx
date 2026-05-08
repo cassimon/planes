@@ -22,6 +22,7 @@ import {
 import { modals } from "@mantine/modals"
 import {
   IconArrowRight,
+  IconAtom,
   IconBold,
   IconBox,
   IconChartBar,
@@ -32,9 +33,11 @@ import {
   IconFolderPlus,
   IconHandGrab,
   IconItalic,
+  IconLayersLinked,
   IconLetterT,
   IconMinus,
   IconNote,
+  IconPackage,
   IconPencil,
   IconPlayerPlay,
   IconPlus,
@@ -880,6 +883,106 @@ function LineOverlay({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Speech-bubble action button rendered outside the collection card */
+// Sub-menu items for material category selection
+const MATERIAL_SUBMENU_ITEMS: {
+  label: string
+  color: string
+  Icon: React.ElementType
+  category: MaterialCategory
+}[] = [
+  { label: "Compound", color: "teal", Icon: IconAtom, category: "chemical_compound" },
+  { label: "Com. Mixture", color: "cyan", Icon: IconPackage, category: "commercial_mixture" },
+  { label: "Substrate Mat.", color: "lime", Icon: IconLayersLinked, category: "substrate_material" },
+]
+
+function MaterialActionBubble({
+  index,
+  onSelect,
+  onHoverStart,
+  onHoverEnd,
+}: {
+  index: number
+  onSelect: (category: MaterialCategory) => void
+  onHoverStart?: () => void
+  onHoverEnd?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleClose = () => {
+    hideTimerRef.current = setTimeout(() => setOpen(false), 200)
+  }
+  const cancelClose = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+  }
+
+  return (
+    <>
+      <ActionIcon
+        size="md"
+        variant="filled"
+        color="teal"
+        radius="xl"
+        onMouseEnter={() => { cancelClose(); setOpen(true); onHoverStart?.() }}
+        onMouseLeave={() => { scheduleClose(); onHoverEnd?.() }}
+        onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); (e.target as HTMLElement).setPointerCapture(e.pointerId) }}
+        onPointerUp={(e) => { e.stopPropagation(); e.preventDefault(); (e.target as HTMLElement).releasePointerCapture(e.pointerId) }}
+        onClick={(e) => { e.stopPropagation(); e.preventDefault(); onSelect("chemical_compound") }}
+        style={{
+          position: "absolute",
+          right: -44,
+          top: 4 + index * 36,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+          animation: "bubble-in 150ms ease-out",
+          touchAction: "none",
+        }}
+      >
+        <IconBox size={16} />
+      </ActionIcon>
+      {open && (
+        <Paper
+          shadow="md"
+          p={4}
+          radius="sm"
+          onMouseEnter={() => { cancelClose(); onHoverStart?.() }}
+          onMouseLeave={() => { scheduleClose(); onHoverEnd?.() }}
+          style={{
+            position: "absolute",
+            right: -185,
+            top: 4 + index * 36 - 2,
+            zIndex: 200,
+            minWidth: 130,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {MATERIAL_SUBMENU_ITEMS.map((item) => (
+            <Tooltip key={item.category} label={`Add ${item.label}`} position="right" withArrow>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                color={item.color}
+                leftSection={<item.Icon size={13} />}
+                styles={{ inner: { justifyContent: "flex-start" } }}
+                onPointerDown={(e) => { e.stopPropagation(); e.preventDefault() }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setOpen(false)
+                  onSelect(item.category)
+                }}
+              >
+                {item.label}
+              </Button>
+            </Tooltip>
+          ))}
+        </Paper>
+      )}
+    </>
+  )
+}
+
 function ActionBubble({
   label,
   Icon,
@@ -1225,34 +1328,12 @@ function CollectionEl({
     return id
   }
 
-  const actions: {
+  const nonMaterialActions: {
     label: string
     Icon: React.ElementType
     color: string
     kind: CollectionRef["kind"]
-    materialCategory?: MaterialCategory
   }[] = [
-    {
-      label: "Add Compound",
-      Icon: IconBox,
-      color: "teal",
-      kind: "material",
-      materialCategory: "chemical_compound",
-    },
-    {
-      label: "Add Com. Mixture",
-      Icon: IconBox,
-      color: "cyan",
-      kind: "material",
-      materialCategory: "commercial_mixture",
-    },
-    {
-      label: "Add Substrate Material",
-      Icon: IconBox,
-      color: "lime",
-      kind: "material",
-      materialCategory: "substrate_material",
-    },
     { label: "Add Solution", Icon: IconFlask, color: "blue", kind: "solution" },
     { label: "Add Process", Icon: IconStack3, color: "gray", kind: "process" },
   ]
@@ -1522,19 +1603,28 @@ function CollectionEl({
       </Paper>
 
       {/* Speech-bubble actions (only when selected) */}
-      {showCollectionControls &&
-        actions.map((a, i) => (
-          <ActionBubble
-            key={a.kind}
-            label={a.label}
-            Icon={a.Icon}
-            color={a.color}
-            onClick={() => handleBubbleClick(a.kind, a.materialCategory)}
-            index={i}
+      {showCollectionControls && (
+        <>
+          <MaterialActionBubble
+            index={0}
+            onSelect={(cat) => handleBubbleClick("material", cat)}
             onHoverStart={activateHover}
             onHoverEnd={scheduleHoverHide}
           />
-        ))}
+          {nonMaterialActions.map((a, i) => (
+            <ActionBubble
+              key={a.kind}
+              label={a.label}
+              Icon={a.Icon}
+              color={a.color}
+              onClick={() => handleBubbleClick(a.kind)}
+              index={i + 1}
+              onHoverStart={activateHover}
+              onHoverEnd={scheduleHoverHide}
+            />
+          ))}
+        </>
+      )}
 
       {showCollectionControls && el.refs.length > 0 && (
         <Tooltip label="Divide collection" position="left" withArrow>
