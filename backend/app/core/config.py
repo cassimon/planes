@@ -107,7 +107,9 @@ class Settings(BaseSettings):
     NOMAD_KEYCLOAK_REALM_URL: str = "https://nomad-lab.eu/fairdi/keycloak/auth/realms/fairdi_nomad_prod"
     NOMAD_OAUTH_CLIENT_ID: str = "nomad_public"  # Central NOMAD public Keycloak client
     NOMAD_OAUTH_AUDIENCE: str | None = None  # Defaults to client_id when unset
-    NOMAD_OAUTH_VERIFY_AUDIENCE: bool = True
+    # nomad_public access tokens have no aud claim — set to true only if your
+    # Keycloak client has an audience mapper configured.
+    NOMAD_OAUTH_VERIFY_AUDIENCE: bool = False
     NOMAD_OAUTH_ENABLED: bool = False  # Enable NOMAD OAuth login
     # Path to the out-of-repo credentials file (key=value format).
     # Override via the NOMAD_AUTH_FILE env var if needed.
