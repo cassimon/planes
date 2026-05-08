@@ -80,6 +80,8 @@ def _safe_datetime(val: Any) -> datetime | None:
 def read_state(session: SessionDep, current_user: CurrentUser) -> Any:
     """Reconstruct the full AppSnapshot from normalised tables."""
     uid = current_user.id
+    us = session.exec(select(UserState).where(UserState.owner_id == uid)).first()
+    us_data = us.data if us and isinstance(us.data, dict) else {}
 
     # --- Materials ---
     materials_db = session.exec(select(Material).where(Material.owner_id == uid)).all()
@@ -171,19 +173,20 @@ def read_state(session: SessionDep, current_user: CurrentUser) -> Any:
         "materials": materials_out,
         "solutions": solutions_out,
         "experiments": experiments_out,
+        # Processes currently have no normalised table; persist via UserState JSON.
+        "processes": us_data.get("processes", []),
         "results": results_out,
         "planes": planes_out,
     }
 
     logger.info(
         "GET /state/ user=%s — materials=%d solutions=%d experiments=%d "
-        "results=%d planes=%d",
+        "processes=%d results=%d planes=%d",
         uid, len(materials_out), len(solutions_out), len(experiments_out),
-        len(results_out), len(planes_out),
+        len(data["processes"]), len(results_out), len(planes_out),
     )
 
     # Also fetch updated_at from the UserState row (if any)
-    us = session.exec(select(UserState).where(UserState.owner_id == uid)).first()
     updated_at = us.updated_at if us else None
 
     return UserStatePublic(data=data, updated_at=updated_at)

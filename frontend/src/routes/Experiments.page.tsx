@@ -228,7 +228,7 @@ function RecipeSelectionModal({
     <Modal
       opened={isOpen}
       onClose={onClose}
-      title="Select Recipe (Process) for Experiment"
+      title="Select Process (Recipe) for Experiment"
       size="md"
     >
       <Stack gap="md">
@@ -241,15 +241,15 @@ function RecipeSelectionModal({
           {processes.length === 0 ? (
             <Alert
               icon={<IconInfoCircle size={16} />}
-              title="No Recipes Available"
+              title="No Processes Available"
               color="yellow"
             >
-              Please create a recipe first before creating an experiment.
+              Please create a process first before creating an experiment.
             </Alert>
           ) : (
             <Select
-              label="Recipe"
-              placeholder="Select a recipe..."
+              label="Process"
+              placeholder="Select a process..."
               searchable
               data={processes.map((p) => ({
                 value: p.id,
