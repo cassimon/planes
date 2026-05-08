@@ -39,6 +39,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
+  type Material,
   newComponent,
   newSolution,
   type Solution,
@@ -76,6 +77,16 @@ function fromDateTimeLocalValue(localValue: string): string | null {
   return d.toISOString()
 }
 
+function getDefaultUnitForMaterial(material: Material): "mg" | "ml" {
+  if ((material.category ?? "chemical_compound") === "substrate_material") {
+    return "mg"
+  }
+  if (material.stateAtRt === "liquid" || material.stateAtRt === "gas") {
+    return "ml"
+  }
+  return "mg"
+}
+
 // ── Component row (material/solution + amount + unit) ─────────────────────────
 
 type ComponentRowProps = {
@@ -91,6 +102,7 @@ type ComponentRowProps = {
   buffer: SolutionComponent | null
   onBufferChange: (b: SolutionComponent) => void
   materialOptions: { value: string; label: string }[]
+  materialUnitById?: Map<string, "mg" | "ml">
   /** Solution options (already filtered to exclude self-reference) */
   solutionOptions: { value: string; label: string }[]
   materialColorMap?: Map<string, string>
@@ -108,6 +120,7 @@ function ComponentRow({
   buffer,
   onBufferChange,
   materialOptions,
+  materialUnitById,
   solutionOptions,
   materialColorMap,
   solutionColorMap,
@@ -150,13 +163,15 @@ function ComponentRow({
               <Select
                 size="xs"
                 value={buffer.materialId || null}
-                onChange={(v) =>
+                onChange={(v) => {
+                  const unit = v ? (materialUnitById?.get(v) ?? buffer.unit) : buffer.unit
                   onBufferChange({
                     ...buffer,
                     materialId: v ?? "",
                     solutionId: undefined,
+                    unit,
                   })
-                }
+                }}
                 data={materialOptions}
                 placeholder="— select material —"
                 clearable
@@ -320,6 +335,7 @@ type SolutionCardProps = {
   onDelete: () => void
   onCopy: () => void
   materialOptions: { value: string; label: string }[]
+  materialUnitById?: Map<string, "mg" | "ml">
   getMaterialName: (id: string) => string
   /** All solutions (used to build solution-as-component options) */
   allSolutionOptions: { value: string; label: string }[]
@@ -338,6 +354,7 @@ function SolutionCard({
   onDelete,
   onCopy,
   materialOptions,
+  materialUnitById,
   getMaterialName,
   allSolutionOptions,
   getSolutionName,
@@ -641,6 +658,7 @@ function SolutionCard({
                     }
                     onBufferChange={setComponentBuffer}
                     materialOptions={materialOptions}
+                    materialUnitById={materialUnitById}
                     solutionOptions={filteredSolutionOptions}
                     materialColorMap={materialColorMap}
                     solutionColorMap={solutionColorMap}
@@ -732,6 +750,7 @@ export function SolutionsPage() {
   const materialOptions = useMemo(
     () =>
       materials
+        .filter((m) => (m.category ?? "chemical_compound") !== "substrate_material")
         .filter((m) => isEntityOnActivePlane("material", m.id))
         .map((m) => ({
           value: m.id,
@@ -739,6 +758,19 @@ export function SolutionsPage() {
         })),
     [materials, isEntityOnActivePlane],
   )
+
+  const materialUnitById = useMemo(() => {
+    const map = new Map<string, "mg" | "ml">()
+    for (const material of materials) {
+      if (
+        (material.category ?? "chemical_compound") === "substrate_material"
+      ) {
+        continue
+      }
+      map.set(material.id, getDefaultUnitForMaterial(material))
+    }
+    return map
+  }, [materials])
 
   const materialColorMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -999,6 +1031,7 @@ export function SolutionsPage() {
                     onDelete={() => deleteSolution(solution.id)}
                     onCopy={() => copySolution(solution.id)}
                     materialOptions={materialOptions}
+                    materialUnitById={materialUnitById}
                     getMaterialName={getMaterialName}
                     allSolutionOptions={allSolutionOptions}
                     getSolutionName={getSolutionName}
@@ -1038,6 +1071,7 @@ export function SolutionsPage() {
                     onDelete={() => deleteSolution(solution.id)}
                     onCopy={() => copySolution(solution.id)}
                     materialOptions={materialOptions}
+                    materialUnitById={materialUnitById}
                     getMaterialName={getMaterialName}
                     allSolutionOptions={allSolutionOptions}
                     getSolutionName={getSolutionName}
@@ -1063,6 +1097,7 @@ export function SolutionsPage() {
               onDelete={() => deleteSolution(solution.id)}
               onCopy={() => copySolution(solution.id)}
               materialOptions={materialOptions}
+              materialUnitById={materialUnitById}
               getMaterialName={getMaterialName}
               allSolutionOptions={allSolutionOptions}
               getSolutionName={getSolutionName}

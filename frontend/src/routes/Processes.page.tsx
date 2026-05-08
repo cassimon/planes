@@ -774,6 +774,11 @@ export function ProcessesPage() {
     )
   }, [selectedProcess, selectedStep])
 
+  const hasAtLeastOneStep = useMemo(() => {
+    if (!selectedProcess) return false
+    return selectedProcess.stages.some((stage) => stage.alternatives.length > 0)
+  }, [selectedProcess])
+
   const getSourceSuggestions = useCallback(
     (key: ProcessParameterKey): Array<{ name: string; origin: string; param: ProcessParam }> => {
       if (!selectedProcess || !selectedStep || selectedStageIndex < 0) {
@@ -1375,6 +1380,15 @@ export function ProcessesPage() {
               />
               <Group gap="xs">
                 <Button
+                  size="md"
+                  color="green"
+                  variant="light"
+                  leftSection={<IconPlayerPlay size={18} />}
+                  onClick={() => handleSpawnExperiment(selectedProcess)}
+                >
+                  Create Experiment from Process
+                </Button>
+                <Button
                   size="xs"
                   variant="light"
                   leftSection={<IconDownload size={14} />}
@@ -1779,6 +1793,20 @@ export function ProcessesPage() {
                         </Menu.Dropdown>
                       </Menu>
                     </Group>
+
+                    {hasAtLeastOneStep && (
+                      <Group justify="center" mt="md">
+                        <Button
+                          size="lg"
+                          color="green"
+                          variant="subtle"
+                          leftSection={<IconPlayerPlay size={20} />}
+                          onClick={() => handleSpawnExperiment(selectedProcess)}
+                        >
+                          Create Experiment from Process
+                        </Button>
+                      </Group>
+                    )}
                   </Stack>
                 </Box>
               </Stack>

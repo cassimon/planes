@@ -505,6 +505,7 @@ export class HttpBackend implements BackendAdapter {
       // Apply type conversions from API format to AppContext format
       const materials = (json.materials ?? []).map((m: any) => ({
         id: m.id,
+        category: "chemical_compound" as const,
         type: "",
         name: m.name,
         supplier: m.supplier ?? "",
@@ -513,6 +514,8 @@ export class HttpBackend implements BackendAdapter {
         pubchemCid: "",
         inventoryLabel: "",
         purity: "",
+        stateAtRt: "" as const,
+        substrateRigidity: "" as const,
       }))
 
       const solutions = (json.solutions ?? []).map((s: any) => ({

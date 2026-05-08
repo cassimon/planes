@@ -63,6 +63,7 @@ import {
   type CanvasTextElement,
   type CollectionRef,
   getDependentLocations,
+  type MaterialCategory,
   type Plane,
   type TextFormatting,
   useAppContext,
@@ -1166,11 +1167,15 @@ function CollectionEl({
     analysis: "/analysis",
   }
 
-  const handleBubbleClick = (kind: CollectionRef["kind"]) => {
+  const handleBubbleClick = (
+    kind: CollectionRef["kind"],
+    materialCategory?: MaterialCategory,
+  ) => {
     setPendingCollectionLink({
       collectionId: el.id,
       planeId,
       kind,
+      materialCategory,
       requestId: crypto.randomUUID(),
     })
     navigate({ to: routeForKind[kind] })
@@ -1225,8 +1230,29 @@ function CollectionEl({
     Icon: React.ElementType
     color: string
     kind: CollectionRef["kind"]
+    materialCategory?: MaterialCategory
   }[] = [
-    { label: "Add Material", Icon: IconBox, color: "teal", kind: "material" },
+    {
+      label: "Add Compound",
+      Icon: IconBox,
+      color: "teal",
+      kind: "material",
+      materialCategory: "chemical_compound",
+    },
+    {
+      label: "Add Com. Mixture",
+      Icon: IconBox,
+      color: "cyan",
+      kind: "material",
+      materialCategory: "commercial_mixture",
+    },
+    {
+      label: "Add Substrate Material",
+      Icon: IconBox,
+      color: "lime",
+      kind: "material",
+      materialCategory: "substrate_material",
+    },
     { label: "Add Solution", Icon: IconFlask, color: "blue", kind: "solution" },
     { label: "Add Process", Icon: IconStack3, color: "gray", kind: "process" },
   ]
@@ -1503,7 +1529,7 @@ function CollectionEl({
             label={a.label}
             Icon={a.Icon}
             color={a.color}
-            onClick={() => handleBubbleClick(a.kind)}
+            onClick={() => handleBubbleClick(a.kind, a.materialCategory)}
             index={i}
             onHoverStart={activateHover}
             onHoverEnd={scheduleHoverHide}

@@ -133,6 +133,7 @@ export interface ApiBulkState {
 export function apiMaterialToMaterial(api: ApiMaterial): Material {
   return {
     id: api.id,
+    category: "chemical_compound",
     type: "", // Not in API, default empty
     name: api.name,
     supplier: api.supplier ?? "",
@@ -141,6 +142,8 @@ export function apiMaterialToMaterial(api: ApiMaterial): Material {
     pubchemCid: "", // Not in API
     inventoryLabel: "", // Not in API
     purity: "", // Not in API
+    stateAtRt: "",
+    substrateRigidity: "",
   }
 }
 

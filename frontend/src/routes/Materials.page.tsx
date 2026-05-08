@@ -5,6 +5,7 @@ import {
   Button,
   Container,
   Group,
+  NativeSelect,
   rem,
   ScrollArea,
   Table,
@@ -27,10 +28,11 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { DependencyBlockModal } from "../components/DependencyBlockModal"
 import {
   getDependentLocations,
+  type MaterialCategory,
   type Material,
   newMaterial,
   useAppContext,
@@ -42,15 +44,60 @@ type Column = {
   label: string
 }
 
-const COLUMNS: Column[] = [
+const COMMON_COLUMNS: Column[] = [
   { key: "type", label: "Type" },
   { key: "name", label: "Name" },
   { key: "supplier", label: "Supplier" },
   { key: "supplierNumber", label: "Supplier Number" },
+  { key: "inventoryLabel", label: "Inventory Label" },
+]
+
+const CHEMICAL_COLUMNS: Column[] = [
+  ...COMMON_COLUMNS,
   { key: "casNumber", label: "CAS Number" },
   { key: "pubchemCid", label: "PubChem CID" },
-  { key: "inventoryLabel", label: "Inventory Label" },
   { key: "purity", label: "Purity" },
+  { key: "stateAtRt", label: "State at RT" },
+]
+
+const COMMERCIAL_MIXTURE_COLUMNS: Column[] = [
+  ...COMMON_COLUMNS,
+  { key: "casNumber", label: "CAS Number" },
+  { key: "pubchemCid", label: "CID Numbers (Components)" },
+]
+
+const SUBSTRATE_COLUMNS: Column[] = [
+  ...COMMON_COLUMNS,
+  { key: "substrateRigidity", label: "Flexible / Rigid" },
+]
+
+const CATEGORY_LABEL: Record<MaterialCategory, string> = {
+  chemical_compound: "Chemical Compounds",
+  commercial_mixture: "Commercial Mixtures",
+  substrate_material: "Substrate Materials",
+}
+
+const CATEGORY_ADD_LABEL: Record<MaterialCategory, string> = {
+  chemical_compound: "Add Compound",
+  commercial_mixture: "Add Com. Mixture",
+  substrate_material: "Add Substrate Material",
+}
+
+const CATEGORY_COLUMNS: Record<MaterialCategory, Column[]> = {
+  chemical_compound: CHEMICAL_COLUMNS,
+  commercial_mixture: COMMERCIAL_MIXTURE_COLUMNS,
+  substrate_material: SUBSTRATE_COLUMNS,
+}
+
+const ALL_FREE_TEXT_KEYS: Array<keyof Material> = [
+  "type",
+  "name",
+  "supplier",
+  "supplierNumber",
+  "casNumber",
+  "pubchemCid",
+  "inventoryLabel",
+  "purity",
 ]
 
 type SortState = { key: keyof Material; direction: "asc" | "desc" } | null
@@ -89,7 +136,7 @@ export function MaterialsPage() {
     activeEntity,
     setActiveEntity,
   } = useAppContext()
-  const { getEntityColor, isEntityVisible, getEntityPlane, getEntityCollection } =
+  const { getEntityColor, isEntityVisible, getEntityCollection } =
     useEntityCollection()
   const [sort, setSort] = useState<SortState>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -166,10 +213,10 @@ export function MaterialsPage() {
     }
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
-    const { collectionId, planeId } = pendingCollectionLink
+    const { collectionId, planeId, materialCategory } = pendingCollectionLink
     setPendingCollectionLink(null)
 
-    const m = newMaterial()
+    const m = newMaterial(materialCategory)
     setMaterials((prev) => [...prev, m])
 
     const plane = planes.find((p) => p.id === planeId)
@@ -202,11 +249,25 @@ export function MaterialsPage() {
       if (!sort) {
         return 0
       }
-      const av = a[sort.key].toLowerCase()
-      const bv = b[sort.key].toLowerCase()
+      const av = String(a[sort.key] ?? "").toLowerCase()
+      const bv = String(b[sort.key] ?? "").toLowerCase()
       const cmp = av.localeCompare(bv)
       return sort.direction === "asc" ? cmp : -cmp
     })
+
+  const groupedByCategory = useMemo(() => {
+    return {
+      chemical_compound: sorted.filter(
+        (m) => (m.category ?? "chemical_compound") === "chemical_compound",
+      ),
+      commercial_mixture: sorted.filter(
+        (m) => (m.category ?? "chemical_compound") === "commercial_mixture",
+      ),
+      substrate_material: sorted.filter(
+        (m) => (m.category ?? "chemical_compound") === "substrate_material",
+      ),
+    }
+  }, [sorted])
 
   const copyMaterial = (m: Material) => {
     const copied: Material = {
@@ -265,8 +326,8 @@ export function MaterialsPage() {
     })
   }
 
-  const addMaterial = () => {
-    const m = newMaterial()
+  const addMaterial = (category: MaterialCategory) => {
+    const m = newMaterial(category)
     setMaterials((prev) => [...prev, m])
     // Link to active collection if one is selected
     if (activeCollectionId && activePlaneId) {
@@ -297,7 +358,12 @@ export function MaterialsPage() {
 
   const cancelEdit = (id: string) => {
     const original = materials.find((m) => m.id === id)
-    if (original && !COLUMNS.some((c) => original[c.key])) {
+    if (
+      original &&
+      !ALL_FREE_TEXT_KEYS.some((k) => String(original[k] ?? "").trim()) &&
+      !original.stateAtRt &&
+      !original.substrateRigidity
+    ) {
       // Row was never filled — remove it
       setMaterials((prev) => prev.filter((m) => m.id !== id))
       removeCollectionRefs("material", [id])
@@ -383,7 +449,88 @@ export function MaterialsPage() {
     })
   }
 
-  const renderMaterialRow = (material: Material) => {
+  const renderCellEditor = (material: Material, colKey: keyof Material) => {
+    if (!editBuffer) {
+      return null
+    }
+    if (colKey === "stateAtRt") {
+      return (
+        <NativeSelect
+          size="xs"
+          value={editBuffer.stateAtRt}
+          data={[
+            { label: "", value: "" },
+            { label: "liquid", value: "liquid" },
+            { label: "solid", value: "solid" },
+            { label: "gas", value: "gas" },
+          ]}
+          onChange={(e) => {
+            const value = e.currentTarget.value as Material["stateAtRt"]
+            setEditBuffer((prev) => (prev ? { ...prev, stateAtRt: value } : prev))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitEdit()
+            }
+            if (e.key === "Escape") {
+              cancelEdit(material.id)
+            }
+          }}
+        />
+      )
+    }
+    if (colKey === "substrateRigidity") {
+      return (
+        <NativeSelect
+          size="xs"
+          value={editBuffer.substrateRigidity}
+          data={[
+            { label: "", value: "" },
+            { label: "Flexible", value: "flexible" },
+            { label: "Rigid", value: "rigid" },
+          ]}
+          onChange={(e) => {
+            const value = e.currentTarget.value as Material["substrateRigidity"]
+            setEditBuffer((prev) =>
+              prev ? { ...prev, substrateRigidity: value } : prev,
+            )
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitEdit()
+            }
+            if (e.key === "Escape") {
+              cancelEdit(material.id)
+            }
+          }}
+        />
+      )
+    }
+    return (
+      <TextInput
+        size="xs"
+        value={String(editBuffer[colKey] ?? "")}
+        onChange={(e) => {
+          const value = e.currentTarget.value
+          setEditBuffer((prev) => (prev ? { ...prev, [colKey]: value } : prev))
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            commitEdit()
+          }
+          if (e.key === "Escape") {
+            cancelEdit(material.id)
+          }
+        }}
+        autoFocus={colKey === "type" || colKey === "name"}
+      />
+    )
+  }
+
+  const renderMaterialRow = (
+    material: Material,
+    categoryColumns: Column[],
+  ) => {
     const isEditing = editingId === material.id
     return (
       <Table.Tr
@@ -412,31 +559,13 @@ export function MaterialsPage() {
             onChange={() => toggleSelect(material.id)}
           />
         </Table.Td>
-        {COLUMNS.map((col) => (
+        {categoryColumns.map((col) => (
           <Table.Td key={col.key}>
             {isEditing && editBuffer ? (
-              <TextInput
-                size="xs"
-                value={editBuffer[col.key]}
-                onChange={(e) => {
-                  const value = e.currentTarget.value
-                  setEditBuffer((prev) =>
-                    prev ? { ...prev, [col.key]: value } : prev,
-                  )
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    commitEdit()
-                  }
-                  if (e.key === "Escape") {
-                    cancelEdit(material.id)
-                  }
-                }}
-                autoFocus={col.key === "type"}
-              />
+              renderCellEditor(material, col.key)
             ) : (
               <Text size="sm">
-                {material[col.key] || (
+                {String(material[col.key] ?? "") || (
                   <Text span c="dimmed" size="sm">
                     —
                   </Text>
@@ -510,6 +639,81 @@ export function MaterialsPage() {
     )
   }
 
+  const renderCategoryTable = (category: MaterialCategory) => {
+    const columns = CATEGORY_COLUMNS[category]
+    const items = groupedByCategory[category]
+
+    return (
+      <Box key={category}>
+        <Group justify="space-between" mb="xs" mt="md">
+          <Title order={4}>{CATEGORY_LABEL[category]}</Title>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={() => addMaterial(category)}
+            disabled={!activeCollectionId}
+            size="xs"
+          >
+            {CATEGORY_ADD_LABEL[category]}
+          </Button>
+        </Group>
+
+        <ScrollArea>
+          <Table
+            striped
+            highlightOnHover
+            withTableBorder
+            withColumnBorders
+            stickyHeader
+          >
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th style={{ padding: 0, width: 6 }} />
+                <Table.Th style={{ width: rem(36) }} />
+                {columns.map((col) => (
+                  <Table.Th key={`${category}-${col.key}`}>
+                    <UnstyledButton
+                      onClick={() => toggleSort(col.key)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: rem(4),
+                      }}
+                    >
+                      <Text fw={600} size="sm">
+                        {col.label}
+                      </Text>
+                      <SortIcon
+                        sorted={sort?.key === col.key}
+                        direction={
+                          sort?.key === col.key ? sort.direction : "asc"
+                        }
+                      />
+                    </UnstyledButton>
+                  </Table.Th>
+                ))}
+                <Table.Th style={{ width: rem(130) }} />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {items.length === 0 ? (
+                <Table.Tr>
+                  <Table.Td colSpan={columns.length + 3}>
+                    <Text c="dimmed" ta="center" py="md">
+                      No {CATEGORY_LABEL[category].toLowerCase()} in the selected
+                      collection.
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              ) : (
+                items.map((material) => renderMaterialRow(material, columns))
+              )}
+            </Table.Tbody>
+          </Table>
+        </ScrollArea>
+      </Box>
+    )
+  }
+
   return (
     <Container fluid>
       <Group justify="space-between" mb="md" mt="md">
@@ -525,13 +729,6 @@ export function MaterialsPage() {
               Delete ({selected.size})
             </Button>
           )}
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={addMaterial}
-            disabled={!activeCollectionId}
-          >
-            Add Material
-          </Button>
         </Group>
       </Group>
 
@@ -542,125 +739,9 @@ export function MaterialsPage() {
         </Alert>
       )}
 
-      <ScrollArea>
-        <Table
-          striped
-          highlightOnHover
-          withTableBorder
-          withColumnBorders
-          stickyHeader
-        >
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th style={{ padding: 0, width: 6 }} />
-              <Table.Th style={{ width: rem(36) }} />
-              {COLUMNS.map((col) => (
-                <Table.Th key={col.key}>
-                  <UnstyledButton
-                    onClick={() => toggleSort(col.key)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: rem(4),
-                    }}
-                  >
-                    <Text fw={600} size="sm">
-                      {col.label}
-                    </Text>
-                    <SortIcon
-                      sorted={sort?.key === col.key}
-                      direction={sort?.key === col.key ? sort.direction : "asc"}
-                    />
-                  </UnstyledButton>
-                </Table.Th>
-              ))}
-              <Table.Th style={{ width: rem(130) }} />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {sorted.length === 0 && (
-              <Table.Tr>
-                <Table.Td colSpan={COLUMNS.length + 3}>
-                  <Text c="dimmed" ta="center" py="md">
-                    {materials.length === 0
-                      ? 'No materials yet. Click "Add Material" to get started.'
-                      : "No materials in the selected collection."}
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            )}
-            {(() => {
-              // In General mode (no plane selected), group by plane with subheadings
-              if (!activePlaneId) {
-                const groups = new Map<
-                  string,
-                  { planeName: string; items: typeof sorted }
-                >()
-                const orphans: typeof sorted = []
-                for (const material of sorted) {
-                  const plane = getEntityPlane("material", material.id)
-                  if (plane) {
-                    const group = groups.get(plane.id)
-                    if (group) {
-                      group.items.push(material)
-                    } else {
-                      groups.set(plane.id, {
-                        planeName: plane.name,
-                        items: [material],
-                      })
-                    }
-                  } else {
-                    orphans.push(material)
-                  }
-                }
-                const sections: React.ReactNode[] = []
-                for (const [planeId, { planeName, items }] of groups) {
-                  sections.push(
-                    <Table.Tr key={`plane-header-${planeId}`}>
-                      <Table.Td
-                        colSpan={COLUMNS.length + 3}
-                        style={{
-                          background: "var(--mantine-color-gray-1)",
-                          padding: "4px 12px",
-                        }}
-                      >
-                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                          {planeName}
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>,
-                  )
-                  sections.push(
-                    ...items.map((material) => renderMaterialRow(material)),
-                  )
-                }
-                if (orphans.length > 0) {
-                  sections.push(
-                    <Table.Tr key="plane-header-orphan">
-                      <Table.Td
-                        colSpan={COLUMNS.length + 3}
-                        style={{
-                          background: "var(--mantine-color-gray-1)",
-                          padding: "4px 12px",
-                        }}
-                      >
-                        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-                          Unassigned
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>,
-                  )
-                  sections.push(
-                    ...orphans.map((material) => renderMaterialRow(material)),
-                  )
-                }
-                return sections
-              }
-              return sorted.map((material) => renderMaterialRow(material))
-            })()}
-          </Table.Tbody>
-        </Table>
-      </ScrollArea>
+      {renderCategoryTable("chemical_compound")}
+      {renderCategoryTable("commercial_mixture")}
+      {renderCategoryTable("substrate_material")}
 
       {materials.length > 0 && (
         <Box mt="xs">

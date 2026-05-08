@@ -18,8 +18,18 @@ import {
 
 // ── Material ────────────────────────────────────────────────────────────────
 
+export type MaterialCategory =
+  | "chemical_compound"
+  | "commercial_mixture"
+  | "substrate_material"
+
+export type MaterialStateAtRt = "" | "liquid" | "solid" | "gas"
+
+export type MaterialSubstrateRigidity = "" | "flexible" | "rigid"
+
 export type Material = {
   id: string
+  category: MaterialCategory
   type: string
   name: string
   supplier: string
@@ -28,11 +38,16 @@ export type Material = {
   pubchemCid: string
   inventoryLabel: string
   purity: string
+  stateAtRt: MaterialStateAtRt
+  substrateRigidity: MaterialSubstrateRigidity
 }
 
-export function newMaterial(): Material {
+export function newMaterial(
+  category: MaterialCategory = "chemical_compound",
+): Material {
   return {
     id: crypto.randomUUID(),
+    category,
     type: "",
     name: "",
     supplier: "",
@@ -41,6 +56,8 @@ export function newMaterial(): Material {
     pubchemCid: "",
     inventoryLabel: "",
     purity: "",
+    stateAtRt: "",
+    substrateRigidity: "",
   }
 }
 
@@ -919,6 +936,7 @@ type AppContextValue = {
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    materialCategory?: MaterialCategory
     requestId: string
   } | null
   setPendingCollectionLink: (
@@ -926,6 +944,7 @@ type AppContextValue = {
       collectionId: string
       planeId: string
       kind: CollectionRef["kind"]
+      materialCategory?: MaterialCategory
       requestId: string
     } | null,
   ) => void
@@ -987,6 +1006,7 @@ export function AppProvider({
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    materialCategory?: MaterialCategory
     requestId: string
   } | null>(null)
   const [activeEntity, setActiveEntity] = useState<{
