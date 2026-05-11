@@ -20,6 +20,8 @@ import {
 import { modals } from "@mantine/modals"
 import {
   IconAtom,
+  IconArrowBackUp,
+  IconCheck,
   IconChevronDown,
   IconCopy,
   IconDownload,
@@ -42,12 +44,15 @@ import {
 } from "@/lib/processExport"
 import {
   getDependentLocations,
+  type Material,
+  type ProcessGeneratedStack,
   type ProcessParam,
   PROCESS_PARAMETER_DEFINITIONS,
   type Process,
   type ProcessParameterKey,
   type ProcessStep,
   type ProcessStepCategory,
+  type Solution,
   newExperiment,
   newProcess,
   newProcessStep,
@@ -292,6 +297,638 @@ function ProcessParamInput({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Device Stack Generation & Rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StackLayer = {
+  id: string
+  name: string
+  color: string
+  isSubstrate: boolean
+  layerType: string   // "ETL" | "HTL" | "absorber" | "contact" | "interlayer" | ""
+  thicknessNm: string
+  perovskiteA: string
+  perovskiteB: string
+  perovskiteX: string
+}
+
+const LAYER_TYPE_OPTIONS = ["ETL", "HTL", "absorber", "contact", "interlayer"]
+
+function getMaterialTypeStr(step: ProcessStep, materials: Material[]): string {
+  if (step.materialId) {
+    const mat = materials.find((m) => m.id === step.materialId)
+    return mat?.type?.toLowerCase() ?? ""
+  }
+  return ""
+}
+
+function isPerovskitePrecursor(step: ProcessStep, materials: Material[]): boolean {
+  return getMaterialTypeStr(step, materials).includes("perovskite")
+}
+
+function getDefaultLayerType(step: ProcessStep, materials: Material[]): string {
+  const t = getMaterialTypeStr(step, materials)
+  if (t.includes("n-type") || t.includes("etl")) return "ETL"
+  if (t.includes("p-type") || t.includes("htl")) return "HTL"
+  if (t.includes("perovskite")) return "absorber"
+  if (t.includes("conductor") || t.includes("contact")) return "contact"
+  if (t.includes("semiconductor")) return "absorber"
+  return "interlayer"
+}
+
+type GeneratedStack = {
+  layers: StackLayer[]
+  combination: number // for identifying which alternative combo this represents
+}
+
+function getStackInvalidationKey(process: Process | null): string {
+  if (!process) return ""
+
+  const substrateKey = (process.substrateIds ?? []).join("|")
+  const stageKey = process.stages
+    .map((stage, stagePos) =>
+      `${stagePos}:${stage.alternatives
+        .map(
+          (step, altPos) =>
+            `${altPos}:${step.id}:${step.materialId ?? ""}:${step.solutionId ?? ""}`,
+        )
+        .join(",")}`,
+    )
+    .join(";")
+
+  return `${process.id}::${substrateKey}::${stageKey}`
+}
+
+function getLayerName(
+  step: ProcessStep,
+  materials: Material[],
+  solutions: Solution[],
+): string {
+  // Try to get material/solution name
+  if (step.materialId) {
+    const mat = materials.find((m) => m.id === step.materialId)
+    return mat?.name || "Unnamed Material"
+  }
+  if (step.solutionId) {
+    const sol = solutions.find((s) => s.id === step.solutionId)
+    return sol?.name || "Unnamed Solution"
+  }
+  // Fallback to deposition method
+  return step.depositionMethod?.value?.trim() || step.name || "Unnamed"
+}
+
+function shouldIncludeLayer(
+  step: ProcessStep,
+  materials: Material[],
+  solutions: Solution[],
+): boolean {
+  // Exclude solvents, surface modifiers, etc.
+  if (step.stepCategory === "surface_treatment") {
+    return false
+  }
+
+  // Check material type
+  if (step.materialId) {
+    const mat = materials.find((m) => m.id === step.materialId)
+    if (!mat) return true // include if not found
+
+    // Exclude solvents in materials (type field)
+    const materialType = mat.type?.toLowerCase() || ""
+    if (
+      materialType.includes("solvent") ||
+      materialType.includes("surface modifier")
+    ) {
+      return false
+    }
+    return true
+  }
+
+  // For solutions, only include solid materials (not solvents)
+  if (step.solutionId) {
+    const sol = solutions.find((s) => s.id === step.solutionId)
+    if (!sol || !sol.components) return true
+
+    // Check if solution has any solid components
+    for (const comp of sol.components) {
+      const mat = materials.find((m) => m.id === comp.materialId)
+      if (mat && (mat.stateAtRt === "solid" || mat.category === "substrate_material")) {
+        return true
+      }
+    }
+    return false
+  }
+
+  return true
+}
+
+/**
+ * Generate all possible device stack combinations from a process.
+ * Returns one stack per unique combination of alternative steps.
+ */
+function generateStackCombinations(
+  process: Process,
+  materials: Material[],
+  solutions: Solution[],
+  substrateMap: Map<string, Material>,
+): GeneratedStack[] {
+  if (process.substrateIds.length === 0 || process.stages.length === 0) {
+    return []
+  }
+
+  // Build cartesian product of stage alternatives
+  const combinations: ProcessStep[][] = [[]]
+
+  for (const stage of process.stages) {
+    const newCombinations: ProcessStep[][] = []
+    for (const combo of combinations) {
+      for (const step of stage.alternatives) {
+        newCombinations.push([...combo, step])
+      }
+    }
+    combinations.splice(0, combinations.length, ...newCombinations)
+  }
+
+  // Convert each substrate + step combination to a stack
+  const stacks: GeneratedStack[] = []
+  let combinationCounter = 0
+
+  for (const substrateId of process.substrateIds) {
+    const substrate = substrateMap.get(substrateId)
+    if (!substrate) continue
+
+    for (const combo of combinations) {
+      const layers: StackLayer[] = []
+
+      // Add substrate at bottom
+      layers.push({
+        id: substrate.id,
+        name: `substrate: ${substrate.name || "Unnamed"}`,
+        color: SUBSTRATE_COLOR,
+        isSubstrate: true,
+        layerType: "",
+        thicknessNm: "",
+        perovskiteA: "",
+        perovskiteB: "",
+        perovskiteX: "",
+      })
+
+      // Filter to includable steps
+      const includedSteps = combo.filter((step) =>
+        shouldIncludeLayer(step, materials, solutions),
+      )
+
+      // Merge consecutive perovskite precursor steps into one "Perovskite" layer
+      type MergedEntry = { step: ProcessStep; name: string; isPerovskite: boolean }
+      const merged: MergedEntry[] = []
+      for (const step of includedSteps) {
+        const isPero = isPerovskitePrecursor(step, materials)
+        if (isPero && merged.length > 0 && merged[merged.length - 1].isPerovskite) {
+          // absorb into previous perovskite group (keep first step's color)
+        } else {
+          merged.push({
+            step,
+            name: isPero ? "Perovskite" : getLayerName(step, materials, solutions),
+            isPerovskite: isPero,
+          })
+        }
+      }
+
+      for (const entry of merged) {
+        layers.push({
+          id: entry.step.id,
+          name: entry.name,
+          color: entry.step.color,
+          isSubstrate: false,
+          layerType: getDefaultLayerType(entry.step, materials),
+          thicknessNm: "",
+          perovskiteA: "",
+          perovskiteB: "",
+          perovskiteX: "",
+        })
+      }
+
+      stacks.push({
+        layers,
+        combination: combinationCounter,
+      })
+      combinationCounter += 1
+    }
+  }
+
+  return stacks
+}
+
+type ResultingStacksProps = {
+  stacks: GeneratedStack[]
+  deletedCombinations: Set<number>
+  onLayerChange: (stackIdx: number, layerIdx: number, field: keyof StackLayer, value: string) => void
+  onDelete: (combination: number) => void
+  onRecover: (combination: number) => void
+}
+
+function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete, onRecover }: ResultingStacksProps) {
+  const LAYER_HEIGHT = 42
+  const PEROVSKITE_LAYER_HEIGHT = 92
+  const PEROVSKITE_EDIT_LAYER_HEIGHT = 124
+  const SUBSTRATE_HEIGHT = 50
+  const [editingLayerKey, setEditingLayerKey] = useState<string | null>(null)
+
+  const sideInputStyle: React.CSSProperties = {
+    fontSize: 11,
+    border: "1px solid #dee2e6",
+    borderRadius: 4,
+    padding: "2px 4px",
+    background: "white",
+    color: "#333",
+    width: "100%",
+    outline: "none",
+  }
+
+  const inLayerFieldInputStyle: React.CSSProperties = {
+    width: "100%",
+    background: "rgba(255,255,255,0.16)",
+    border: "1px solid rgba(255,255,255,0.3)",
+    borderRadius: 4,
+    color: "white",
+    fontSize: 11,
+    padding: "2px 4px",
+    outline: "none",
+  }
+
+  const activeStacks = stacks.filter((s) => !deletedCombinations.has(s.combination))
+  const deletedStacks = stacks.filter((s) => deletedCombinations.has(s.combination))
+  const getLayerKey = (combination: number, layerIdx: number) =>
+    `${combination}-${layerIdx}`
+
+  return (
+    <Box onClick={() => setEditingLayerKey(null)}>
+      <Text size="sm" fw={600} mb="md">
+        Generated Device Stacks ({activeStacks.length} combination{activeStacks.length !== 1 ? "s" : ""})
+      </Text>
+      <Group gap="xl" wrap="wrap" align="flex-start">
+        {activeStacks.map((stack) => {
+          const stackIdx = stacks.indexOf(stack)
+          return (
+            <Paper
+              key={`stack-${stack.combination}`}
+              withBorder
+              p="md"
+              radius="md"
+              style={{ minWidth: 440, position: "relative" }}
+            >
+              {/* Delete (X) button — top right corner */}
+              <Tooltip label="Remove combination" withArrow>
+                <ActionIcon
+                  size="xs"
+                  variant="subtle"
+                  color="gray"
+                  style={{ position: "absolute", top: 6, right: 6, zIndex: 1 }}
+                  onClick={() => onDelete(stack.combination)}
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              </Tooltip>
+
+              {/* Column headers */}
+              <Box style={{ display: "flex", gap: 4, marginBottom: 4, paddingRight: 20 }}>
+                <Box style={{ width: 96 }}>
+                  <Text size="10px" c="dimmed" ta="center">Type</Text>
+                </Box>
+                <Box style={{ flex: 1 }}>
+                  <Text size="10px" c="dimmed" ta="center">Layer</Text>
+                </Box>
+                <Box style={{ width: 72 }}>
+                  <Text size="10px" c="dimmed" ta="center">nm</Text>
+                </Box>
+              </Box>
+
+              <Box style={{ display: "flex", flexDirection: "column-reverse", gap: 2 }}>
+                {stack.layers.map((layer, layerIdx) => {
+                  const depositIndex = layerIdx
+                  const layerKey = getLayerKey(stack.combination, layerIdx)
+                  const isEditing = editingLayerKey === layerKey
+
+                  if (layer.isSubstrate) {
+                    return (
+                      <Box
+                        key={`layer-${layer.id}`}
+                        style={{ display: "flex", alignItems: "stretch", gap: 4 }}
+                      >
+                        <Box style={{ width: 96, flexShrink: 0 }} />
+                        <Box
+                          style={{
+                            flex: 1,
+                            background: layer.color,
+                            height: SUBSTRATE_HEIGHT,
+                            borderRadius: 4,
+                            display: "flex",
+                            alignItems: "center",
+                            border: "1px solid rgba(0,0,0,0.1)",
+                            padding: "0 8px",
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setEditingLayerKey(layerKey)
+                          }}
+                        >
+                          {isEditing ? (
+                            <Box style={{ width: "100%", position: "relative" }}>
+                              <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                color="gray"
+                                style={{ position: "absolute", top: 2, right: 2 }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingLayerKey(null)
+                                }}
+                              >
+                                <IconCheck size={12} />
+                              </ActionIcon>
+                              <input
+                                type="text"
+                                value={layer.name}
+                                onChange={(e) =>
+                                  onLayerChange(stackIdx, layerIdx, "name", e.currentTarget.value)
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                style={inLayerFieldInputStyle}
+                              />
+                            </Box>
+                          ) : (
+                            <Text
+                              size="sm"
+                              c="white"
+                              fw={600}
+                              ta="center"
+                              style={{ width: "100%", textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
+                            >
+                              {layer.name || "Unnamed"}
+                            </Text>
+                          )}
+                        </Box>
+                        <Box style={{ width: 72, flexShrink: 0 }} />
+                      </Box>
+                    )
+                  }
+
+                  return (
+                    <Box
+                      key={`layer-${layer.id}`}
+                      style={{ display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      {(() => {
+                        const isPerovskiteLayer = layer.name.toLowerCase().includes("perovskite")
+                        const layerHeight = isPerovskiteLayer
+                          ? (isEditing ? PEROVSKITE_EDIT_LAYER_HEIGHT : PEROVSKITE_LAYER_HEIGHT)
+                          : LAYER_HEIGHT
+
+                        return (
+                          <>
+                      {/* Left: index + type dropdown */}
+                      <Box
+                        style={{
+                          width: 96,
+                          flexShrink: 0,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
+                        <Text
+                          size="10px"
+                          c="dimmed"
+                          fw={700}
+                          style={{ width: 14, flexShrink: 0, textAlign: "right" }}
+                        >
+                          {depositIndex}
+                        </Text>
+                        <select
+                          value={layer.layerType}
+                          onChange={(e) =>
+                            onLayerChange(stackIdx, layerIdx, "layerType", e.currentTarget.value)
+                          }
+                          style={{ ...sideInputStyle, flex: 1 }}
+                        >
+                          {LAYER_TYPE_OPTIONS.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </Box>
+
+                      {/* Center: colored bar with editable name */}
+                      <Box
+                        style={{
+                          flex: 1,
+                          background: layer.color,
+                          height: layerHeight,
+                          borderRadius: 4,
+                          display: "flex",
+                          alignItems: "center",
+                          border: "1px solid rgba(0,0,0,0.1)",
+                          padding: "0 8px",
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setEditingLayerKey(layerKey)
+                        }}
+                      >
+                        {isPerovskiteLayer && isEditing ? (
+                          <Box style={{ width: "100%", display: "flex", flexDirection: "column", gap: 4 }}>
+                            <Box style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                color="gray"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingLayerKey(null)
+                                }}
+                              >
+                                <IconCheck size={12} />
+                              </ActionIcon>
+                            </Box>
+                            <Text size="10px" c="white" fw={700} ta="center" style={{ opacity: 0.9, marginTop: -4 }}>
+                              Perovskite ABX_3
+                            </Text>
+                            <Box style={{ display: "flex", gap: 4 }}>
+                              <Box style={{ flex: 1 }}>
+                                <Text size="9px" c="white" fw={600} style={{ opacity: 0.85, marginBottom: 2 }}>
+                                  A
+                                </Text>
+                                <input
+                                  type="text"
+                                  value={layer.perovskiteA}
+                                  onChange={(e) =>
+                                    onLayerChange(stackIdx, layerIdx, "perovskiteA", e.currentTarget.value)
+                                  }
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={inLayerFieldInputStyle}
+                                />
+                              </Box>
+                              <Box style={{ flex: 1 }}>
+                                <Text size="9px" c="white" fw={600} style={{ opacity: 0.85, marginBottom: 2 }}>
+                                  B
+                                </Text>
+                                <input
+                                  type="text"
+                                  value={layer.perovskiteB}
+                                  onChange={(e) =>
+                                    onLayerChange(stackIdx, layerIdx, "perovskiteB", e.currentTarget.value)
+                                  }
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={inLayerFieldInputStyle}
+                                />
+                              </Box>
+                              <Box style={{ flex: 1 }}>
+                                <Text size="9px" c="white" fw={600} style={{ opacity: 0.85, marginBottom: 2 }}>
+                                  X
+                                </Text>
+                                <input
+                                  type="text"
+                                  value={layer.perovskiteX}
+                                  onChange={(e) =>
+                                    onLayerChange(stackIdx, layerIdx, "perovskiteX", e.currentTarget.value)
+                                  }
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={inLayerFieldInputStyle}
+                                />
+                              </Box>
+                            </Box>
+                          </Box>
+                        ) : isPerovskiteLayer ? (
+                          <Box style={{ width: "100%", display: "flex", flexDirection: "column", gap: 2 }}>
+                            <Text
+                              size="sm"
+                              c="white"
+                              fw={700}
+                              ta="center"
+                              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
+                            >
+                              Perovskite ABX_3
+                            </Text>
+                            <Text
+                              size="xs"
+                              c="white"
+                              ta="center"
+                              style={{ opacity: 0.9, textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
+                            >
+                              A: {layer.perovskiteA || "-"}  B: {layer.perovskiteB || "-"}  X: {layer.perovskiteX || "-"}
+                            </Text>
+                          </Box>
+                        ) : isEditing ? (
+                          <Box style={{ width: "100%" }}>
+                            <Box style={{ display: "flex", justifyContent: "flex-end" }}>
+                              <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                color="gray"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setEditingLayerKey(null)
+                                }}
+                              >
+                                <IconCheck size={12} />
+                              </ActionIcon>
+                            </Box>
+                            <input
+                              type="text"
+                              value={layer.name}
+                              onChange={(e) =>
+                                onLayerChange(stackIdx, layerIdx, "name", e.currentTarget.value)
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                              style={inLayerFieldInputStyle}
+                            />
+                          </Box>
+                        ) : (
+                          <Text
+                            size="sm"
+                            c="white"
+                            fw={600}
+                            ta="center"
+                            style={{ width: "100%", textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
+                          >
+                            {layer.name || "Unnamed"}
+                          </Text>
+                        )}
+                      </Box>
+
+                      {/* Right: thickness (nm) */}
+                      <Box style={{ width: 72, flexShrink: 0 }}>
+                        <input
+                          type="number"
+                          min={0}
+                          value={layer.thicknessNm}
+                          onChange={(e) =>
+                            onLayerChange(stackIdx, layerIdx, "thicknessNm", e.currentTarget.value)
+                          }
+                          onClick={(e) => e.stopPropagation()}
+                          placeholder="—"
+                          style={{ ...sideInputStyle, textAlign: "right" }}
+                        />
+                      </Box>
+                        </>
+                      )
+                    })()}
+                    </Box>
+                  )
+                })}
+              </Box>
+            </Paper>
+          )
+        })}
+      </Group>
+
+      {/* Deleted stack thumbnails */}
+      {deletedStacks.length > 0 && (
+        <Box mt="lg" pt="sm" style={{ borderTop: "1px dashed var(--mantine-color-gray-3)" }}>
+          <Text size="xs" c="dimmed" mb="xs">Deleted combinations — click to restore</Text>
+          <Group gap="sm" wrap="wrap" align="flex-end">
+            {deletedStacks.map((stack) => (
+              <Tooltip key={`deleted-${stack.combination}`} label={`Restore combination ${stack.combination + 1}`} withArrow>
+                <Box
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                    cursor: "pointer",
+                    opacity: 0.7,
+                  }}
+                  onClick={() => onRecover(stack.combination)}
+                >
+                  {/* Mini stack visualization */}
+                  <Box style={{ width: 60, display: "flex", flexDirection: "column-reverse", gap: 1 }}>
+                    {stack.layers.map((layer) => (
+                      <Box
+                        key={layer.id}
+                        style={{
+                          height: layer.isSubstrate ? 10 : 6,
+                          background: layer.color,
+                          borderRadius: 2,
+                          border: "1px solid rgba(0,0,0,0.08)",
+                        }}
+                      />
+                    ))}
+                  </Box>
+                  <ActionIcon size="xs" variant="subtle" color="blue" tabIndex={-1}>
+                    <IconArrowBackUp size={12} />
+                  </ActionIcon>
+                  <Text size="10px" c="dimmed">#{stack.combination + 1}</Text>
+                </Box>
+              </Tooltip>
+            ))}
+          </Group>
+        </Box>
+      )}
+    </Box>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -333,6 +970,7 @@ export function ProcessesPage() {
   const [isExportingDocx, setIsExportingDocx] = useState(false)
   const [substrateSelectingIdx, setSubstrateSelectingIdx] = useState<number | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
+  const stackInvalidationByProcessRef = useRef<Map<string, string>>(new Map())
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
 
   const selectProcess = useCallback(
@@ -402,6 +1040,54 @@ export function ProcessesPage() {
         : null,
     [activeEntity, processes],
   )
+
+  const stackInvalidationKey = useMemo(
+    () => getStackInvalidationKey(selectedProcess),
+    [selectedProcess],
+  )
+
+  const generatedStacks = useMemo<GeneratedStack[]>(
+    () => ((selectedProcess?.generatedStacks ?? []) as GeneratedStack[]),
+    [selectedProcess],
+  )
+
+  const deletedCombinations = useMemo(
+    () => new Set<number>(selectedProcess?.deletedStackCombinations ?? []),
+    [selectedProcess],
+  )
+
+  // Clear persisted stacks only when stack-defining structure/source changes.
+  // Parameter edits should not invalidate generated stacks.
+  useEffect(() => {
+    if (!selectedProcess) return
+
+    const previousKey = stackInvalidationByProcessRef.current.get(selectedProcess.id)
+    // First observation for this process in this session: record key, do not clear.
+    if (previousKey === undefined) {
+      stackInvalidationByProcessRef.current.set(selectedProcess.id, stackInvalidationKey)
+      return
+    }
+    if (previousKey === stackInvalidationKey) {
+      return
+    }
+
+    stackInvalidationByProcessRef.current.set(selectedProcess.id, stackInvalidationKey)
+
+    // Structure/source changed: clear now-stale generated stacks.
+    if (
+      (selectedProcess.generatedStacks?.length ?? 0) > 0 ||
+      (selectedProcess.deletedStackCombinations?.length ?? 0) > 0
+    ) {
+      const updated: Process = {
+        ...selectedProcess,
+        generatedStacks: [],
+        deletedStackCombinations: [],
+      }
+      setProcesses((prev) =>
+        prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+      )
+    }
+  }, [selectedProcess, setProcesses, stackInvalidationKey])
 
   const launchLinkedCreation = useCallback(
     (config: {
@@ -491,6 +1177,111 @@ export function ProcessesPage() {
     setExperiments((prev) => [...prev, exp])
     setActiveEntity({ kind: "experiment", id: exp.id })
     void navigate({ to: "/experiments" })
+  }
+
+  const handleGenerateStacks = () => {
+    if (!selectedProcess) return
+    const substrateMap = new Map(materials.map((m) => [m.id, m]))
+    const newStacks = generateStackCombinations(selectedProcess, materials, solutions, substrateMap)
+
+    // Preserve user edits by layer id across regenerations
+    const existingLayerData = new Map<
+      string,
+      {
+        name: string
+        layerType: string
+        thicknessNm: string
+        perovskiteA: string
+        perovskiteB: string
+        perovskiteX: string
+      }
+    >()
+    for (const stack of generatedStacks) {
+      for (const layer of stack.layers) {
+        existingLayerData.set(layer.id, {
+          name: layer.name,
+          layerType: layer.layerType,
+          thicknessNm: layer.thicknessNm,
+          perovskiteA: layer.perovskiteA,
+          perovskiteB: layer.perovskiteB,
+          perovskiteX: layer.perovskiteX,
+        })
+      }
+    }
+
+    const preservedStacks = newStacks.map((stack) => ({
+      ...stack,
+      layers: stack.layers.map((layer) => {
+        const existing = existingLayerData.get(layer.id)
+        return existing ? { ...layer, ...existing } : layer
+      }),
+    }))
+
+    const updated: Process = {
+      ...selectedProcess,
+      generatedStacks: preservedStacks as ProcessGeneratedStack[],
+      // intentionally NOT cleared — persists across regenerations
+      deletedStackCombinations: selectedProcess.deletedStackCombinations ?? [],
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
+  }
+
+  const handleDeleteStack = (combination: number) => {
+    if (!selectedProcess) return
+    const next = new Set<number>(selectedProcess.deletedStackCombinations ?? [])
+    next.add(combination)
+    const updated: Process = {
+      ...selectedProcess,
+      deletedStackCombinations: [...next],
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
+  }
+
+  const handleRecoverStack = (combination: number) => {
+    if (!selectedProcess) return
+    const next = new Set<number>(selectedProcess.deletedStackCombinations ?? [])
+    next.delete(combination)
+    const updated: Process = {
+      ...selectedProcess,
+      deletedStackCombinations: [...next],
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
+  }
+
+  const handleUpdateStackLayer = (
+    stackIdx: number,
+    layerIdx: number,
+    field: keyof StackLayer,
+    value: string,
+  ) => {
+    if (!selectedProcess) return
+    const stack = generatedStacks[stackIdx]
+    if (!stack) return
+    const layer = stack.layers[layerIdx]
+    if (!layer) return
+    // Sync thicknessNm across ALL stacks that share the same layer (same process step)
+    const syncAcrossStacks = field === "thicknessNm"
+    const updatedStacks = generatedStacks.map((s, si) => ({
+      ...s,
+      layers: s.layers.map((l, li) => {
+        if (si === stackIdx && li === layerIdx) return { ...l, [field]: value }
+        if (syncAcrossStacks && !l.isSubstrate && l.id === layer.id) return { ...l, [field]: value }
+        return l
+      }),
+    }))
+    const updated: Process = {
+      ...selectedProcess,
+      generatedStacks: updatedStacks as ProcessGeneratedStack[],
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
   }
 
   const handleExportProcessPdf = async () => {
@@ -1561,6 +2352,10 @@ export function ProcessesPage() {
               ) : (
                 visibleProcesses.map((process) => {
                   const isSelected = selectedProcess?.id === process.id
+                  const canSpawnFromList =
+                    (process.generatedStacks?.length ?? 0) > 0 &&
+                    process.substrateIds.length > 0 &&
+                    process.stages.length > 0
                   const collectionColor = getEntityColor("process", process.id)
                   return (
                     <Paper
@@ -1596,7 +2391,8 @@ export function ProcessesPage() {
                             <ActionIcon
                               size="sm"
                               variant="subtle"
-                              color="green"
+                              color={canSpawnFromList ? "green" : "gray"}
+                              disabled={!canSpawnFromList}
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleSpawnExperiment(process)
@@ -1654,15 +2450,32 @@ export function ProcessesPage() {
               <Group gap="xs">
                 <Button
                   size="md"
+                  color="blue"
+                  variant="light"
+                  leftSection={<IconSparkles size={18} />}
+                  onClick={handleGenerateStacks}
+                  disabled={!hasBothSubstrateAndStep}
+                  title={
+                    !hasBothSubstrateAndStep
+                      ? "Select both a substrate and add at least one step to generate stacks"
+                      : ""
+                  }
+                >
+                  Generate Resulting Stacks
+                </Button>
+                <Button
+                  size="md"
                   color="green"
                   variant="light"
                   leftSection={<IconPlayerPlay size={18} />}
                   onClick={() => handleSpawnExperiment(selectedProcess)}
-                  disabled={!hasBothSubstrateAndStep}
+                  disabled={!hasBothSubstrateAndStep || generatedStacks.length === 0}
                   title={
                     !hasBothSubstrateAndStep
                       ? "Select both a substrate and add at least one step to create an experiment"
-                      : ""
+                      : generatedStacks.length === 0
+                        ? "Generate resulting stacks first"
+                        : ""
                   }
                 >
                   Create Experiment from Process
@@ -2331,18 +3144,46 @@ export function ProcessesPage() {
 
                         {hasBothSubstrateAndStep && (
                           <Group justify="center">
-                            <Button
-                              size="lg"
-                              color="green"
-                              variant="subtle"
-                              leftSection={<IconPlayerPlay size={20} />}
-                              onClick={() => handleSpawnExperiment(selectedProcess)}
-                            >
-                              Create Experiment from Process
-                            </Button>
+                            {generatedStacks.length === 0 ? (
+                              <Button
+                                size="lg"
+                                color="blue"
+                                variant="subtle"
+                                leftSection={<IconSparkles size={20} />}
+                                onClick={handleGenerateStacks}
+                              >
+                                Generate Resulting Stacks
+                              </Button>
+                            ) : null}
                           </Group>
                         )}
                       </Box>
+                    )}
+
+                    {generatedStacks.length > 0 && (
+                      <>
+                        <Box mt="xl" pt="xl" style={{ borderTop: "2px solid var(--mantine-color-gray-3)" }}>
+                          <ResultingStacks
+                            stacks={generatedStacks}
+                            deletedCombinations={deletedCombinations}
+                            onLayerChange={handleUpdateStackLayer}
+                            onDelete={handleDeleteStack}
+                            onRecover={handleRecoverStack}
+                          />
+                        </Box>
+
+                        <Group justify="center" mt="lg">
+                          <Button
+                            size="lg"
+                            color="green"
+                            variant="subtle"
+                            leftSection={<IconPlayerPlay size={20} />}
+                            onClick={() => handleSpawnExperiment(selectedProcess)}
+                          >
+                            Create Experiment from Process
+                          </Button>
+                        </Group>
+                      </>
                     )}
                   </Stack>
                 </Box>

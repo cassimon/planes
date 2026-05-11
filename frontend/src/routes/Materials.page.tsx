@@ -45,6 +45,19 @@ type Column = {
   label: string
 }
 
+const MATERIAL_TYPES = [
+  "n-type (ETL)",
+  "p-type (HTL)",
+  "perovskite precursor",
+  "solvent",
+  "additive",
+  "passivation agent/layer",
+  "conductor (contact)",
+  "encapsulant",
+  "semiconductor (i)",
+  "other",
+]
+
 const COMMON_COLUMNS: Column[] = [
   { key: "name", label: "Name" },
   { key: "supplier", label: "Supplier" },
@@ -53,6 +66,7 @@ const COMMON_COLUMNS: Column[] = [
 ]
 
 const CHEMICAL_COLUMNS: Column[] = [
+  { key: "type", label: "Type" },
   ...COMMON_COLUMNS,
   { key: "casNumber", label: "CAS Number" },
   { key: "pubchemCid", label: "PubChem CID" },
@@ -61,6 +75,7 @@ const CHEMICAL_COLUMNS: Column[] = [
 ]
 
 const COMMERCIAL_MIXTURE_COLUMNS: Column[] = [
+  { key: "type", label: "Type" },
   ...COMMON_COLUMNS,
   { key: "casNumber", label: "CAS Number" },
   { key: "pubchemCid", label: "CID Numbers (Components)" },
@@ -502,6 +517,31 @@ export function MaterialsPage() {
     if (!editBuffer) {
       return null
     }
+    if (colKey === "type") {
+      return (
+        <NativeSelect
+          size="xs"
+          value={editBuffer.type}
+          data={[
+            { label: "", value: "" },
+            ...MATERIAL_TYPES.map((t) => ({ label: t, value: t })),
+          ]}
+          onChange={(e) => {
+            const value = e.currentTarget.value
+            setEditBuffer((prev) => (prev ? { ...prev, type: value } : prev))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitEdit()
+            }
+            if (e.key === "Escape") {
+              cancelEdit(material.id)
+            }
+          }}
+          autoFocus
+        />
+      )
+    }
     if (colKey === "stateAtRt") {
       return (
         <NativeSelect
@@ -571,7 +611,7 @@ export function MaterialsPage() {
             cancelEdit(material.id)
           }
         }}
-        autoFocus={colKey === "type" || colKey === "name"}
+        autoFocus={colKey === "name"}
       />
     )
   }

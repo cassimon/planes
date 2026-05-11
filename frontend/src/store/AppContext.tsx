@@ -146,6 +146,25 @@ export type ProcessStage = {
   alternatives: ProcessStep[] // >= 1 step per stage (usually 1, multiple for alternatives)
 }
 
+/** Persisted generated layer for process-derived stack editor */
+export type ProcessGeneratedStackLayer = {
+  id: string
+  name: string
+  color: string
+  isSubstrate: boolean
+  layerType: string
+  thicknessNm: string
+  perovskiteA: string
+  perovskiteB: string
+  perovskiteX: string
+}
+
+/** Persisted generated stack for a process */
+export type ProcessGeneratedStack = {
+  layers: ProcessGeneratedStackLayer[]
+  combination: number
+}
+
 /** An abstract thin-film deposition process template */
 export type Process = {
   id: string
@@ -153,6 +172,10 @@ export type Process = {
   description?: string
   substrateIds: string[] // references to substrate Materials
   stages: ProcessStage[] // ordered from bottom (index 0) upward
+  /** Persisted generated stacks for process editor UI */
+  generatedStacks?: ProcessGeneratedStack[]
+  /** Persisted hidden/deleted stack combinations in process editor UI */
+  deletedStackCombinations?: number[]
 }
 
 /** Helper to create a new process step */
