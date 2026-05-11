@@ -165,10 +165,10 @@ export function AppLayout() {
     }
   }, [activeEntity, experiments, materials, solutions, derivedProcesses])
 
-  // When on the Organization page and a collection is selected, compute which
-  // page paths have refs in that collection — all others are dimmed.
+  // When a collection is selected, compute which page paths have refs in that
+  // collection — all others are dimmed across the app until selection changes.
   const litPaths = useMemo<Set<string> | null>(() => {
-    if (!location.pathname.startsWith("/organization") || !activeCollection) {
+    if (!activeCollection) {
       return null
     }
     const lit = new Set<string>(["/organization"])
@@ -193,7 +193,7 @@ export function AppLayout() {
       }
     })
     return lit
-  }, [activeCollection, location.pathname])
+  }, [activeCollection])
 
   return (
     <AppShell

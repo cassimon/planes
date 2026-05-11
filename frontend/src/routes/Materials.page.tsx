@@ -809,6 +809,8 @@ export function MaterialsPage() {
       returnToProcessIdRef.current = null
       if (processId) setActiveEntity({ kind: "process", id: processId })
       void navigate({ to: route as never })
+    } else {
+      setActiveEntity(null)
     }
   }
 
@@ -821,6 +823,7 @@ export function MaterialsPage() {
     }
     setEditingId(null)
     setEditBuffer(null)
+    setActiveEntity(null)
   }
 
   const confirmDelete = () => {

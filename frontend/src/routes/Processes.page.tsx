@@ -1209,9 +1209,6 @@ export function ProcessesPage() {
 
     const proc = newProcess()
     setProcesses((prev) => [...prev, proc])
-    selectProcess(proc.id)
-    setSelectedStepId(null)
-    setPendingSelectProcessNameId(proc.id)
 
     // Link back to collection
     const plane = planes.find((p) => p.id === planeId)

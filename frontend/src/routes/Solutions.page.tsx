@@ -906,7 +906,6 @@ export function SolutionsPage() {
 
     const s = newSolution()
     setSolutions((prev) => [...prev, s])
-    setSelectedSolutionId(s.id)
     setAutoAddComponentId(s.id)
 
     if (returnTo) {

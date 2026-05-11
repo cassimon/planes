@@ -62,6 +62,61 @@ function buildGeneratedSubstrateName(
   return `${parts.join("_")}_${index}`
 }
 
+function alphabeticSuffix(index: number): string {
+  let n = index
+  let suffix = ""
+  do {
+    suffix = String.fromCharCode(65 + (n % 26)) + suffix
+    n = Math.floor(n / 26) - 1
+  } while (n >= 0)
+  return suffix
+}
+
+function buildStepBaseLabel(
+  step: ProcessStep,
+  materialNameById: Map<string, string>,
+  solutionNameById: Map<string, string>,
+): string {
+  const depositionMethod = step.depositionMethod?.value?.trim() || "Deposition"
+  const materialName = step.materialId
+    ? materialNameById.get(step.materialId)
+    : undefined
+  const solutionName = step.solutionId
+    ? solutionNameById.get(step.solutionId)
+    : undefined
+  const targetName = materialName || solutionName || step.name || "Material"
+  return `${depositionMethod}: ${targetName}`
+}
+
+function buildStageStepOptions(
+  alternatives: ProcessStep[],
+  materialNameById: Map<string, string>,
+  solutionNameById: Map<string, string>,
+) {
+  const options = alternatives.map((step) => ({
+    value: step.id,
+    label: buildStepBaseLabel(step, materialNameById, solutionNameById),
+  }))
+
+  const totalByLabel = new Map<string, number>()
+  for (const option of options) {
+    totalByLabel.set(option.label, (totalByLabel.get(option.label) ?? 0) + 1)
+  }
+
+  const seenByLabel = new Map<string, number>()
+  const deduped = options.map((option) => {
+    const total = totalByLabel.get(option.label) ?? 0
+    if (total <= 1) {
+      return option
+    }
+    const seen = seenByLabel.get(option.label) ?? 0
+    seenByLabel.set(option.label, seen + 1)
+    return { ...option, label: `${option.label} (${alphabeticSuffix(seen)})` }
+  })
+
+  return [...deduped, { value: "SKIP", label: "Skip step" }]
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Edit SubstrateName Generator (simplified display above table)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +124,8 @@ function buildGeneratedSubstrateName(
 function SubstrateNameGenerator({
   process,
   substrateMaterialOptions,
+  materialNameById,
+  solutionNameById,
   generatorConfig,
   onChangeGeneratorConfig,
   nextStepDefaults,
@@ -77,6 +134,8 @@ function SubstrateNameGenerator({
 }: {
   process: Process
   substrateMaterialOptions: Array<{ value: string; label: string }>
+  materialNameById: Map<string, string>
+  solutionNameById: Map<string, string>
   generatorConfig: SubstrateGeneratorConfig
   onChangeGeneratorConfig: (patch: Partial<SubstrateGeneratorConfig>) => void
   nextStepDefaults: Record<number, string>
@@ -136,7 +195,7 @@ function SubstrateNameGenerator({
           <Select
             key={`default-stage-${idx}`}
             size="xs"
-            label={`Step ${idx + 1}`}
+            label={`#${idx + 1} Step`}
             w={210}
             value={nextStepDefaults[idx] ?? stage.alternatives[0]?.id ?? "SKIP"}
             onChange={(value) =>
@@ -145,13 +204,11 @@ function SubstrateNameGenerator({
                 value ?? stage.alternatives[0]?.id ?? "SKIP",
               )
             }
-            data={[
-              ...stage.alternatives.map((step) => ({
-                value: step.id,
-                label: step.name,
-              })),
-              { value: "SKIP", label: "Skip step" },
-            ]}
+            data={buildStageStepOptions(
+              stage.alternatives,
+              materialNameById,
+              solutionNameById,
+            )}
           />
         ))}
       </Group>
@@ -263,22 +320,26 @@ function RecipeSelectionModal({
 
 function ProcessStepSelector({
   alternatives,
+  materialNameById,
+  solutionNameById,
   selectedStepId,
   defaultStepId,
   onSelect,
 }: {
   alternatives: ProcessStep[]
+  materialNameById: Map<string, string>
+  solutionNameById: Map<string, string>
   selectedStepId: string | undefined | null
   defaultStepId: string | null
   onSelect: (stepId: string | null) => void
 }) {
-  const data = [
-    ...alternatives.map((step) => ({
-      value: step.id,
-      label: step.name,
-    })),
-    { value: "SKIP", label: "Skip this step" },
-  ]
+  const data = buildStageStepOptions(
+    alternatives,
+    materialNameById,
+    solutionNameById,
+  ).map((option) =>
+    option.value === "SKIP" ? { ...option, label: "Skip this step" } : option,
+  )
 
   const handleChange = (value: string | null) => {
     if (value === "SKIP") {
@@ -308,6 +369,8 @@ function ExperimentGrid({
   experiment,
   process,
   substrateMaterialOptions,
+  materialNameById,
+  solutionNameById,
   generatorConfig,
   nextStepDefaults,
   onUpdate,
@@ -316,6 +379,8 @@ function ExperimentGrid({
   experiment: Experiment
   process: Process
   substrateMaterialOptions: Array<{ value: string; label: string }>
+  materialNameById: Map<string, string>
+  solutionNameById: Map<string, string>
   generatorConfig: SubstrateGeneratorConfig
   nextStepDefaults: Record<number, string>
   onUpdate: (exp: Experiment) => void
@@ -323,7 +388,41 @@ function ExperimentGrid({
 }) {
   const [variationTarget, setVariationTarget] = useState<string | null>(null)
   const [variationParam, setVariationParam] = useState<string | null>(null)
+  const [selectedSubstrateIds, setSelectedSubstrateIds] = useState<Set<string>>(new Set())
   const nameInputRefs = React.useRef<Array<HTMLInputElement | null>>([])
+
+  const stepDisplayById = React.useMemo(() => {
+    const map = new Map<string, string>()
+    process.stages.forEach((stage) => {
+      const options = buildStageStepOptions(
+        stage.alternatives,
+        materialNameById,
+        solutionNameById,
+      )
+      for (const option of options) {
+        if (option.value !== "SKIP") {
+          map.set(option.value, option.label)
+        }
+      }
+    })
+    return map
+  }, [materialNameById, process.stages, solutionNameById])
+
+  React.useEffect(() => {
+    const validIds = new Set(experiment.substrates.map((substrate) => substrate.id))
+    setSelectedSubstrateIds((prev) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const id of prev) {
+        if (validIds.has(id)) {
+          next.add(id)
+        } else {
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [experiment.substrates])
 
   const variationColumns = React.useMemo(() => {
     const columns = new Map<
@@ -331,7 +430,7 @@ function ExperimentGrid({
       {
         stageIndex: number
         stepId: string
-        stepName: string
+        stepLabel: string
         paramKey: ProcessParameterKey
         label: string
       }
@@ -359,7 +458,6 @@ function ExperimentGrid({
         let match:
           | {
               stageIndex: number
-              stepName: string
             }
           | undefined
 
@@ -369,7 +467,6 @@ function ExperimentGrid({
           if (step) {
             match = {
               stageIndex: stageIdx,
-              stepName: step.name,
             }
             break
           }
@@ -381,12 +478,13 @@ function ExperimentGrid({
 
         const columnKey = `${stepId}:${paramDef.key}`
         if (!columns.has(columnKey)) {
+          const stepLabel = stepDisplayById.get(stepId) ?? "Deposition: Material"
           columns.set(columnKey, {
             stageIndex: match.stageIndex,
             stepId,
-            stepName: match.stepName,
+            stepLabel,
             paramKey: paramDef.key,
-            label: `${match.stageIndex + 1}. ${match.stepName} - ${paramDef.label}`,
+            label: `#${match.stageIndex + 1} Step - ${stepLabel} - ${paramDef.label}`,
           })
         }
       }
@@ -396,12 +494,12 @@ function ExperimentGrid({
       if (a.stageIndex !== b.stageIndex) {
         return a.stageIndex - b.stageIndex
       }
-      if (a.stepName !== b.stepName) {
-        return a.stepName.localeCompare(b.stepName)
+      if (a.stepLabel !== b.stepLabel) {
+        return a.stepLabel.localeCompare(b.stepLabel)
       }
       return a.paramKey.localeCompare(b.paramKey)
     })
-  }, [experiment.substrates, process.stages])
+  }, [experiment.substrates, process.stages, stepDisplayById])
 
   const selectedVariationStep = React.useMemo(() => {
     if (!variationTarget) {
@@ -463,7 +561,59 @@ function ExperimentGrid({
     const newSubstrates = experiment.substrates.filter(
       (s) => s.id !== substrateId,
     )
-    onUpdate({ ...experiment, substrates: newSubstrates })
+    setSelectedSubstrateIds((prev) => {
+      const next = new Set(prev)
+      next.delete(substrateId)
+      return next
+    })
+    onUpdate({ ...experiment, numSubstrates: newSubstrates.length, substrates: newSubstrates })
+  }
+
+  const handleToggleSubstrateSelection = (substrateId: string, checked: boolean) => {
+    setSelectedSubstrateIds((prev) => {
+      const next = new Set(prev)
+      if (checked) {
+        next.add(substrateId)
+      } else {
+        next.delete(substrateId)
+      }
+      return next
+    })
+  }
+
+  const handleSelectAllSubstrates = () => {
+    setSelectedSubstrateIds(new Set(experiment.substrates.map((substrate) => substrate.id)))
+  }
+
+  const handleSelectNoSubstrates = () => {
+    setSelectedSubstrateIds(new Set())
+  }
+
+  const handleDeleteSelectedSubstrates = () => {
+    if (selectedSubstrateIds.size === 0) {
+      return
+    }
+    modals.openConfirmModal({
+      title: "Delete selected substrates?",
+      children: (
+        <Text size="sm">
+          Remove {selectedSubstrateIds.size} selected substrate{selectedSubstrateIds.size !== 1 ? "s" : ""} from this experiment?
+        </Text>
+      ),
+      labels: { confirm: "Delete", cancel: "Cancel" },
+      confirmProps: { color: "red" },
+      onConfirm: () => {
+        const newSubstrates = experiment.substrates.filter(
+          (substrate) => !selectedSubstrateIds.has(substrate.id),
+        )
+        setSelectedSubstrateIds(new Set())
+        onUpdate({
+          ...experiment,
+          numSubstrates: newSubstrates.length,
+          substrates: newSubstrates,
+        })
+      },
+    })
   }
 
   const buildDefaultStageValues = () => {
@@ -578,6 +728,72 @@ function ExperimentGrid({
     setVariationParam(null)
   }
 
+  const removeVariationColumn = (
+    column: (typeof variationColumns)[number],
+  ) => {
+    const key = `${column.stepId}:${column.paramKey}`
+    const targetStep = process.stages[column.stageIndex]?.alternatives.find(
+      (step) => step.id === column.stepId,
+    )
+    const defaultValue = targetStep?.[column.paramKey]?.value ?? ""
+    const hasChangedDefaultValues = experiment.substrates.some(
+      (substrate) =>
+        (substrate.parameterValues?.[key] ?? defaultValue) !== defaultValue,
+    )
+
+    const applyRemoval = () => {
+      const updatedExperiment: Experiment = {
+        ...experiment,
+        substrates: experiment.substrates.map((substrate) => {
+          const values = { ...(substrate.parameterValues ?? {}) }
+          delete values[key]
+          return { ...substrate, parameterValues: values }
+        }),
+      }
+
+      const updatedProcess: Process = {
+        ...process,
+        stages: process.stages.map((stage, idx) =>
+          idx !== column.stageIndex
+            ? stage
+            : {
+                ...stage,
+                alternatives: stage.alternatives.map((step) =>
+                  step.id !== column.stepId
+                    ? step
+                    : {
+                        ...step,
+                        [column.paramKey]: step[column.paramKey]
+                          ? { ...step[column.paramKey]!, mode: "constant" }
+                          : step[column.paramKey],
+                      },
+                ),
+              },
+        ),
+      }
+
+      onUpdateProcess(updatedProcess)
+      onUpdate(updatedExperiment)
+    }
+
+    if (hasChangedDefaultValues) {
+      modals.openConfirmModal({
+        title: "Delete parameter variation?",
+        children: (
+          <Text size="sm">
+            Some variation values differ from the default process value. Delete this variation column and discard those changes?
+          </Text>
+        ),
+        labels: { confirm: "Delete", cancel: "Cancel" },
+        confirmProps: { color: "red" },
+        onConfirm: applyRemoval,
+      })
+      return
+    }
+
+    applyRemoval()
+  }
+
   const handleProcessingTimeChange = (stageKey: string, value: string) => {
     onUpdate({
       ...experiment,
@@ -620,11 +836,41 @@ function ExperimentGrid({
     return selectedStepId === stepId
   }
 
+  const allSelected =
+    experiment.substrates.length > 0 &&
+    experiment.substrates.every((substrate) => selectedSubstrateIds.has(substrate.id))
+  const partiallySelected =
+    selectedSubstrateIds.size > 0 && !allSelected
+
   return (
     <>
       {experiment.substrates.length > 0 && (
       <Group align="flex-start" wrap="nowrap" gap="md" mb="lg">
         <Box style={{ overflowX: "auto", flex: 1 }}>
+        <Group justify="space-between" mb="xs">
+          <Group gap="xs">
+            <Button size="xs" variant="light" onClick={handleSelectAllSubstrates}>
+              Select All
+            </Button>
+            <Button size="xs" variant="default" onClick={handleSelectNoSubstrates}>
+              Select None
+            </Button>
+          </Group>
+          <Group gap="xs">
+            <Text size="xs" c="dimmed">
+              {selectedSubstrateIds.size} selected
+            </Text>
+            <Button
+              size="xs"
+              color="red"
+              variant="light"
+              disabled={selectedSubstrateIds.size === 0}
+              onClick={handleDeleteSelectedSubstrates}
+            >
+              Delete Selected
+            </Button>
+          </Group>
+        </Group>
         <table
           style={{
             borderCollapse: "collapse",
@@ -634,6 +880,28 @@ function ExperimentGrid({
         >
           <thead>
             <tr style={{ background: "var(--mantine-color-gray-1)" }}>
+              <th
+                style={{
+                  padding: "12px 8px",
+                  textAlign: "center",
+                  fontWeight: 600,
+                  borderBottom: "2px solid var(--mantine-color-gray-3)",
+                  minWidth: "46px",
+                }}
+              >
+                <Checkbox
+                  checked={allSelected}
+                  indeterminate={partiallySelected}
+                  onChange={(e) => {
+                    if (e.currentTarget.checked) {
+                      handleSelectAllSubstrates()
+                    } else {
+                      handleSelectNoSubstrates()
+                    }
+                  }}
+                  aria-label="Select all substrates"
+                />
+              </th>
               <th
                 style={{
                   padding: "12px 8px",
@@ -657,7 +925,6 @@ function ExperimentGrid({
                 Material
               </th>
               {process.stages.map((stage, idx) => {
-                const step = stage.alternatives[0]
                 return (
                   <th
                     key={`stage-${idx}`}
@@ -670,7 +937,7 @@ function ExperimentGrid({
                     }}
                   >
                     <Group justify="space-between" gap="xs">
-                      <Text size="sm">{step.name}</Text>
+                      <Text size="sm">#{idx + 1} Step</Text>
                       {stage.alternatives.length > 1 && (
                         <Badge size="xs" variant="light" color="orange">
                           {stage.alternatives.length} options
@@ -691,7 +958,19 @@ function ExperimentGrid({
                     minWidth: "190px",
                   }}
                 >
-                  <Text size="sm">{column.label}</Text>
+                    <Group justify="space-between" gap="xs" wrap="nowrap">
+                      <Text size="sm">{column.label}</Text>
+                      <Tooltip label="Delete variation column">
+                        <ActionIcon
+                          size="xs"
+                          variant="subtle"
+                          color="red"
+                          onClick={() => removeVariationColumn(column)}
+                        >
+                          <IconTrash size={12} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
                 </th>
               ))}
               <th
@@ -715,6 +994,24 @@ function ExperimentGrid({
                   borderBottom: "1px solid var(--mantine-color-gray-2)",
                 }}
               >
+                <td
+                  style={{
+                    padding: "8px 8px",
+                    textAlign: "center",
+                    background: "var(--mantine-color-gray-0)",
+                  }}
+                >
+                  <Checkbox
+                    checked={selectedSubstrateIds.has(substrate.id)}
+                    onChange={(e) =>
+                      handleToggleSubstrateSelection(
+                        substrate.id,
+                        e.currentTarget.checked,
+                      )
+                    }
+                    aria-label={`Select substrate ${substrate.name}`}
+                  />
+                </td>
                 <td
                   style={{
                     padding: "12px 8px",
@@ -771,6 +1068,8 @@ function ExperimentGrid({
                   >
                     <ProcessStepSelector
                       alternatives={stage.alternatives}
+                      materialNameById={materialNameById}
+                      solutionNameById={solutionNameById}
                       defaultStepId={stage.alternatives[0]?.id ?? null}
                       selectedStepId={getStageSelection(substrate.id, stageIdx)}
                       onSelect={(stepId) =>
@@ -847,6 +1146,11 @@ function ExperimentGrid({
             <tr style={{ background: "var(--mantine-color-gray-0)" }}>
               <td
                 style={{
+                  borderTop: "2px solid var(--mantine-color-gray-2)",
+                }}
+              />
+              <td
+                style={{
                   padding: "10px 8px",
                   fontWeight: 600,
                   borderTop: "2px solid var(--mantine-color-gray-2)",
@@ -917,10 +1221,16 @@ function ExperimentGrid({
               value={variationTarget}
               onChange={setVariationTarget}
               data={process.stages.flatMap((stage, idx) =>
-                stage.alternatives.map((step) => ({
-                  value: `${idx}:${step.id}`,
-                  label: `${idx + 1}. ${step.name}`,
-                })),
+                buildStageStepOptions(
+                  stage.alternatives,
+                  materialNameById,
+                  solutionNameById,
+                )
+                  .filter((option) => option.value !== "SKIP")
+                  .map((option) => ({
+                    value: `${idx}:${option.value}`,
+                    label: `#${idx + 1} Step - ${option.label}`,
+                  })),
               )}
               size="sm"
             />
@@ -961,6 +1271,7 @@ export default function ExperimentsPage() {
     experiments,
     setExperiments,
     materials,
+    solutions,
     processes,
     setProcesses,
     activeEntity,
@@ -990,6 +1301,23 @@ export default function ExperimentsPage() {
   const selectedExperiment = experiments.find((e) => e.id === selectedExpId)
   const selectedProcess =
     selectedExperiment && processes.find((p) => p.id === selectedExperiment.processId)
+  const materialNameById = React.useMemo(
+    () =>
+      new Map(
+        materials.map((material) => [
+          material.id,
+          material.name || material.inventoryLabel || material.casNumber || material.id,
+        ]),
+      ),
+    [materials],
+  )
+  const solutionNameById = React.useMemo(
+    () =>
+      new Map(
+        solutions.map((solution) => [solution.id, solution.name || solution.id]),
+      ),
+    [solutions],
+  )
   const substrateMaterialOptions = React.useMemo(() => {
     if (!selectedProcess) {
       return []
@@ -1465,6 +1793,8 @@ export default function ExperimentsPage() {
             <SubstrateNameGenerator
               process={selectedProcess}
               substrateMaterialOptions={substrateMaterialOptions}
+              materialNameById={materialNameById}
+              solutionNameById={solutionNameById}
               generatorConfig={generatorConfig}
               onChangeGeneratorConfig={(patch) =>
                 setGeneratorConfig((prev) => ({ ...prev, ...patch }))
@@ -1485,6 +1815,8 @@ export default function ExperimentsPage() {
                 experiment={selectedExperiment}
                 process={selectedProcess}
                 substrateMaterialOptions={substrateMaterialOptions}
+                materialNameById={materialNameById}
+                solutionNameById={solutionNameById}
                 generatorConfig={generatorConfig}
                 nextStepDefaults={nextStepDefaults}
                 onUpdate={handleUpdateExperiment}
