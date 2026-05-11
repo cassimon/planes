@@ -704,7 +704,7 @@ function ResultingStacks({
           </ActionIcon>
         </Tooltip>
       </Group>
-      <Group gap="xl" wrap="wrap" align="flex-start">
+      <Group gap="xl" wrap="wrap" align="flex-start" justify="center">
         {activeStacks.map((stack) => {
           const stackIdx = stacks.indexOf(stack)
           return (
