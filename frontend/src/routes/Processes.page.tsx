@@ -307,6 +307,7 @@ type StackLayer = {
   isSubstrate: boolean
   layerType: string   // "ETL" | "HTL" | "absorber" | "contact" | "interlayer" | ""
   thicknessNm: string
+  bandgapEv: string
   perovskiteA: string
   perovskiteB: string
   perovskiteX: string
@@ -467,6 +468,7 @@ function generateStackCombinations(
         isSubstrate: true,
         layerType: "",
         thicknessNm: "",
+        bandgapEv: "",
         perovskiteA: "",
         perovskiteB: "",
         perovskiteX: "",
@@ -501,6 +503,7 @@ function generateStackCombinations(
           isSubstrate: false,
           layerType: getDefaultLayerType(entry.step, materials),
           thicknessNm: "",
+          bandgapEv: "",
           perovskiteA: "",
           perovskiteB: "",
           perovskiteX: "",
@@ -597,7 +600,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                 <Box style={{ flex: 1 }}>
                   <Text size="10px" c="dimmed" ta="center">Layer</Text>
                 </Box>
-                <Box style={{ width: 72 }}>
+                <Box style={{ width: 92 }}>
                   <Text size="10px" c="dimmed" ta="center">nm</Text>
                 </Box>
               </Box>
@@ -667,7 +670,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                             </Text>
                           )}
                         </Box>
-                        <Box style={{ width: 72, flexShrink: 0 }} />
+                        <Box style={{ width: 92, flexShrink: 0 }} />
                       </Box>
                     )
                   }
@@ -856,8 +859,8 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                         )}
                       </Box>
 
-                      {/* Right: thickness (nm) */}
-                      <Box style={{ width: 72, flexShrink: 0 }}>
+                      {/* Right: thickness (nm) + perovskite bandgap */}
+                      <Box style={{ width: 92, flexShrink: 0 }}>
                         <input
                           type="number"
                           min={0}
@@ -869,6 +872,25 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                           placeholder="—"
                           style={{ ...sideInputStyle, textAlign: "right" }}
                         />
+                        {isPerovskiteLayer && (
+                          <>
+                            <Text size="9px" c="dimmed" mt={4} mb={2} ta="left">
+                              Bandgap (eV)
+                            </Text>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={layer.bandgapEv ?? ""}
+                              onChange={(e) =>
+                                onLayerChange(stackIdx, layerIdx, "bandgapEv", e.currentTarget.value)
+                              }
+                              onClick={(e) => e.stopPropagation()}
+                              placeholder="—"
+                              style={{ ...sideInputStyle, textAlign: "right" }}
+                            />
+                          </>
+                        )}
                       </Box>
                         </>
                       )
@@ -1191,6 +1213,7 @@ export function ProcessesPage() {
         name: string
         layerType: string
         thicknessNm: string
+        bandgapEv: string
         perovskiteA: string
         perovskiteB: string
         perovskiteX: string
@@ -1202,6 +1225,7 @@ export function ProcessesPage() {
           name: layer.name,
           layerType: layer.layerType,
           thicknessNm: layer.thicknessNm,
+          bandgapEv: layer.bandgapEv ?? "",
           perovskiteA: layer.perovskiteA,
           perovskiteB: layer.perovskiteB,
           perovskiteX: layer.perovskiteX,
@@ -1265,8 +1289,8 @@ export function ProcessesPage() {
     if (!stack) return
     const layer = stack.layers[layerIdx]
     if (!layer) return
-    // Sync thicknessNm across ALL stacks that share the same layer (same process step)
-    const syncAcrossStacks = field === "thicknessNm"
+    // Sync selected fields across ALL stacks that share the same layer (same process step)
+    const syncAcrossStacks = field === "thicknessNm" || field === "bandgapEv"
     const updatedStacks = generatedStacks.map((s, si) => ({
       ...s,
       layers: s.layers.map((l, li) => {

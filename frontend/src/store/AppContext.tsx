@@ -154,6 +154,7 @@ export type ProcessGeneratedStackLayer = {
   isSubstrate: boolean
   layerType: string
   thicknessNm: string
+  bandgapEv: string
   perovskiteA: string
   perovskiteB: string
   perovskiteX: string

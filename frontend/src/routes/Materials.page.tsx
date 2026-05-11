@@ -1,12 +1,16 @@
 import {
   ActionIcon,
+  Anchor,
   Box,
   Button,
   Container,
   Group,
+  Loader,
+  Modal,
   NativeSelect,
   rem,
   ScrollArea,
+  Stack,
   Table,
   Text,
   TextInput,
@@ -106,6 +110,118 @@ const CATEGORY_COLUMNS: Record<MaterialCategory, Column[]> = {
 
 type SortState = { key: keyof Material; direction: "asc" | "desc" } | null
 
+type PubChemResult = {
+  cid: string
+  title: string
+  iupacName: string
+  molecularFormula: string
+}
+
+type PubChemImportDetails = {
+  casNumber: string
+  stateAtRt: Material["stateAtRt"]
+}
+
+function extractCidValues(raw: string): string[] {
+  const matches = raw.match(/\d+/g) ?? []
+  return [...new Set(matches)]
+}
+
+function extractInfoStrings(value: unknown): string[] {
+  if (!value || typeof value !== "object") {
+    return []
+  }
+
+  const maybe = value as {
+    StringValue?: string
+    StringWithMarkup?: Array<{ String?: string }>
+  }
+  const out: string[] = []
+
+  if (typeof maybe.StringValue === "string") {
+    out.push(maybe.StringValue)
+  }
+  for (const entry of maybe.StringWithMarkup ?? []) {
+    if (entry?.String) {
+      out.push(entry.String)
+    }
+  }
+
+  return out
+}
+
+function inferStateAtRt(text: string): Material["stateAtRt"] {
+  const lower = text.toLowerCase()
+  if (/\bsolid\b/.test(lower)) return "solid"
+  if (/\bliquid\b/.test(lower)) return "liquid"
+  if (/\bgas\b|\bgaseous\b/.test(lower)) return "gas"
+  return ""
+}
+
+function parsePubChemDetails(raw: unknown): PubChemImportDetails {
+  const casCandidates: string[] = []
+  const stateCandidates: string[] = []
+  const casRegex = /\b\d{2,7}-\d{2}-\d\b/g
+
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") {
+      return
+    }
+    const obj = node as {
+      TOCHeading?: string
+      Information?: Array<{ Value?: unknown }>
+      Section?: unknown[]
+      Record?: unknown
+    }
+
+    const heading = obj.TOCHeading?.toLowerCase() ?? ""
+    if (obj.Information && heading) {
+      for (const info of obj.Information) {
+        const strings = extractInfoStrings(info?.Value)
+        if (heading.includes("cas")) {
+          for (const text of strings) {
+            const matches = text.match(casRegex) ?? []
+            casCandidates.push(...matches)
+          }
+        }
+        if (
+          heading.includes("physical description") ||
+          heading.includes("physical state") ||
+          heading.includes("appearance") ||
+          heading === "state"
+        ) {
+          stateCandidates.push(...strings)
+        }
+      }
+    }
+
+    if (Array.isArray(obj.Section)) {
+      for (const child of obj.Section) {
+        walk(child)
+      }
+    }
+
+    // PUG View responses commonly wrap data under Record.
+    if (obj.Record) {
+      walk(obj.Record)
+    }
+  }
+
+  walk(raw)
+
+  const casNumber = casCandidates[0] ?? ""
+  let stateAtRt: Material["stateAtRt"] = ""
+  for (const text of stateCandidates) {
+    const inferred = inferStateAtRt(text)
+    if (inferred) {
+      stateAtRt = inferred
+      break
+    }
+  }
+
+  return { casNumber, stateAtRt }
+}
+
 function SortIcon({
   sorted,
   direction,
@@ -156,6 +272,18 @@ export function MaterialsPage() {
   const navigate = useNavigate()
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
   const pendingCategoryRef = useRef<MaterialCategory | null>(null)
+  const pendingImportRef = useRef<Partial<Material> | null>(null)
+  const [pubChemModalOpen, setPubChemModalOpen] = useState(false)
+  const [pubChemCategory, setPubChemCategory] = useState<MaterialCategory>(
+    "chemical_compound",
+  )
+  const [pubChemQuery, setPubChemQuery] = useState("")
+  const [pubChemLoading, setPubChemLoading] = useState(false)
+  const [pubChemError, setPubChemError] = useState<string | null>(null)
+  const [pubChemResults, setPubChemResults] = useState<PubChemResult[]>([])
+  const [pubChemImportingCid, setPubChemImportingCid] = useState<string | null>(
+    null,
+  )
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
@@ -371,8 +499,12 @@ export function MaterialsPage() {
     })
   }
 
-  const doAddMaterial = (category: MaterialCategory, { planeId, collection }: CollectionConfirmParams) => {
-    const m = newMaterial(category)
+  const doAddMaterial = (
+    category: MaterialCategory,
+    { planeId, collection }: CollectionConfirmParams,
+    overrides?: Partial<Material>,
+  ) => {
+    const m = { ...newMaterial(category), ...overrides }
     setMaterials((prev) => [...prev, m])
     updateElement(planeId, {
       ...collection,
@@ -382,6 +514,7 @@ export function MaterialsPage() {
   }
 
   const addMaterial = (category: MaterialCategory) => {
+    pendingImportRef.current = null
     if (activeCollectionId && activePlaneId) {
       const plane = planes.find((p) => p.id === activePlaneId)
       const col = plane?.elements.find((e) => e.id === activeCollectionId)
@@ -394,11 +527,143 @@ export function MaterialsPage() {
     setCollectionModalOpen(true)
   }
 
+  const addImportedMaterial = (
+    category: MaterialCategory,
+    overrides: Partial<Material>,
+  ) => {
+    if (activeCollectionId && activePlaneId) {
+      const plane = planes.find((p) => p.id === activePlaneId)
+      const col = plane?.elements.find((e) => e.id === activeCollectionId)
+      if (col && col.type === "collection") {
+        doAddMaterial(
+          category,
+          {
+            planeId: activePlaneId,
+            collectionId: activeCollectionId,
+            collection: col as CanvasCollectionElement,
+          },
+          overrides,
+        )
+        return
+      }
+    }
+    pendingCategoryRef.current = category
+    pendingImportRef.current = overrides
+    setCollectionModalOpen(true)
+  }
+
+  const openPubChemImporter = (category: MaterialCategory) => {
+    setPubChemCategory(category)
+    setPubChemModalOpen(true)
+    setPubChemError(null)
+    setPubChemResults([])
+  }
+
+  const searchPubChem = async () => {
+    const query = pubChemQuery.trim()
+    if (!query) {
+      setPubChemError("Please enter a search term.")
+      setPubChemResults([])
+      return
+    }
+
+    setPubChemLoading(true)
+    setPubChemError(null)
+    try {
+      const cidRes = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(query)}/cids/JSON`,
+      )
+      if (!cidRes.ok) {
+        throw new Error("PubChem lookup failed")
+      }
+      const cidData = (await cidRes.json()) as {
+        IdentifierList?: { CID?: number[] }
+      }
+      const cids = (cidData.IdentifierList?.CID ?? []).slice(0, 20)
+      if (cids.length === 0) {
+        setPubChemResults([])
+        setPubChemError("No compounds found for this query.")
+        return
+      }
+
+      const propRes = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/${cids.join(",")}/property/Title,IUPACName,MolecularFormula/JSON`,
+      )
+      if (!propRes.ok) {
+        throw new Error("PubChem property fetch failed")
+      }
+      const propData = (await propRes.json()) as {
+        PropertyTable?: {
+          Properties?: Array<{
+            CID: number
+            Title?: string
+            IUPACName?: string
+            MolecularFormula?: string
+          }>
+        }
+      }
+
+      const results: PubChemResult[] = (propData.PropertyTable?.Properties ?? []).map(
+        (item) => ({
+          cid: String(item.CID),
+          title: item.Title || item.IUPACName || `CID ${item.CID}`,
+          iupacName: item.IUPACName || "",
+          molecularFormula: item.MolecularFormula || "",
+        }),
+      )
+      setPubChemResults(results)
+      if (results.length === 0) {
+        setPubChemError("No compounds found for this query.")
+      }
+    } catch {
+      setPubChemError("PubChem search failed. Please try again.")
+      setPubChemResults([])
+    } finally {
+      setPubChemLoading(false)
+    }
+  }
+
+  const importPubChemResult = async (result: PubChemResult) => {
+    let details: PubChemImportDetails = { casNumber: "", stateAtRt: "" }
+
+    if (pubChemCategory === "chemical_compound") {
+      setPubChemImportingCid(result.cid)
+      try {
+        const detailRes = await fetch(
+          `https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/${result.cid}/JSON`,
+        )
+        if (detailRes.ok) {
+          const detailData = (await detailRes.json()) as unknown
+          details = parsePubChemDetails(detailData)
+        }
+      } catch {
+        // Best effort import: keep remaining fields even when detail lookup fails.
+      } finally {
+        setPubChemImportingCid(null)
+      }
+    }
+
+    addImportedMaterial(pubChemCategory, {
+      name: result.title,
+      pubchemCid: result.cid,
+      ...(pubChemCategory === "chemical_compound"
+        ? {
+            casNumber: details.casNumber,
+            stateAtRt: details.stateAtRt,
+            purity: "",
+          }
+        : {}),
+    })
+    setPubChemModalOpen(false)
+  }
+
   const handleCollectionConfirmed = (params: CollectionConfirmParams) => {
     const category = pendingCategoryRef.current
+    const overrides = pendingImportRef.current
     pendingCategoryRef.current = null
+    pendingImportRef.current = null
     if (category) {
-      doAddMaterial(category, params)
+      doAddMaterial(category, params, overrides ?? undefined)
     }
   }
 
@@ -652,6 +917,30 @@ export function MaterialsPage() {
           <Table.Td key={col.key}>
             {isEditing && editBuffer ? (
               renderCellEditor(material, col.key)
+            ) : col.key === "pubchemCid" && String(material.pubchemCid ?? "").trim() ? (
+              (() => {
+                const raw = String(material.pubchemCid ?? "")
+                const cidValues = extractCidValues(raw)
+                if (cidValues.length === 0) {
+                  return <Text size="sm">{raw}</Text>
+                }
+                return (
+                  <Group gap={6} wrap="wrap">
+                    {cidValues.map((cid) => (
+                      <Anchor
+                        key={cid}
+                        href={`https://pubchem.ncbi.nlm.nih.gov/compound/${cid}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        size="sm"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {cid}
+                      </Anchor>
+                    ))}
+                  </Group>
+                )
+              })()
             ) : (
               <Text size="sm">
                 {String(material[col.key] ?? "") || (
@@ -736,13 +1025,24 @@ export function MaterialsPage() {
       <Box key={category}>
         <Group justify="space-between" mb="xs" mt="md">
           <Title order={4}>{CATEGORY_LABEL[category]}</Title>
-          <Button
-            leftSection={<IconPlus size={16} />}
-            onClick={() => addMaterial(category)}
-            size="xs"
-          >
-            {CATEGORY_ADD_LABEL[category]}
-          </Button>
+          <Group gap="xs">
+            {category !== "substrate_material" && (
+              <Button
+                variant="light"
+                onClick={() => openPubChemImporter(category)}
+                size="xs"
+              >
+                Import from PubChem
+              </Button>
+            )}
+            <Button
+              leftSection={<IconPlus size={16} />}
+              onClick={() => addMaterial(category)}
+              size="xs"
+            >
+              {CATEGORY_ADD_LABEL[category]}
+            </Button>
+          </Group>
         </Group>
 
         <ScrollArea>
@@ -838,6 +1138,83 @@ export function MaterialsPage() {
         onConfirm={handleCollectionConfirmed}
         confirmLabel="Add Material"
       />
+
+      <Modal
+        opened={pubChemModalOpen}
+        onClose={() => setPubChemModalOpen(false)}
+        title={`Import ${CATEGORY_LABEL[pubChemCategory]} from PubChem`}
+        size="lg"
+      >
+        <Stack gap="sm">
+          <Group align="flex-end">
+            <TextInput
+              label="Search PubChem"
+              placeholder="Name, IUPAC, formula..."
+              value={pubChemQuery}
+              onChange={(e) => setPubChemQuery(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void searchPubChem()
+                }
+              }}
+              style={{ flex: 1 }}
+            />
+            <Button onClick={() => void searchPubChem()} loading={pubChemLoading}>
+              Search
+            </Button>
+          </Group>
+
+          {pubChemError && (
+            <Text size="sm" c="red">
+              {pubChemError}
+            </Text>
+          )}
+
+          {pubChemLoading ? (
+            <Group justify="center" py="lg">
+              <Loader size="sm" />
+            </Group>
+          ) : (
+            <ScrollArea.Autosize mah={360}>
+              <Stack gap="xs">
+                {pubChemResults.map((result) => (
+                  <Box
+                    key={result.cid}
+                    p="sm"
+                    style={{ border: "1px solid var(--mantine-color-gray-3)", borderRadius: rem(8) }}
+                  >
+                    <Group justify="space-between" align="flex-start" wrap="nowrap">
+                      <Box style={{ minWidth: 0 }}>
+                        <Text fw={600} size="sm" truncate>
+                          {result.title}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          CID: {result.cid}
+                        </Text>
+                        {result.molecularFormula && (
+                          <Text size="xs">Formula: {result.molecularFormula}</Text>
+                        )}
+                        {result.iupacName && (
+                          <Text size="xs" c="dimmed" lineClamp={2}>
+                            {result.iupacName}
+                          </Text>
+                        )}
+                      </Box>
+                      <Button
+                        size="xs"
+                        onClick={() => void importPubChemResult(result)}
+                        loading={pubChemImportingCid === result.cid}
+                      >
+                        Import
+                      </Button>
+                    </Group>
+                  </Box>
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
+          )}
+        </Stack>
+      </Modal>
     </Container>
   )
 }
