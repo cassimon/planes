@@ -1161,6 +1161,8 @@ export function ProcessesPage() {
     activePlaneId,
     activeEntity,
     setActiveEntity,
+    lastSelectedByKind,
+    updateLastSelected,
   } = useAppContext()
   const { isEntityVisible, getEntityColor, getEntityPlane, getEntityCollection } =
     useEntityCollection()
@@ -1188,9 +1190,20 @@ export function ProcessesPage() {
   const selectProcess = useCallback(
     (id: string | null) => {
       setActiveEntity(id ? { kind: "process", id } : null)
+      if (id) updateLastSelected("process", id)
     },
-    [setActiveEntity],
+    [setActiveEntity, updateLastSelected],
   )
+
+  // Restore last selected process on mount if no active entity
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once on mount
+  useEffect(() => {
+    if (activeEntity?.kind === "process") return
+    const lastId = lastSelectedByKind.process
+    if (lastId && processes.some((p) => p.id === lastId)) {
+      selectProcess(lastId)
+    }
+  }, [])
 
   // Auto-create process + link to collection when navigated from action bubble
   useEffect(() => {

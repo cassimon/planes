@@ -1276,13 +1276,17 @@ export default function ExperimentsPage() {
     setProcesses,
     activeEntity,
     setActiveEntity,
+    lastSelectedByKind,
+    updateLastSelected,
     planes,
     updateElement,
     activeCollectionId,
     activePlaneId,
   } = useAppContext()
 
-  const [selectedExpId, setSelectedExpId] = useState<string | null>(null)
+  const [selectedExpId, setSelectedExpId] = useState<string | null>(
+    () => lastSelectedByKind.experiment ?? null,
+  )
   const [recipeModalOpen, setRecipeModalOpen] = useState(false)
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
   const [newExperimentProcessId, setNewExperimentProcessId] = useState<string | null>(
@@ -1360,7 +1364,8 @@ export default function ExperimentsPage() {
       return
     }
     setActiveEntity({ kind: "experiment", id: selectedExpId })
-  }, [selectedExpId, setActiveEntity])
+    updateLastSelected("experiment", selectedExpId)
+  }, [selectedExpId, setActiveEntity, updateLastSelected])
 
   // Create new experiment
   const doAddExperiment = ({ planeId, collection }: CollectionConfirmParams) => {

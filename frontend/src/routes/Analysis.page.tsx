@@ -644,10 +644,10 @@ const GRID_SIZE = 20 // snap grid size
 const MIN_WIDGET_SIZE = 200
 
 export function AnalysisPage() {
-  const { experiments } = useAppContext()
+  const { experiments, lastSelectedByKind, updateLastSelected } = useAppContext()
   const [selectedExperimentId, setSelectedExperimentId] = useState<
     string | null
-  >(null)
+  >(() => lastSelectedByKind.experiment ?? null)
   const [dataSourceMode, setDataSourceMode] =
     useState<DataSourceMode>("all-devices")
   const [excludedDevices, setExcludedDevices] = useState<string[]>([])
@@ -700,6 +700,7 @@ export function AnalysisPage() {
 
   const selectExperiment = (id: string | null) => {
     setSelectedExperimentId(id)
+    if (id) updateLastSelected("experiment", id)
   }
 
   const selectedExperiment = experiments.find(

@@ -1003,6 +1003,10 @@ type AppContextValue = {
     e: { kind: "experiment" | "material" | "solution" | "process"; id: string } | null,
   ) => void
 
+  /** Last-selected entity ID per kind — restored when navigating back to a page */
+  lastSelectedByKind: Partial<Record<"experiment" | "material" | "solution" | "process", string>>
+  updateLastSelected: (kind: "experiment" | "material" | "solution" | "process", id: string) => void
+
   /** Immediately persist the current state (call before logout). */
   flushSave: () => Promise<void>
 }
@@ -1064,6 +1068,15 @@ export function AppProvider({
     kind: "experiment" | "material" | "solution" | "process"
     id: string
   } | null>(null)
+  const [lastSelectedByKind, setLastSelectedByKind] = useState<
+    Partial<Record<"experiment" | "material" | "solution" | "process", string>>
+  >({})
+  const updateLastSelected = useCallback(
+    (kind: "experiment" | "material" | "solution" | "process", id: string) => {
+      setLastSelectedByKind((prev) => ({ ...prev, [kind]: id }))
+    },
+    [],
+  )
   const [loaded, setLoaded] = useState(false)
 
   // Refs for save — avoids stale closure in the interval callback
@@ -1494,6 +1507,8 @@ export function AppProvider({
         setPendingCollectionLink,
         activeEntity,
         setActiveEntity,
+        lastSelectedByKind,
+        updateLastSelected,
         flushSave: async () => {
           console.log("[AppContext] flushSave called (e.g. before logout)")
           dirtyRef.current = true

@@ -2014,15 +2014,18 @@ export function ResultsPage() {
     pendingCollectionLink,
     setPendingCollectionLink,
     setActiveEntity,
+    lastSelectedByKind,
+    updateLastSelected,
   } = useAppContext()
   const { getEntityColor, isEntityVisible } = useEntityCollection()
   const [selectedExperimentId, setSelectedExperimentId] = useState<
     string | null
-  >(null)
+  >(() => lastSelectedByKind.experiment ?? null)
 
   const selectExperiment = (id: string | null) => {
     setSelectedExperimentId(id)
     setActiveEntity(id ? { kind: "experiment", id } : null)
+    if (id) updateLastSelected("experiment", id)
   }
 
   const selectedExperiment = experiments.find(

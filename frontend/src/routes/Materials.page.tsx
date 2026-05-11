@@ -256,6 +256,8 @@ export function MaterialsPage() {
     activePlaneId,
     activeEntity,
     setActiveEntity,
+    lastSelectedByKind,
+    updateLastSelected,
   } = useAppContext()
   const { getEntityColor, isEntityVisible, getEntityCollection } =
     useEntityCollection()
@@ -264,7 +266,7 @@ export function MaterialsPage() {
   const [editBuffer, setEditBuffer] = useState<Material | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(
-    null,
+    () => lastSelectedByKind.material ?? null,
   )
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
   const returnToRef = useRef<string | null>(null)
@@ -296,6 +298,7 @@ export function MaterialsPage() {
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
+    if (id) updateLastSelected("material", id)
   }
 
   const startEdit = (m: Material) => {

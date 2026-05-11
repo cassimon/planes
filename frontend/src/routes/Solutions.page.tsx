@@ -699,6 +699,8 @@ export function SolutionsPage() {
     activePlaneId,
     activeEntity,
     setActiveEntity,
+    lastSelectedByKind,
+    updateLastSelected,
   } = useAppContext()
   const {
     getEntityColor,
@@ -707,7 +709,9 @@ export function SolutionsPage() {
     getEntityCollection,
     isEntityOnActivePlane,
   } = useEntityCollection()
-  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null)
+  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
+    () => lastSelectedByKind.solution ?? null,
+  )
   const [editingSolutionId, setEditingSolutionId] = useState<string | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
   const returnToRef = useRef<string | null>(null)
@@ -719,6 +723,7 @@ export function SolutionsPage() {
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
+    if (id) updateLastSelected("solution", id)
   }
 
   useEffect(() => {
