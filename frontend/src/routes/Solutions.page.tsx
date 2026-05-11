@@ -1,7 +1,6 @@
 import {
   ActionIcon,
   Badge,
-  Box,
   Button,
   Collapse,
   ColorSwatch,
@@ -13,7 +12,6 @@ import {
   Paper,
   rem,
   ScrollArea,
-  SegmentedControl,
   Select,
   Stack,
   Table,
@@ -30,6 +28,8 @@ import {
   IconCopy,
   IconPencil,
   IconPlus,
+  IconRestore,
+  IconSparkles,
   IconTrash,
   IconX,
 } from "@tabler/icons-react"
@@ -94,7 +94,6 @@ type ComponentRowProps = {
   component: SolutionComponent
   onChange: (updated: SolutionComponent) => void
   onDelete: () => void
-  /** Pre-computed display name for the referenced material or solution */
   componentName: string
   editing: boolean
   onStartEdit: () => void
@@ -102,12 +101,10 @@ type ComponentRowProps = {
   onCancel: () => void
   buffer: SolutionComponent | null
   onBufferChange: (b: SolutionComponent) => void
-  materialOptions: { value: string; label: string }[]
+  groupedComponentOptions: { group: string; items: { value: string; label: string }[] }[]
+  solutionIdSet: Set<string>
   materialUnitById?: Map<string, "mg" | "ml">
-  /** Solution options (already filtered to exclude self-reference) */
-  solutionOptions: { value: string; label: string }[]
-  materialColorMap?: Map<string, string>
-  solutionColorMap?: Map<string, string>
+  componentColorMap?: Map<string, string>
 }
 
 function ComponentRow({
@@ -120,110 +117,52 @@ function ComponentRow({
   onCancel,
   buffer,
   onBufferChange,
-  materialOptions,
+  groupedComponentOptions,
+  solutionIdSet,
   materialUnitById,
-  solutionOptions,
-  materialColorMap,
-  solutionColorMap,
+  componentColorMap,
 }: ComponentRowProps) {
-  // Derive which type is being edited from the buffer state
-  const editType: "material" | "solution" =
-    editing && buffer && buffer.solutionId !== undefined
-      ? "solution"
-      : "material"
-
   return (
     <Table.Tr>
       <Table.Td>
         {editing && buffer ? (
-          <Stack gap={4}>
-            <SegmentedControl
-              size="xs"
-              value={editType}
-              onChange={(t) => {
-                if (t === "material") {
-                  onBufferChange({
-                    ...buffer,
-                    materialId: buffer.materialId ?? "",
-                    solutionId: undefined,
-                  })
-                } else {
-                  onBufferChange({
-                    ...buffer,
-                    solutionId: buffer.solutionId ?? "",
-                    materialId: undefined,
-                  })
-                }
-              }}
-              data={[
-                { label: "Material", value: "material" },
-                { label: "Solution ↰", value: "solution" },
-              ]}
-            />
-            {editType === "material" ? (
-              <Select
-                size="xs"
-                value={buffer.materialId || null}
-                onChange={(v) => {
-                  const unit = v ? (materialUnitById?.get(v) ?? buffer.unit) : buffer.unit
-                  onBufferChange({
-                    ...buffer,
-                    materialId: v ?? "",
-                    solutionId: undefined,
-                    unit,
-                  })
-                }}
-                data={materialOptions}
-                placeholder="— select material —"
-                clearable
-                searchable
-                renderOption={({ option }) => {
-                  const color = materialColorMap?.get(option.value)
-                  return (
-                    <Group gap={6} wrap="nowrap">
-                      <ColorSwatch
-                        color={color ?? "transparent"}
-                        size={12}
-                        withShadow={false}
-                        style={{ opacity: color ? 1 : 0, flexShrink: 0 }}
-                      />
-                      <Text size="xs">{option.label}</Text>
-                    </Group>
-                  )
-                }}
-              />
-            ) : (
-              <Select
-                size="xs"
-                value={buffer.solutionId || null}
-                onChange={(v) =>
-                  onBufferChange({
-                    ...buffer,
-                    solutionId: v ?? "",
-                    materialId: undefined,
-                  })
-                }
-                data={solutionOptions}
-                placeholder="— select solution —"
-                clearable
-                searchable
-                renderOption={({ option }) => {
-                  const color = solutionColorMap?.get(option.value)
-                  return (
-                    <Group gap={6} wrap="nowrap">
-                      <ColorSwatch
-                        color={color ?? "transparent"}
-                        size={12}
-                        withShadow={false}
-                        style={{ opacity: color ? 1 : 0, flexShrink: 0 }}
-                      />
-                      <Text size="xs">{option.label}</Text>
-                    </Group>
-                  )
-                }}
-              />
-            )}
-          </Stack>
+          <Select
+            size="xs"
+            value={buffer.materialId || buffer.solutionId || null}
+            onChange={(v) => {
+              if (!v) {
+                onBufferChange({ ...buffer, materialId: "", solutionId: undefined })
+                return
+              }
+              if (solutionIdSet.has(v)) {
+                onBufferChange({ ...buffer, solutionId: v, materialId: undefined })
+              } else {
+                const unit = materialUnitById?.get(v) ?? buffer.unit
+                onBufferChange({ ...buffer, materialId: v, solutionId: undefined, unit })
+              }
+            }}
+            data={groupedComponentOptions}
+            placeholder="— select component —"
+            clearable
+            searchable
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onCommit()
+            }}
+            renderOption={({ option }) => {
+              const color = componentColorMap?.get(option.value)
+              return (
+                <Group gap={6} wrap="nowrap">
+                  <ColorSwatch
+                    color={color ?? "transparent"}
+                    size={12}
+                    withShadow={false}
+                    style={{ opacity: color ? 1 : 0, flexShrink: 0 }}
+                  />
+                  <Text size="xs">{option.label}</Text>
+                </Group>
+              )
+            }}
+          />
         ) : (
           <Text size="sm">
             {componentName || (
@@ -240,6 +179,9 @@ function ComponentRow({
             size="xs"
             value={buffer.amount}
             onChange={(v) => onBufferChange({ ...buffer, amount: String(v) })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onCommit()
+            }}
             min={0}
             style={{ width: rem(100) }}
           />
@@ -265,6 +207,9 @@ function ComponentRow({
               })
             }
             data={["mg", "ml"]}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onCommit()
+            }}
             style={{ width: rem(80) }}
           />
         ) : (
@@ -278,22 +223,12 @@ function ComponentRow({
           {editing ? (
             <>
               <Tooltip label="Save">
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  color="green"
-                  onClick={onCommit}
-                >
+                <ActionIcon size="sm" variant="subtle" color="green" onClick={onCommit}>
                   <IconCheck size={14} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Cancel">
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  color="gray"
-                  onClick={onCancel}
-                >
+                <ActionIcon size="sm" variant="subtle" color="gray" onClick={onCancel}>
                   <IconX size={14} />
                 </ActionIcon>
               </Tooltip>
@@ -301,22 +236,12 @@ function ComponentRow({
           ) : (
             <>
               <Tooltip label="Edit">
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  color="blue"
-                  onClick={onStartEdit}
-                >
+                <ActionIcon size="sm" variant="subtle" color="blue" onClick={onStartEdit}>
                   <IconPencil size={14} />
                 </ActionIcon>
               </Tooltip>
               <Tooltip label="Delete">
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  color="red"
-                  onClick={onDelete}
-                >
+                <ActionIcon size="sm" variant="subtle" color="red" onClick={onDelete}>
                   <IconTrash size={14} />
                 </ActionIcon>
               </Tooltip>
@@ -335,18 +260,19 @@ type SolutionCardProps = {
   onUpdate: (s: Solution) => void
   onDelete: () => void
   onCopy: () => void
-  materialOptions: { value: string; label: string }[]
+  groupedComponentOptions: { group: string; items: { value: string; label: string }[] }[]
+  solutionIdSet: Set<string>
+  solventIdSet: Set<string>
   materialUnitById?: Map<string, "mg" | "ml">
   getMaterialName: (id: string) => string
-  /** All solutions (used to build solution-as-component options) */
-  allSolutionOptions: { value: string; label: string }[]
   getSolutionName: (id: string) => string
-  materialColorMap?: Map<string, string>
-  solutionColorMap?: Map<string, string>
+  componentColorMap?: Map<string, string>
   collectionColor?: string
   isSelected?: boolean
   onSelect?: (id: string | null) => void
   onEditingChange?: (id: string, isEditing: boolean) => void
+  autoAddComponent?: boolean
+  onAutoAdded?: () => void
 }
 
 function SolutionCard({
@@ -354,26 +280,77 @@ function SolutionCard({
   onUpdate,
   onDelete,
   onCopy,
-  materialOptions,
+  groupedComponentOptions,
+  solutionIdSet,
+  solventIdSet,
   materialUnitById,
   getMaterialName,
-  allSolutionOptions,
   getSolutionName,
-  materialColorMap,
-  solutionColorMap,
+  componentColorMap,
   collectionColor,
   isSelected,
   onSelect,
   onEditingChange,
+  autoAddComponent,
+  onAutoAdded,
 }: SolutionCardProps) {
   const [open, setOpen] = useState(isSelected ?? false)
+  const [nameAtExpand, setNameAtExpand] = useState(solution.name)
+
+  const commitName = () => {
+    const nextName = nameBuffer.trim() || solution.name
+    if (nextName !== solution.name) {
+      onUpdate({ ...solution, name: nextName })
+    }
+  }
+
+  const restoreNameToExpandedState = () => {
+    setNameBuffer(nameAtExpand)
+    if (solution.name !== nameAtExpand) {
+      onUpdate({ ...solution, name: nameAtExpand })
+    }
+  }
+
+  const commitOpenEditsBeforeClose = () => {
+    if (editingName) {
+      commitName()
+    }
+    if (editingComponentId && componentBuffer) {
+      onUpdate({
+        ...solution,
+        components: solution.components.map((c) =>
+          c.id === componentBuffer.id ? componentBuffer : c,
+        ),
+      })
+    }
+  }
 
   useEffect(() => {
-    setOpen(Boolean(isSelected))
+    const nextOpen = Boolean(isSelected)
+
+    if (open && !nextOpen) {
+      commitOpenEditsBeforeClose()
+    }
+
+    setOpen(nextOpen)
+    if (nextOpen) {
+      setNameAtExpand(solution.name)
+      setNameBuffer(solution.name)
+      setEditingName(true)
+    } else {
+      setEditingName(false)
+      setEditingComponentId(null)
+      setComponentBuffer(null)
+    }
   }, [isSelected])
 
   const handleToggleOpen = (newOpen: boolean) => {
-    if (!newOpen) {
+    if (newOpen) {
+      setNameAtExpand(solution.name)
+      setNameBuffer(solution.name)
+      setEditingName(true)
+    } else {
+      commitOpenEditsBeforeClose()
       setEditingName(false)
       setEditingComponentId(null)
       setComponentBuffer(null)
@@ -383,21 +360,19 @@ function SolutionCard({
       onSelect(newOpen ? solution.id : null)
     }
   }
+
   const [editingName, setEditingName] = useState(false)
   const [nameBuffer, setNameBuffer] = useState(solution.name)
   const [handlingBuffer, setHandlingBuffer] = useState(solution.handling ?? "")
+  const [storageBuffer, setStorageBuffer] = useState(solution.storage ?? "")
   const [creationTimeBuffer, setCreationTimeBuffer] = useState(
     toDateTimeLocalValue(solution.creationTime),
   )
-  const [editingComponentId, setEditingComponentId] = useState<string | null>(
-    null,
-  )
-  const [componentBuffer, setComponentBuffer] =
-    useState<SolutionComponent | null>(null)
+  const [editingComponentId, setEditingComponentId] = useState<string | null>(null)
+  const [componentBuffer, setComponentBuffer] = useState<SolutionComponent | null>(null)
 
   useEffect(() => {
     onEditingChange?.(solution.id, editingName || editingComponentId !== null)
-
     return () => {
       onEditingChange?.(solution.id, false)
     }
@@ -405,12 +380,39 @@ function SolutionCard({
 
   useEffect(() => {
     setHandlingBuffer(solution.handling ?? "")
+    setStorageBuffer(solution.storage ?? "")
     setCreationTimeBuffer(toDateTimeLocalValue(solution.creationTime))
-  }, [solution.creationTime, solution.handling])
+  }, [solution.creationTime, solution.handling, solution.storage])
 
-  const commitName = () => {
-    onUpdate({ ...solution, name: nameBuffer.trim() || solution.name })
-    setEditingName(false)
+  const generateName = () => {
+    const solutes: string[] = []
+    const solvents: string[] = []
+    for (const comp of solution.components) {
+      if (comp.solutionId) {
+        solutes.push(getSolutionName(comp.solutionId))
+      } else if (comp.materialId) {
+        if (solventIdSet.has(comp.materialId)) {
+          solvents.push(getMaterialName(comp.materialId))
+        } else {
+          solutes.push(getMaterialName(comp.materialId))
+        }
+      }
+    }
+    const date = new Date(solution.creationTime)
+    const dateStr = Number.isNaN(date.getTime())
+      ? ""
+      : date.toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })
+    let name = ""
+    if (solutes.length > 0) name += solutes.join(", ")
+    if (solvents.length > 0) name += (name ? " in " : "") + solvents.join(", ")
+    if (dateStr) name += (name ? " " : "") + dateStr
+    if (!name) return
+    onUpdate({ ...solution, name })
+    setNameBuffer(name)
   }
 
   const addComponent = () => {
@@ -422,11 +424,22 @@ function SolutionCard({
   }
 
   const commitHandling = () => {
-    if ((solution.handling ?? "") === handlingBuffer) {
-      return
-    }
+    if ((solution.handling ?? "") === handlingBuffer) return
     onUpdate({ ...solution, handling: handlingBuffer })
   }
+
+  const commitStorage = () => {
+    if ((solution.storage ?? "") === storageBuffer) return
+    onUpdate({ ...solution, storage: storageBuffer })
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs once on mount
+  useEffect(() => {
+    if (autoAddComponent) {
+      onAutoAdded?.()
+      addComponent()
+    }
+  }, [])
 
   const commitCreationTime = () => {
     const parsed = fromDateTimeLocalValue(creationTimeBuffer)
@@ -434,16 +447,12 @@ function SolutionCard({
       setCreationTimeBuffer(toDateTimeLocalValue(solution.creationTime))
       return
     }
-    if (parsed === solution.creationTime) {
-      return
-    }
+    if (parsed === solution.creationTime) return
     onUpdate({ ...solution, creationTime: parsed })
   }
 
   const commitComponent = () => {
-    if (!componentBuffer) {
-      return
-    }
+    if (!componentBuffer) return
     onUpdate({
       ...solution,
       components: solution.components.map((c) =>
@@ -456,12 +465,7 @@ function SolutionCard({
 
   const cancelComponent = (id: string) => {
     const original = solution.components.find((c) => c.id === id)
-    if (
-      original &&
-      !original.materialId &&
-      !original.solutionId &&
-      !original.amount
-    ) {
+    if (original && !original.materialId && !original.solutionId && !original.amount) {
       onUpdate({
         ...solution,
         components: solution.components.filter((c) => c.id !== id),
@@ -485,9 +489,7 @@ function SolutionCard({
       p="sm"
       mb="sm"
       style={{
-        borderLeft: collectionColor
-          ? `6px solid ${collectionColor}`
-          : undefined,
+        borderLeft: collectionColor ? `6px solid ${collectionColor}` : undefined,
       }}
     >
       <Group justify="space-between" wrap="nowrap">
@@ -499,11 +501,7 @@ function SolutionCard({
             onClick={() => handleToggleOpen(!open)}
             aria-label={open ? "Collapse" : "Expand"}
           >
-            {open ? (
-              <IconChevronDown size={16} />
-            ) : (
-              <IconChevronRight size={16} />
-            )}
+            {open ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
           </ActionIcon>
 
           {editingName ? (
@@ -512,55 +510,42 @@ function SolutionCard({
                 size="xs"
                 value={nameBuffer}
                 onChange={(e) => setNameBuffer(e.currentTarget.value)}
+                onFocus={(e) => e.currentTarget.select()}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    commitName()
-                  }
+                  if (e.key === "Enter") commitName()
                   if (e.key === "Escape") {
-                    setEditingName(false)
-                    setNameBuffer(solution.name)
+                    restoreNameToExpandedState()
                   }
                 }}
                 autoFocus
-                style={{ width: rem(200) }}
+                style={{ width: rem(240) }}
               />
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                color="green"
-                onClick={commitName}
-              >
-                <IconCheck size={14} />
-              </ActionIcon>
-              <ActionIcon
-                size="sm"
-                variant="subtle"
-                color="gray"
-                onClick={() => {
-                  setEditingName(false)
-                  setNameBuffer(solution.name)
-                }}
-              >
-                <IconX size={14} />
-              </ActionIcon>
+              <Tooltip label="Auto-generate name from components">
+                <ActionIcon size="sm" variant="subtle" color="violet" onClick={generateName}>
+                  <IconSparkles size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Restore name from when this tab was expanded">
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  onClick={restoreNameToExpandedState}
+                >
+                  <IconRestore size={14} />
+                </ActionIcon>
+              </Tooltip>
             </Group>
           ) : (
             <Group gap={4} wrap="nowrap">
               <Text
                 fw={600}
-                style={{ cursor: "pointer" }}
-                onClick={() => handleToggleOpen(!open)}
+                style={{ cursor: "text" }}
+                title="Click to rename"
+                onClick={() => setEditingName(true)}
               >
                 {solution.name}
               </Text>
-              <ActionIcon
-                size="xs"
-                variant="subtle"
-                color="gray"
-                onClick={() => setEditingName(true)}
-              >
-                <IconPencil size={12} />
-              </ActionIcon>
             </Group>
           )}
 
@@ -592,11 +577,20 @@ function SolutionCard({
             onChange={(e) => setHandlingBuffer(e.currentTarget.value)}
             onBlur={commitHandling}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                commitHandling()
-              }
+              if (e.key === "Enter") commitHandling()
             }}
-            placeholder="e.g. Store under nitrogen"
+            placeholder="e.g. PVDF 0.22 µm filter before use"
+          />
+          <TextInput
+            label="Storage"
+            size="xs"
+            value={storageBuffer}
+            onChange={(e) => setStorageBuffer(e.currentTarget.value)}
+            onBlur={commitStorage}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitStorage()
+            }}
+            placeholder="e.g. N2 Glovebox"
           />
           <TextInput
             label="Creation Time"
@@ -606,9 +600,7 @@ function SolutionCard({
             onChange={(e) => setCreationTimeBuffer(e.currentTarget.value)}
             onBlur={commitCreationTime}
             onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                commitCreationTime()
-              }
+              if (e.key === "Enter") commitCreationTime()
             }}
           />
         </Group>
@@ -636,9 +628,16 @@ function SolutionCard({
                 const compName = comp.solutionId
                   ? `↰ ${getSolutionName(comp.solutionId)}`
                   : getMaterialName(comp.materialId ?? "")
-                // Exclude self to prevent circular references
-                const filteredSolutionOptions = allSolutionOptions.filter(
-                  (opt) => opt.value !== solution.id,
+                const filteredSolutionIdSet = new Set(
+                  [...solutionIdSet].filter((id) => id !== solution.id),
+                )
+                const filteredGrouped = groupedComponentOptions.map((group) =>
+                  group.group === "Solution"
+                    ? {
+                        ...group,
+                        items: group.items.filter((opt) => opt.value !== solution.id),
+                      }
+                    : group,
                 )
                 return (
                   <ComponentRow
@@ -654,22 +653,19 @@ function SolutionCard({
                     }}
                     onCommit={commitComponent}
                     onCancel={() => cancelComponent(comp.id)}
-                    buffer={
-                      editingComponentId === comp.id ? componentBuffer : null
-                    }
+                    buffer={editingComponentId === comp.id ? componentBuffer : null}
                     onBufferChange={setComponentBuffer}
-                    materialOptions={materialOptions}
+                    groupedComponentOptions={filteredGrouped}
+                    solutionIdSet={filteredSolutionIdSet}
                     materialUnitById={materialUnitById}
-                    solutionOptions={filteredSolutionOptions}
-                    materialColorMap={materialColorMap}
-                    solutionColorMap={solutionColorMap}
+                    componentColorMap={componentColorMap}
                   />
                 )
               })}
             </Table.Tbody>
           </Table>
         </ScrollArea>
-        <Box mt="xs">
+        <Group mt="xs" justify="flex-end">
           <Button
             size="xs"
             leftSection={<IconPlus size={12} />}
@@ -678,7 +674,7 @@ function SolutionCard({
           >
             Add Component
           </Button>
-        </Box>
+        </Group>
       </Collapse>
     </Paper>
   )
@@ -711,18 +707,15 @@ export function SolutionsPage() {
     getEntityCollection,
     isEntityOnActivePlane,
   } = useEntityCollection()
-  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(
-    null,
-  )
-  const [editingSolutionId, setEditingSolutionId] = useState<string | null>(
-    null,
-  )
+  const [selectedSolutionId, setSelectedSolutionId] = useState<string | null>(null)
+  const [editingSolutionId, setEditingSolutionId] = useState<string | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
   const returnToRef = useRef<string | null>(null)
   const returnSolutionIdRef = useRef<string | null>(null)
   const returnToProcessIdRef = useRef<string | null>(null)
   const navigate = useNavigate()
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
+  const [autoAddComponentId, setAutoAddComponentId] = useState<string | null>(null)
 
   const selectSolution = (id: string | null) => {
     setSelectedSolutionId(id)
@@ -746,12 +739,8 @@ export function SolutionsPage() {
   }, [editingSolutionId, isEntityVisible, setActiveEntity, solutions])
 
   useEffect(() => {
-    if (activeEntity?.kind !== "solution") {
-      return
-    }
-    if (!isEntityVisible("solution", activeEntity.id)) {
-      return
-    }
+    if (activeEntity?.kind !== "solution") return
+    if (!isEntityVisible("solution", activeEntity.id)) return
     setSelectedSolutionId(activeEntity.id)
   }, [activeEntity, isEntityVisible])
 
@@ -759,6 +748,20 @@ export function SolutionsPage() {
     () =>
       materials
         .filter((m) => (m.category ?? "chemical_compound") !== "substrate_material")
+        .filter((m) => m.type !== "solvent")
+        .filter((m) => isEntityOnActivePlane("material", m.id))
+        .map((m) => ({
+          value: m.id,
+          label: m.name || m.inventoryLabel || m.casNumber || m.id,
+        })),
+    [materials, isEntityOnActivePlane],
+  )
+
+  const solventOptions = useMemo(
+    () =>
+      materials
+        .filter((m) => (m.category ?? "chemical_compound") !== "substrate_material")
+        .filter((m) => m.type === "solvent")
         .filter((m) => isEntityOnActivePlane("material", m.id))
         .map((m) => ({
           value: m.id,
@@ -770,11 +773,7 @@ export function SolutionsPage() {
   const materialUnitById = useMemo(() => {
     const map = new Map<string, "mg" | "ml">()
     for (const material of materials) {
-      if (
-        (material.category ?? "chemical_compound") === "substrate_material"
-      ) {
-        continue
-      }
+      if ((material.category ?? "chemical_compound") === "substrate_material") continue
       map.set(material.id, getDefaultUnitForMaterial(material))
     }
     return map
@@ -798,10 +797,7 @@ export function SolutionsPage() {
     () =>
       solutions
         .filter((s) => isEntityOnActivePlane("solution", s.id))
-        .map((s) => ({
-          value: s.id,
-          label: s.name || s.id,
-        })),
+        .map((s) => ({ value: s.id, label: s.name || s.id })),
     [solutions, isEntityOnActivePlane],
   )
 
@@ -814,14 +810,38 @@ export function SolutionsPage() {
     return map
   }, [solutions, getEntityColor])
 
+  const componentColorMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [id, color] of materialColorMap) map.set(id, color)
+    for (const [id, color] of solutionColorMap) map.set(id, color)
+    return map
+  }, [materialColorMap, solutionColorMap])
+
+  const groupedComponentOptions = useMemo(
+    () => [
+      ...(materialOptions.length > 0 ? [{ group: "Material", items: materialOptions }] : []),
+      ...(solventOptions.length > 0 ? [{ group: "Solvent", items: solventOptions }] : []),
+      ...(allSolutionOptions.length > 0 ? [{ group: "Solution", items: allSolutionOptions }] : []),
+    ],
+    [materialOptions, solventOptions, allSolutionOptions],
+  )
+
+  const solutionIdSet = useMemo(
+    () => new Set(allSolutionOptions.map((o) => o.value)),
+    [allSolutionOptions],
+  )
+
+  const solventIdSet = useMemo(
+    () => new Set(solventOptions.map((o) => o.value)),
+    [solventOptions],
+  )
+
   const getSolutionName = (id: string) => {
     const s = solutions.find((sol) => sol.id === id)
     return s ? s.name || id : id
   }
 
-  const visibleSolutions = solutions.filter((s) =>
-    isEntityVisible("solution", s.id),
-  )
+  const visibleSolutions = solutions.filter((s) => isEntityVisible("solution", s.id))
 
   useEffect(() => {
     if (
@@ -834,16 +854,10 @@ export function SolutionsPage() {
 
   const handleSolutionEditingChange = (id: string, isEditing: boolean) => {
     setEditingSolutionId((current) => {
-      if (isEditing) {
-        return id
-      }
+      if (isEditing) return id
       return current === id ? null : current
     })
-    if (
-      !isEditing &&
-      id === returnSolutionIdRef.current &&
-      returnToRef.current
-    ) {
+    if (!isEditing && id === returnSolutionIdRef.current && returnToRef.current) {
       const route = returnToRef.current
       returnToRef.current = null
       returnSolutionIdRef.current = null
@@ -861,6 +875,8 @@ export function SolutionsPage() {
       ...collection,
       refs: [...collection.refs, { kind: "solution" as const, id: s.id }],
     })
+    selectSolution(s.id)
+    setAutoAddComponentId(s.id)
   }
 
   const addSolution = () => {
@@ -868,23 +884,21 @@ export function SolutionsPage() {
       const plane = planes.find((p) => p.id === activePlaneId)
       const col = plane?.elements.find((e) => e.id === activeCollectionId)
       if (col && col.type === "collection") {
-        doAddSolution({ planeId: activePlaneId, collectionId: activeCollectionId, collection: col as CanvasCollectionElement })
+        doAddSolution({
+          planeId: activePlaneId,
+          collectionId: activeCollectionId,
+          collection: col as CanvasCollectionElement,
+        })
         return
       }
     }
     setCollectionModalOpen(true)
   }
 
-  // Auto-create solution + link to collection when navigated from action bubble
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run once on pendingCollectionLink change
   useEffect(() => {
-    if (!pendingCollectionLink || pendingCollectionLink.kind !== "solution") {
-      return
-    }
-    if (
-      processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)
-    ) {
-      return
-    }
+    if (!pendingCollectionLink || pendingCollectionLink.kind !== "solution") return
+    if (processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)) return
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
     const { collectionId, planeId, processAttachment, returnTo } = pendingCollectionLink
@@ -892,6 +906,8 @@ export function SolutionsPage() {
 
     const s = newSolution()
     setSolutions((prev) => [...prev, s])
+    setSelectedSolutionId(s.id)
+    setAutoAddComponentId(s.id)
 
     if (returnTo) {
       returnToRef.current = returnTo
@@ -925,14 +941,12 @@ export function SolutionsPage() {
     if (plane) {
       const col = plane.elements.find((e) => e.id === collectionId)
       if (col && col.type === "collection") {
-        const updated = {
+        updateElement(planeId, {
           ...col,
           refs: [...col.refs, { kind: "solution" as const, id: s.id }],
-        }
-        updateElement(planeId, updated)
+        })
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingCollectionLink,
     planes,
@@ -952,10 +966,7 @@ export function SolutionsPage() {
       ...original,
       id: crypto.randomUUID(),
       name: `Copy of ${original.name}`,
-      components: original.components.map((c) => ({
-        ...c,
-        id: crypto.randomUUID(),
-      })),
+      components: original.components.map((c) => ({ ...c, id: crypto.randomUUID() })),
     }
     setSolutions((prev) => [...prev, copied])
     const owner = getEntityCollection("solution", id)
@@ -979,10 +990,7 @@ export function SolutionsPage() {
       modals.open({
         title: "Cannot delete solution",
         children: (
-          <DependencyBlockModal
-            itemName={sol?.name ?? id}
-            dependents={dependents}
-          />
+          <DependencyBlockModal itemName={sol?.name ?? id} dependents={dependents} />
         ),
       })
       return
@@ -999,173 +1007,154 @@ export function SolutionsPage() {
       onConfirm: () => {
         setSolutions((prev) => prev.filter((s) => s.id !== id))
         removeCollectionRefs("solution", [id])
-        if (id === selectedSolutionId) {
-          selectSolution(null)
-        }
+        if (id === selectedSolutionId) selectSolution(null)
       },
     })
   }
 
+  const sharedCardProps = {
+    groupedComponentOptions,
+    solutionIdSet,
+    solventIdSet,
+    materialUnitById,
+    getMaterialName,
+    getSolutionName,
+    componentColorMap,
+    onEditingChange: handleSolutionEditingChange,
+  }
+
   return (
     <>
-    <Container fluid>
-      <Group justify="space-between" mb="md" mt="md">
-        <Title order={2}>Solutions</Title>
-        <Button
-          leftSection={<IconPlus size={16} />}
-          onClick={addSolution}
-        >
-          New Solution
-        </Button>
-      </Group>
+      <Container fluid>
+        <Group justify="space-between" mb="md" mt="md">
+          <Title order={2}>Solutions</Title>
+          <Button leftSection={<IconPlus size={16} />} onClick={addSolution}>
+            New Solution
+          </Button>
+        </Group>
 
-      {visibleSolutions.length === 0 && (
-        <Text c="dimmed">
-          {solutions.length === 0
-            ? 'No solutions yet. Click "New Solution" to get started.'
-            : "No solutions in the selected collection."}
-        </Text>
-      )}
+        {visibleSolutions.length === 0 && (
+          <Text c="dimmed">
+            {solutions.length === 0
+              ? 'No solutions yet. Click "New Solution" to get started.'
+              : "No solutions in the selected collection."}
+          </Text>
+        )}
 
-      <Stack gap={0}>
-        {(() => {
-          if (!activePlaneId) {
-            // General mode: group by plane
-            const groups = new Map<
-              string,
-              { planeName: string; items: typeof visibleSolutions }
-            >()
-            const orphans: typeof visibleSolutions = []
-            for (const solution of visibleSolutions) {
-              const plane = getEntityPlane("solution", solution.id)
-              if (plane) {
-                const group = groups.get(plane.id)
-                if (group) {
-                  group.items.push(solution)
+        <Stack gap={0}>
+          {(() => {
+            if (!activePlaneId) {
+              const groups = new Map<
+                string,
+                { planeName: string; items: typeof visibleSolutions }
+              >()
+              const orphans: typeof visibleSolutions = []
+              for (const solution of visibleSolutions) {
+                const plane = getEntityPlane("solution", solution.id)
+                if (plane) {
+                  const group = groups.get(plane.id)
+                  if (group) {
+                    group.items.push(solution)
+                  } else {
+                    groups.set(plane.id, { planeName: plane.name, items: [solution] })
+                  }
                 } else {
-                  groups.set(plane.id, {
-                    planeName: plane.name,
-                    items: [solution],
-                  })
+                  orphans.push(solution)
                 }
-              } else {
-                orphans.push(solution)
               }
-            }
-            const sections: React.ReactNode[] = []
-            for (const [planeId, { planeName, items }] of groups) {
-              sections.push(
-                <Text
-                  key={`plane-header-${planeId}`}
-                  size="xs"
-                  fw={700}
-                  c="dimmed"
-                  tt="uppercase"
-                  mt="md"
-                  mb={4}
-                  px={4}
-                >
-                  {planeName}
-                </Text>,
-              )
-              sections.push(
-                ...items.map((solution) => (
-                  <SolutionCard
-                    key={solution.id}
-                    solution={solution}
-                    onUpdate={updateSolution}
-                    onDelete={() => deleteSolution(solution.id)}
-                    onCopy={() => copySolution(solution.id)}
-                    materialOptions={materialOptions}
-                    materialUnitById={materialUnitById}
-                    getMaterialName={getMaterialName}
-                    allSolutionOptions={allSolutionOptions}
-                    getSolutionName={getSolutionName}
-                    materialColorMap={materialColorMap}
-                    solutionColorMap={solutionColorMap}
-                    collectionColor={
-                      getEntityColor("solution", solution.id) ?? undefined
-                    }
-                    isSelected={selectedSolutionId === solution.id}
-                    onSelect={selectSolution}
-                    onEditingChange={handleSolutionEditingChange}
-                  />
-                )),
-              )
-            }
-            if (orphans.length > 0) {
-              sections.push(
-                <Text
-                  key="plane-header-orphan"
-                  size="xs"
-                  fw={700}
-                  c="dimmed"
-                  tt="uppercase"
-                  mt="md"
-                  mb={4}
-                  px={4}
-                >
-                  Unassigned
-                </Text>,
-              )
-              sections.push(
-                ...orphans.map((solution) => (
-                  <SolutionCard
-                    key={solution.id}
-                    solution={solution}
-                    onUpdate={updateSolution}
-                    onDelete={() => deleteSolution(solution.id)}
-                    onCopy={() => copySolution(solution.id)}
-                    materialOptions={materialOptions}
-                    materialUnitById={materialUnitById}
-                    getMaterialName={getMaterialName}
-                    allSolutionOptions={allSolutionOptions}
-                    getSolutionName={getSolutionName}
-                    materialColorMap={materialColorMap}
-                    solutionColorMap={solutionColorMap}
-                    collectionColor={
-                      getEntityColor("solution", solution.id) ?? undefined
-                    }
-                    isSelected={selectedSolutionId === solution.id}
-                    onSelect={selectSolution}
-                    onEditingChange={handleSolutionEditingChange}
-                  />
-                )),
-              )
-            }
-            return sections
-          }
-          return visibleSolutions.map((solution) => (
-            <SolutionCard
-              key={solution.id}
-              solution={solution}
-              onUpdate={updateSolution}
-              onDelete={() => deleteSolution(solution.id)}
-              onCopy={() => copySolution(solution.id)}
-              materialOptions={materialOptions}
-              materialUnitById={materialUnitById}
-              getMaterialName={getMaterialName}
-              allSolutionOptions={allSolutionOptions}
-              getSolutionName={getSolutionName}
-              materialColorMap={materialColorMap}
-              solutionColorMap={solutionColorMap}
-              collectionColor={
-                getEntityColor("solution", solution.id) ?? undefined
+              const sections: React.ReactNode[] = []
+              for (const [planeId, { planeName, items }] of groups) {
+                sections.push(
+                  <Text
+                    key={`plane-header-${planeId}`}
+                    size="xs"
+                    fw={700}
+                    c="dimmed"
+                    tt="uppercase"
+                    mt="md"
+                    mb={4}
+                    px={4}
+                  >
+                    {planeName}
+                  </Text>,
+                )
+                sections.push(
+                  ...items.map((solution) => (
+                    <SolutionCard
+                      key={solution.id}
+                      solution={solution}
+                      onUpdate={updateSolution}
+                      onDelete={() => deleteSolution(solution.id)}
+                      onCopy={() => copySolution(solution.id)}
+                      {...sharedCardProps}
+                      collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+                      isSelected={selectedSolutionId === solution.id}
+                      onSelect={selectSolution}
+                      autoAddComponent={autoAddComponentId === solution.id}
+                      onAutoAdded={() => setAutoAddComponentId(null)}
+                    />
+                  )),
+                )
               }
-              isSelected={selectedSolutionId === solution.id}
-              onSelect={selectSolution}
-              onEditingChange={handleSolutionEditingChange}
-            />
-          ))
-        })()}
-      </Stack>
-    </Container>
-    <SelectCollectionModal
-      opened={collectionModalOpen}
-      onClose={() => setCollectionModalOpen(false)}
-      onConfirm={doAddSolution}
-      confirmLabel="Add Solution"
-    />
-  </>
+              if (orphans.length > 0) {
+                sections.push(
+                  <Text
+                    key="plane-header-orphan"
+                    size="xs"
+                    fw={700}
+                    c="dimmed"
+                    tt="uppercase"
+                    mt="md"
+                    mb={4}
+                    px={4}
+                  >
+                    Unassigned
+                  </Text>,
+                )
+                sections.push(
+                  ...orphans.map((solution) => (
+                    <SolutionCard
+                      key={solution.id}
+                      solution={solution}
+                      onUpdate={updateSolution}
+                      onDelete={() => deleteSolution(solution.id)}
+                      onCopy={() => copySolution(solution.id)}
+                      {...sharedCardProps}
+                      collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+                      isSelected={selectedSolutionId === solution.id}
+                      onSelect={selectSolution}
+                      autoAddComponent={autoAddComponentId === solution.id}
+                      onAutoAdded={() => setAutoAddComponentId(null)}
+                    />
+                  )),
+                )
+              }
+              return sections
+            }
+            return visibleSolutions.map((solution) => (
+              <SolutionCard
+                key={solution.id}
+                solution={solution}
+                onUpdate={updateSolution}
+                onDelete={() => deleteSolution(solution.id)}
+                onCopy={() => copySolution(solution.id)}
+                {...sharedCardProps}
+                collectionColor={getEntityColor("solution", solution.id) ?? undefined}
+                isSelected={selectedSolutionId === solution.id}
+                onSelect={selectSolution}
+                autoAddComponent={autoAddComponentId === solution.id}
+                onAutoAdded={() => setAutoAddComponentId(null)}
+              />
+            ))
+          })()}
+        </Stack>
+      </Container>
+      <SelectCollectionModal
+        opened={collectionModalOpen}
+        onClose={() => setCollectionModalOpen(false)}
+        onConfirm={doAddSolution}
+        confirmLabel="Add Solution"
+      />
+    </>
   )
 }

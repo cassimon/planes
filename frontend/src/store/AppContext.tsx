@@ -525,7 +525,10 @@ export type SolutionComponent = {
 export type Solution = {
   id: string
   name: string
+  /** Handling instructions before use, e.g. "PVDF 0.22 µm filter before use" */
   handling: string
+  /** Storage conditions, e.g. "N2 Glovebox" */
+  storage?: string
   creationTime: string
   components: SolutionComponent[]
 }
@@ -535,6 +538,7 @@ export function newSolution(): Solution {
     id: crypto.randomUUID(),
     name: "New Solution",
     handling: "",
+    storage: "",
     creationTime: new Date().toISOString(),
     components: [],
   }
