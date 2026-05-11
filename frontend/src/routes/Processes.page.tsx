@@ -29,6 +29,7 @@ import {
   IconLayersIntersect,
   IconPlayerPlay,
   IconPlus,
+  IconRefresh,
   IconRowInsertTop,
   IconSparkles,
   IconSquare,
@@ -137,14 +138,50 @@ function getParameterSections(stepCategory: ProcessStepCategory): {
       deposition: [
         "depositionMethod",
         "substrateTemp",
-        "depositionAtmosphere",
         "depositionParameters",
+        "depositionAtmosphere",
       ],
       annealing: DEFAULT_ANNEALING_KEYS,
       labelOverrides: {},
       placeholderOverrides: {
         depositionParameters: "Rate / Temperature",
       },
+    }
+  }
+
+  if (stepCategory === "wet_deposition") {
+    return {
+      // Two-column SimpleGrid is row-major. This ordering yields:
+      // Left: Deposition Method, Deposition Parameters, Deposition Atmosphere
+      // Right: Solution Volume, Substrate Temperature, Drying/Quenching
+      deposition: [
+        "depositionMethod",
+        "solutionVolume",
+        "depositionParameters",
+        "substrateTemp",
+        "depositionAtmosphere",
+        "dryingMethod",
+      ],
+      annealing: DEFAULT_ANNEALING_KEYS,
+      labelOverrides: {},
+      placeholderOverrides: {},
+    }
+  }
+
+  if (stepCategory === "surface_treatment") {
+    return {
+      // Surface treatment reuses the same layout pattern as wet deposition.
+      deposition: [
+        "depositionMethod",
+        "solutionVolume",
+        "depositionParameters",
+        "substrateTemp",
+        "depositionAtmosphere",
+        "dryingMethod",
+      ],
+      annealing: DEFAULT_ANNEALING_KEYS,
+      labelOverrides: {},
+      placeholderOverrides: {},
     }
   }
 
@@ -323,17 +360,61 @@ function getMaterialTypeStr(step: ProcessStep, materials: Material[]): string {
   return ""
 }
 
-function isPerovskitePrecursor(step: ProcessStep, materials: Material[]): boolean {
-  return getMaterialTypeStr(step, materials).includes("perovskite")
+function getSolidComponents(
+  solutionId: string,
+  materials: Material[],
+  solutions: Solution[],
+): Material[] {
+  const sol = solutions.find((s) => s.id === solutionId)
+  if (!sol?.components?.length) return []
+  return sol.components
+    .map((comp) => materials.find((m) => m.id === comp.materialId))
+    .filter((mat): mat is Material => Boolean(mat))
+    .filter((mat) => mat.type?.toLowerCase() !== "solvent" && mat.stateAtRt === "solid")
 }
 
-function getDefaultLayerType(step: ProcessStep, materials: Material[]): string {
-  const t = getMaterialTypeStr(step, materials)
-  if (t.includes("n-type") || t.includes("etl")) return "ETL"
-  if (t.includes("p-type") || t.includes("htl")) return "HTL"
-  if (t.includes("perovskite")) return "absorber"
-  if (t.includes("conductor") || t.includes("contact")) return "contact"
-  if (t.includes("semiconductor")) return "absorber"
+function isPerovskitePrecursor(
+  step: ProcessStep,
+  materials: Material[],
+  solutions: Solution[],
+): boolean {
+  if (step.materialId) {
+    return getMaterialTypeStr(step, materials).includes("perovskite")
+  }
+  if (step.solutionId) {
+    return getSolidComponents(step.solutionId, materials, solutions).some((mat) =>
+      mat.type?.toLowerCase().includes("perovskite"),
+    )
+  }
+  return false
+}
+
+function getDefaultLayerType(
+  step: ProcessStep,
+  materials: Material[],
+  solutions: Solution[],
+): string {
+  if (step.materialId) {
+    const t = getMaterialTypeStr(step, materials)
+    if (t.includes("n-type") || t.includes("etl")) return "ETL"
+    if (t.includes("p-type") || t.includes("htl")) return "HTL"
+    if (t.includes("perovskite")) return "absorber"
+    if (t.includes("conductor") || t.includes("contact")) return "contact"
+    if (t.includes("semiconductor")) return "absorber"
+    return "interlayer"
+  }
+  if (step.solutionId) {
+    const solids = getSolidComponents(step.solutionId, materials, solutions)
+    // Perovskite precursor takes highest priority
+    if (solids.some((mat) => mat.type?.toLowerCase().includes("perovskite"))) return "absorber"
+    for (const mat of solids) {
+      const t = mat.type?.toLowerCase() ?? ""
+      if (t.includes("n-type") || t.includes("etl")) return "ETL"
+      if (t.includes("p-type") || t.includes("htl")) return "HTL"
+      if (t.includes("conductor") || t.includes("contact")) return "contact"
+      if (t.includes("semiconductor")) return "absorber"
+    }
+  }
   return "interlayer"
 }
 
@@ -372,7 +453,26 @@ function getLayerName(
   }
   if (step.solutionId) {
     const sol = solutions.find((s) => s.id === step.solutionId)
-    return sol?.name || "Unnamed Solution"
+    if (sol?.components?.length) {
+      const solidNames = Array.from(
+        new Set(
+          sol.components
+            .map((comp) => materials.find((m) => m.id === comp.materialId))
+            .filter((mat): mat is Material => Boolean(mat))
+            .filter((mat) => mat.type !== "solvent")
+            .filter(
+              (mat) =>
+                mat.stateAtRt === "solid" ||
+                (mat.category ?? "chemical_compound") === "substrate_material",
+            )
+            .map((mat) => mat.name || mat.inventoryLabel || mat.casNumber || mat.id),
+        ),
+      )
+      if (solidNames.length > 0) {
+        return solidNames.join(", ")
+      }
+    }
+    return step.depositionMethod?.value?.trim() || step.name || "Unnamed"
   }
   // Fallback to deposition method
   return step.depositionMethod?.value?.trim() || step.name || "Unnamed"
@@ -483,7 +583,7 @@ function generateStackCombinations(
       type MergedEntry = { step: ProcessStep; name: string; isPerovskite: boolean }
       const merged: MergedEntry[] = []
       for (const step of includedSteps) {
-        const isPero = isPerovskitePrecursor(step, materials)
+        const isPero = isPerovskitePrecursor(step, materials, solutions)
         if (isPero && merged.length > 0 && merged[merged.length - 1].isPerovskite) {
           // absorb into previous perovskite group (keep first step's color)
         } else {
@@ -501,7 +601,7 @@ function generateStackCombinations(
           name: entry.name,
           color: entry.step.color,
           isSubstrate: false,
-          layerType: getDefaultLayerType(entry.step, materials),
+          layerType: getDefaultLayerType(entry.step, materials, solutions),
           thicknessNm: "",
           bandgapEv: "",
           perovskiteA: "",
@@ -527,14 +627,43 @@ type ResultingStacksProps = {
   onLayerChange: (stackIdx: number, layerIdx: number, field: keyof StackLayer, value: string) => void
   onDelete: (combination: number) => void
   onRecover: (combination: number) => void
+  onRefresh: () => void
 }
 
-function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete, onRecover }: ResultingStacksProps) {
+function ResultingStacks({
+  stacks,
+  deletedCombinations,
+  onLayerChange,
+  onDelete,
+  onRecover,
+  onRefresh,
+}: ResultingStacksProps) {
   const LAYER_HEIGHT = 42
   const PEROVSKITE_LAYER_HEIGHT = 92
   const PEROVSKITE_EDIT_LAYER_HEIGHT = 124
   const SUBSTRATE_HEIGHT = 50
   const [editingLayerKey, setEditingLayerKey] = useState<string | null>(null)
+  const [expandedFields, setExpandedFields] = useState<Record<string, { thickness: boolean; bandgap: boolean }>>({})
+
+  const toggleExpandedField = (layerKey: string, field: "thickness" | "bandgap") => {
+    setExpandedFields((prev) => ({
+      ...prev,
+      [layerKey]: { ...(prev[layerKey] ?? { thickness: false, bandgap: false }), [field]: true },
+    }))
+  }
+
+  const addParamButtonStyle: React.CSSProperties = {
+    background: "none",
+    border: "1px dashed #ced4da",
+    borderRadius: 4,
+    color: "#868e96",
+    fontSize: 9,
+    padding: "2px 4px",
+    cursor: "pointer",
+    width: "100%",
+    textAlign: "center" as const,
+    lineHeight: "1.4",
+  }
 
   const sideInputStyle: React.CSSProperties = {
     fontSize: 11,
@@ -565,9 +694,16 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
 
   return (
     <Box onClick={() => setEditingLayerKey(null)}>
-      <Text size="sm" fw={600} mb="md">
-        Generated Device Stacks ({activeStacks.length} combination{activeStacks.length !== 1 ? "s" : ""})
-      </Text>
+      <Group justify="space-between" align="center" mb="md">
+        <Text size="sm" fw={600}>
+          Generated Device Stacks ({activeStacks.length} combination{activeStacks.length !== 1 ? "s" : ""})
+        </Text>
+        <Tooltip label="Refresh generated stacks" withArrow>
+          <ActionIcon size="sm" variant="subtle" color="blue" onClick={onRefresh}>
+            <IconRefresh size={14} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
       <Group gap="xl" wrap="wrap" align="flex-start">
         {activeStacks.map((stack) => {
           const stackIdx = stacks.indexOf(stack)
@@ -694,31 +830,60 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                           width: 96,
                           flexShrink: 0,
                           display: "flex",
-                          alignItems: "center",
+                          flexDirection: "column",
                           gap: 4,
                         }}
                       >
-                        <Text
-                          size="10px"
-                          c="dimmed"
-                          fw={700}
-                          style={{ width: 14, flexShrink: 0, textAlign: "right" }}
-                        >
-                          {depositIndex}
-                        </Text>
-                        <select
-                          value={layer.layerType}
-                          onChange={(e) =>
-                            onLayerChange(stackIdx, layerIdx, "layerType", e.currentTarget.value)
-                          }
-                          style={{ ...sideInputStyle, flex: 1 }}
-                        >
-                          {LAYER_TYPE_OPTIONS.map((opt) => (
-                            <option key={opt} value={opt}>
-                              {opt}
-                            </option>
+                        <Box style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <Text
+                            size="10px"
+                            c="dimmed"
+                            fw={700}
+                            style={{ width: 14, flexShrink: 0, textAlign: "right" }}
+                          >
+                            {depositIndex}
+                          </Text>
+                          <select
+                            value={layer.layerType}
+                            onChange={(e) =>
+                              onLayerChange(stackIdx, layerIdx, "layerType", e.currentTarget.value)
+                            }
+                            style={{ ...sideInputStyle, flex: 1 }}
+                          >
+                            {LAYER_TYPE_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        </Box>
+                        {isPerovskiteLayer &&
+                          ((!!layer.bandgapEv || expandedFields[layerKey]?.bandgap) ? (
+                            <>
+                              <Text size="9px" c="dimmed" ta="left">
+                                Eg (eV)
+                              </Text>
+                              <input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={layer.bandgapEv ?? ""}
+                                onChange={(e) =>
+                                  onLayerChange(stackIdx, layerIdx, "bandgapEv", e.currentTarget.value)
+                                }
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="—"
+                                style={{ ...sideInputStyle, textAlign: "right" }}
+                              />
+                            </>
+                          ) : (
+                            <button
+                              style={addParamButtonStyle}
+                              onClick={(e) => { e.stopPropagation(); toggleExpandedField(layerKey, "bandgap") }}
+                            >
+                              + Eg
+                            </button>
                           ))}
-                        </select>
                       </Box>
 
                       {/* Center: colored bar with editable name */}
@@ -754,7 +919,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                               </ActionIcon>
                             </Box>
                             <Text size="10px" c="white" fw={700} ta="center" style={{ opacity: 0.9, marginTop: -4 }}>
-                              Perovskite ABX_3
+                              Perovskite ABX3
                             </Text>
                             <Box style={{ display: "flex", gap: 4 }}>
                               <Box style={{ flex: 1 }}>
@@ -763,6 +928,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                 </Text>
                                 <input
                                   type="text"
+                                  list={`pvk-a-${stack.combination}-${layerIdx}`}
                                   value={layer.perovskiteA}
                                   onChange={(e) =>
                                     onLayerChange(stackIdx, layerIdx, "perovskiteA", e.currentTarget.value)
@@ -770,6 +936,9 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                   onClick={(e) => e.stopPropagation()}
                                   style={inLayerFieldInputStyle}
                                 />
+                                <datalist id={`pvk-a-${stack.combination}-${layerIdx}`}>
+                                  <option value="Cs0.1FA0.9" />
+                                </datalist>
                               </Box>
                               <Box style={{ flex: 1 }}>
                                 <Text size="9px" c="white" fw={600} style={{ opacity: 0.85, marginBottom: 2 }}>
@@ -777,6 +946,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                 </Text>
                                 <input
                                   type="text"
+                                  list={`pvk-b-${stack.combination}-${layerIdx}`}
                                   value={layer.perovskiteB}
                                   onChange={(e) =>
                                     onLayerChange(stackIdx, layerIdx, "perovskiteB", e.currentTarget.value)
@@ -784,6 +954,9 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                   onClick={(e) => e.stopPropagation()}
                                   style={inLayerFieldInputStyle}
                                 />
+                                <datalist id={`pvk-b-${stack.combination}-${layerIdx}`}>
+                                  <option value="Sn0.2Pb0.8" />
+                                </datalist>
                               </Box>
                               <Box style={{ flex: 1 }}>
                                 <Text size="9px" c="white" fw={600} style={{ opacity: 0.85, marginBottom: 2 }}>
@@ -791,6 +964,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                 </Text>
                                 <input
                                   type="text"
+                                  list={`pvk-x-${stack.combination}-${layerIdx}`}
                                   value={layer.perovskiteX}
                                   onChange={(e) =>
                                     onLayerChange(stackIdx, layerIdx, "perovskiteX", e.currentTarget.value)
@@ -798,6 +972,9 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                                   onClick={(e) => e.stopPropagation()}
                                   style={inLayerFieldInputStyle}
                                 />
+                                <datalist id={`pvk-x-${stack.combination}-${layerIdx}`}>
+                                  <option value="I0.75BR0.25" />
+                                </datalist>
                               </Box>
                             </Box>
                           </Box>
@@ -810,7 +987,7 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                               ta="center"
                               style={{ textShadow: "0 1px 2px rgba(0,0,0,0.3)" }}
                             >
-                              Perovskite ABX_3
+                              Perovskite ABX3
                             </Text>
                             <Text
                               size="xs"
@@ -859,37 +1036,27 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                         )}
                       </Box>
 
-                      {/* Right: thickness (nm) + perovskite bandgap */}
+                      {/* Right: thickness (nm) */}
                       <Box style={{ width: 92, flexShrink: 0 }}>
-                        <input
-                          type="number"
-                          min={0}
-                          value={layer.thicknessNm}
-                          onChange={(e) =>
-                            onLayerChange(stackIdx, layerIdx, "thicknessNm", e.currentTarget.value)
-                          }
-                          onClick={(e) => e.stopPropagation()}
-                          placeholder="—"
-                          style={{ ...sideInputStyle, textAlign: "right" }}
-                        />
-                        {isPerovskiteLayer && (
-                          <>
-                            <Text size="9px" c="dimmed" mt={4} mb={2} ta="left">
-                              Bandgap (eV)
-                            </Text>
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.01"
-                              value={layer.bandgapEv ?? ""}
-                              onChange={(e) =>
-                                onLayerChange(stackIdx, layerIdx, "bandgapEv", e.currentTarget.value)
-                              }
-                              onClick={(e) => e.stopPropagation()}
-                              placeholder="—"
-                              style={{ ...sideInputStyle, textAlign: "right" }}
-                            />
-                          </>
+                        {(!!layer.thicknessNm || expandedFields[layerKey]?.thickness) ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={layer.thicknessNm}
+                            onChange={(e) =>
+                              onLayerChange(stackIdx, layerIdx, "thicknessNm", e.currentTarget.value)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            placeholder="—"
+                            style={{ ...sideInputStyle, textAlign: "right" }}
+                          />
+                        ) : (
+                          <button
+                            style={addParamButtonStyle}
+                            onClick={(e) => { e.stopPropagation(); toggleExpandedField(layerKey, "thickness") }}
+                          >
+                            + nm
+                          </button>
                         )}
                       </Box>
                         </>
@@ -899,6 +1066,27 @@ function ResultingStacks({ stacks, deletedCombinations, onLayerChange, onDelete,
                   )
                 })}
               </Box>
+
+              {/* Param count badge */}
+              {(() => {
+                const paramCount = stack.layers
+                  .filter((l) => !l.isSubstrate)
+                  .reduce((acc, l) => {
+                    if (l.thicknessNm) acc++
+                    if (l.bandgapEv) acc++
+                    if (l.perovskiteA) acc++
+                    if (l.perovskiteB) acc++
+                    if (l.perovskiteX) acc++
+                    return acc
+                  }, 0)
+                return paramCount > 0 ? (
+                  <Box mt="xs" style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <Badge size="xs" variant="light" color="teal">
+                      + {paramCount} param{paramCount !== 1 ? "s" : ""}
+                    </Badge>
+                  </Box>
+                ) : null
+              })()}
             </Paper>
           )
         })}
@@ -991,6 +1179,8 @@ export function ProcessesPage() {
   const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [isExportingDocx, setIsExportingDocx] = useState(false)
   const [substrateSelectingIdx, setSubstrateSelectingIdx] = useState<number | null>(null)
+  const processNameInputRef = useRef<HTMLInputElement | null>(null)
+  const [pendingSelectProcessNameId, setPendingSelectProcessNameId] = useState<string | null>(null)
   const processedPendingRequestIdsRef = useRef<Set<string>>(new Set())
   const stackInvalidationByProcessRef = useRef<Map<string, string>>(new Map())
   const [collectionModalOpen, setCollectionModalOpen] = useState(false)
@@ -1021,6 +1211,7 @@ export function ProcessesPage() {
     setProcesses((prev) => [...prev, proc])
     selectProcess(proc.id)
     setSelectedStepId(null)
+    setPendingSelectProcessNameId(proc.id)
 
     // Link back to collection
     const plane = planes.find((p) => p.id === planeId)
@@ -1163,6 +1354,18 @@ export function ProcessesPage() {
     return null
   }, [selectedProcess, selectedStepId])
 
+  useEffect(() => {
+    if (!selectedProcess || pendingSelectProcessNameId !== selectedProcess.id) return
+    const raf = window.requestAnimationFrame(() => {
+      const input = processNameInputRef.current
+      if (!input) return
+      input.focus()
+      input.select()
+    })
+    setPendingSelectProcessNameId(null)
+    return () => window.cancelAnimationFrame(raf)
+  }, [pendingSelectProcessNameId, selectedProcess])
+
   const selectedStepStagePos = useMemo(() => {
     if (!selectedProcess || !selectedStepId) return null
     const stagePos = selectedProcess.stages.findIndex((stage) =>
@@ -1176,6 +1379,7 @@ export function ProcessesPage() {
     setProcesses((prev) => [...prev, newProc])
     selectProcess(newProc.id)
     setSelectedStepId(null)
+    setPendingSelectProcessNameId(newProc.id)
     updateElement(planeId, {
       ...collection,
       refs: [...collection.refs, { kind: "process" as const, id: newProc.id }],
@@ -1931,6 +2135,27 @@ export function ProcessesPage() {
     [visibleMaterialOptions, visibleSolutionOptions],
   )
 
+  const wetDepositionSourceOptions = useMemo(
+    () => [
+      ...visibleSolutionOptions.map((option) => ({
+        ...option,
+        label: `Solution: ${option.label}`,
+      })),
+      ...materials
+        .filter((material) => isEntityVisible("material", material.id))
+        .filter((material) => (material.category ?? "chemical_compound") !== "substrate_material")
+        .filter((material) => material.stateAtRt === "liquid")
+        .map((material) => ({
+          value: `material:${material.id}`,
+          label: `Material: ${material.name || "Unnamed material"}`,
+        })),
+      { value: NEW_CHEMICAL_OPTION, label: "Add New Chemical" },
+      { value: NEW_COMMERCIAL_MIXTURE_OPTION, label: "Add New Com. Mixture" },
+      { value: NEW_SOLUTION_OPTION, label: "Add New Solution" },
+    ],
+    [isEntityVisible, materials, visibleSolutionOptions],
+  )
+
   const getStepSourceValue = useCallback((step: ProcessStep) => {
     if (step.materialId) {
       return `material:${step.materialId}`
@@ -2466,6 +2691,7 @@ export function ProcessesPage() {
             {/* Header */}
             <Group justify="space-between" p="md" pb={0}>
               <TextInput
+                ref={processNameInputRef}
                 placeholder="Process name"
                 value={selectedProcess.name}
                 onChange={(e) => handleUpdateProcessName(e.currentTarget.value)}
@@ -2925,7 +3151,7 @@ export function ProcessesPage() {
                                             {selectedStepId === step.id ? (
                                               <TextInput
                                                 size="xs"
-                                                placeholder="Step name"
+                                                placeholder="Deposition method"
                                                 autoFocus={pendingFocusStepId === step.id}
                                                 value={step.depositionMethod?.value ?? ""}
                                                 onClick={(e) => e.stopPropagation()}
@@ -2998,7 +3224,12 @@ export function ProcessesPage() {
                                               size="xs"
                                               placeholder="Select material"
                                               value={getStepSourceValue(step)}
-                                              data={sourceOptions}
+                                              data={
+                                                step.stepCategory === "wet_deposition" ||
+                                                step.stepCategory === "surface_treatment"
+                                                  ? wetDepositionSourceOptions
+                                                  : sourceOptions
+                                              }
                                               searchable
                                               clearable
                                               comboboxProps={{ withinPortal: false }}
@@ -3193,6 +3424,7 @@ export function ProcessesPage() {
                             onLayerChange={handleUpdateStackLayer}
                             onDelete={handleDeleteStack}
                             onRecover={handleRecoverStack}
+                            onRefresh={handleGenerateStacks}
                           />
                         </Box>
 

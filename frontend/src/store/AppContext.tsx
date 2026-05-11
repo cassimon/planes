@@ -234,7 +234,7 @@ export const PROCESS_PARAMETER_DEFINITIONS: ReadonlyArray<{
   },
   {
     key: "depositionParameters",
-    label: "Deposition Parameters (spin / blade coating speed etc.)",
+    label: "Deposition Parameters",
     placeholder: "e.g. 4000 rpm for 30 s",
   },
   {
