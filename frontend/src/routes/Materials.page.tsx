@@ -284,6 +284,15 @@ export function MaterialsPage() {
   const [pubChemImportingCid, setPubChemImportingCid] = useState<string | null>(
     null,
   )
+  const [pubChemCidSearchingId, setPubChemCidSearchingId] = useState<string | null>(
+    null,
+  )
+  const [pubChemUpdateField, setPubChemUpdateField] = useState<
+    "casNumber" | "stateAtRt" | null
+  >(null)
+  const [pubChemUpdateMaterialId, setPubChemUpdateMaterialId] = useState<
+    string | null
+  >(null)
 
   const selectMaterial = (id: string | null) => {
     setSelectedMaterialId(id)
@@ -554,9 +563,28 @@ export function MaterialsPage() {
 
   const openPubChemImporter = (category: MaterialCategory) => {
     setPubChemCategory(category)
+    setPubChemUpdateField(null)
+    setPubChemUpdateMaterialId(null)
     setPubChemModalOpen(true)
     setPubChemError(null)
     setPubChemResults([])
+    setPubChemQuery("")
+  }
+
+  const openFieldSearchModal = (
+    material: Material,
+    field: "casNumber" | "stateAtRt",
+  ) => {
+    const name =
+      editBuffer && editBuffer.id === material.id
+        ? (editBuffer.name ?? "").trim()
+        : (material.name ?? "").trim()
+    setPubChemUpdateField(field)
+    setPubChemUpdateMaterialId(material.id)
+    setPubChemQuery(name)
+    setPubChemResults([])
+    setPubChemError(null)
+    setPubChemModalOpen(true)
   }
 
   const searchPubChem = async () => {
@@ -623,6 +651,37 @@ export function MaterialsPage() {
     }
   }
 
+  const applyFieldFromPubChem = async (result: PubChemResult) => {
+    const field = pubChemUpdateField
+    const materialId = pubChemUpdateMaterialId
+    if (!field || !materialId) return
+
+    setPubChemImportingCid(result.cid)
+    try {
+      const detailRes = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/${result.cid}/JSON`,
+      )
+      if (!detailRes.ok) throw new Error("PubChem detail fetch failed")
+      const detailData = (await detailRes.json()) as unknown
+      const details = parsePubChemDetails(detailData)
+
+      setEditBuffer((prev) => {
+        if (!prev || prev.id !== materialId) return prev
+        if (field === "casNumber") {
+          return { ...prev, casNumber: details.casNumber }
+        }
+        return { ...prev, stateAtRt: details.stateAtRt }
+      })
+    } catch {
+      // Keep existing value if fetch fails
+    } finally {
+      setPubChemImportingCid(null)
+      setPubChemModalOpen(false)
+      setPubChemUpdateField(null)
+      setPubChemUpdateMaterialId(null)
+    }
+  }
+
   const importPubChemResult = async (result: PubChemResult) => {
     let details: PubChemImportDetails = { casNumber: "", stateAtRt: "" }
 
@@ -664,6 +723,69 @@ export function MaterialsPage() {
     pendingImportRef.current = null
     if (category) {
       doAddMaterial(category, params, overrides ?? undefined)
+    }
+  }
+
+  const searchCidByMaterialName = async (material: Material) => {
+    const typedName =
+      editBuffer && editBuffer.id === material.id
+        ? (editBuffer.name ?? "").trim()
+        : (material.name ?? "").trim()
+
+    if (!typedName) {
+      modals.open({
+        title: "Missing name",
+        children: (
+          <Text size="sm">
+            Please enter a material name first, then try "Search Name..." again.
+          </Text>
+        ),
+      })
+      return
+    }
+
+    setPubChemCidSearchingId(material.id)
+    try {
+      const response = await fetch(
+        `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/${encodeURIComponent(typedName)}/cids/JSON`,
+      )
+      if (!response.ok) {
+        throw new Error("PubChem lookup failed")
+      }
+
+      const data = (await response.json()) as {
+        IdentifierList?: { CID?: number[] }
+      }
+      const cid = data.IdentifierList?.CID?.[0]
+
+      if (!cid) {
+        modals.open({
+          title: "No CID found",
+          children: (
+            <Text size="sm">
+              PubChem did not return a CID for "{typedName}".
+            </Text>
+          ),
+        })
+        return
+      }
+
+      setEditBuffer((prev) =>
+        prev && prev.id === material.id
+          ? { ...prev, pubchemCid: String(cid) }
+          : prev,
+      )
+    } catch {
+      modals.open({
+        title: "PubChem search failed",
+        children: (
+          <Text size="sm">
+            Could not fetch a PubChem CID right now. Please try again.
+          </Text>
+        ),
+      })
+    } finally {
+      setPubChemCidSearchingId(null)
     }
   }
 
@@ -778,6 +900,24 @@ export function MaterialsPage() {
     })
   }
 
+  const toggleSelectAllInCategory = (ids: string[]) => {
+    if (ids.length === 0) return
+    const allSelected = ids.every((id) => selected.has(id))
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allSelected) {
+        for (const id of ids) {
+          next.delete(id)
+        }
+      } else {
+        for (const id of ids) {
+          next.add(id)
+        }
+      }
+      return next
+    })
+  }
+
   const renderCellEditor = (material: Material, colKey: keyof Material) => {
     if (!editBuffer) {
       return null
@@ -809,28 +949,38 @@ export function MaterialsPage() {
     }
     if (colKey === "stateAtRt") {
       return (
-        <NativeSelect
-          size="xs"
-          value={editBuffer.stateAtRt}
-          data={[
-            { label: "", value: "" },
-            { label: "liquid", value: "liquid" },
-            { label: "solid", value: "solid" },
-            { label: "gas", value: "gas" },
-          ]}
-          onChange={(e) => {
-            const value = e.currentTarget.value as Material["stateAtRt"]
-            setEditBuffer((prev) => (prev ? { ...prev, stateAtRt: value } : prev))
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              commitEdit()
-            }
-            if (e.key === "Escape") {
-              cancelEdit(material.id)
-            }
-          }}
-        />
+        <Group gap={6} wrap="nowrap">
+          <NativeSelect
+            size="xs"
+            value={editBuffer.stateAtRt}
+            data={[
+              { label: "", value: "" },
+              { label: "liquid", value: "liquid" },
+              { label: "solid", value: "solid" },
+              { label: "gas", value: "gas" },
+            ]}
+            onChange={(e) => {
+              const value = e.currentTarget.value as Material["stateAtRt"]
+              setEditBuffer((prev) => (prev ? { ...prev, stateAtRt: value } : prev))
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitEdit()
+              }
+              if (e.key === "Escape") {
+                cancelEdit(material.id)
+              }
+            }}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="xs"
+            variant="light"
+            onClick={() => openFieldSearchModal(material, "stateAtRt")}
+          >
+            Search Name...
+          </Button>
+        </Group>
       )
     }
     if (colKey === "substrateRigidity") {
@@ -860,6 +1010,74 @@ export function MaterialsPage() {
         />
       )
     }
+
+    if (colKey === "casNumber") {
+      return (
+        <Group gap={6} wrap="nowrap">
+          <TextInput
+            size="xs"
+            value={String(editBuffer.casNumber ?? "")}
+            onChange={(e) => {
+              const value = e.currentTarget.value
+              setEditBuffer((prev) =>
+                prev ? { ...prev, casNumber: value } : prev,
+              )
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitEdit()
+              }
+              if (e.key === "Escape") {
+                cancelEdit(material.id)
+              }
+            }}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="xs"
+            variant="light"
+            onClick={() => openFieldSearchModal(material, "casNumber")}
+          >
+            Search Name...
+          </Button>
+        </Group>
+      )
+    }
+
+    if (colKey === "pubchemCid") {
+      return (
+        <Group gap={6} wrap="nowrap">
+          <TextInput
+            size="xs"
+            value={String(editBuffer.pubchemCid ?? "")}
+            onChange={(e) => {
+              const value = e.currentTarget.value
+              setEditBuffer((prev) =>
+                prev ? { ...prev, pubchemCid: value } : prev,
+              )
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                commitEdit()
+              }
+              if (e.key === "Escape") {
+                cancelEdit(material.id)
+              }
+            }}
+            style={{ flex: 1 }}
+          />
+          <Button
+            size="xs"
+            variant="light"
+            onClick={() => void searchCidByMaterialName(material)}
+            loading={pubChemCidSearchingId === material.id}
+          >
+            Search Name...
+          </Button>
+        </Group>
+      )
+    }
+
     return (
       <TextInput
         size="xs"
@@ -1020,6 +1238,11 @@ export function MaterialsPage() {
   const renderCategoryTable = (category: MaterialCategory) => {
     const columns = CATEGORY_COLUMNS[category]
     const items = groupedByCategory[category]
+    const itemIds = items.map((item) => item.id)
+    const allSelectedInCategory =
+      itemIds.length > 0 && itemIds.every((id) => selected.has(id))
+    const someSelectedInCategory =
+      !allSelectedInCategory && itemIds.some((id) => selected.has(id))
 
     return (
       <Box key={category}>
@@ -1056,7 +1279,23 @@ export function MaterialsPage() {
             <Table.Thead>
               <Table.Tr>
                 <Table.Th style={{ padding: 0, width: 6 }} />
-                <Table.Th style={{ width: rem(36) }} />
+                <Table.Th style={{ width: rem(36) }}>
+                  <input
+                    type="checkbox"
+                    checked={allSelectedInCategory}
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate = someSelectedInCategory
+                      }
+                    }}
+                    onChange={() => toggleSelectAllInCategory(itemIds)}
+                    title={
+                      allSelectedInCategory
+                        ? "Deselect all"
+                        : "Select all"
+                    }
+                  />
+                </Table.Th>
                 {columns.map((col) => (
                   <Table.Th key={`${category}-${col.key}`}>
                     <UnstyledButton
@@ -1141,8 +1380,16 @@ export function MaterialsPage() {
 
       <Modal
         opened={pubChemModalOpen}
-        onClose={() => setPubChemModalOpen(false)}
-        title={`Import ${CATEGORY_LABEL[pubChemCategory]} from PubChem`}
+        onClose={() => {
+          setPubChemModalOpen(false)
+          setPubChemUpdateField(null)
+          setPubChemUpdateMaterialId(null)
+        }}
+        title={
+          pubChemUpdateField
+            ? `Search PubChem for ${pubChemUpdateField === "casNumber" ? "CAS Number" : "State at RT"}`
+            : `Import ${CATEGORY_LABEL[pubChemCategory]} from PubChem`
+        }
         size="lg"
       >
         <Stack gap="sm">
@@ -1202,10 +1449,14 @@ export function MaterialsPage() {
                       </Box>
                       <Button
                         size="xs"
-                        onClick={() => void importPubChemResult(result)}
+                        onClick={() =>
+                          pubChemUpdateField
+                            ? void applyFieldFromPubChem(result)
+                            : void importPubChemResult(result)
+                        }
                         loading={pubChemImportingCid === result.cid}
                       >
-                        Import
+                        {pubChemUpdateField ? "Select" : "Import"}
                       </Button>
                     </Group>
                   </Box>
