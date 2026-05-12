@@ -1317,11 +1317,11 @@ export default function ExperimentsPage() {
     }
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
-    const { collectionId, planeId } = pendingCollectionLink
+    const { collectionId, planeId, selectedProcessId } = pendingCollectionLink
     setPendingCollectionLink(null)
 
     // Need at least one process to create an experiment
-    const processId = processes[0]?.id
+    const processId = selectedProcessId || processes[0]?.id
     if (!processId) return
 
     const newExp = newExperiment(processId)

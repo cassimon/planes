@@ -1040,6 +1040,276 @@ function ActionBubble({
   )
 }
 
+function ExperimentActionBubble({
+  index,
+  processes,
+  onSelectProcess,
+  onHoverStart,
+  onHoverEnd,
+}: {
+  index: number
+  processes: Array<{ id: string; name: string }>
+  onSelectProcess: (processId: string) => void
+  onHoverStart?: () => void
+  onHoverEnd?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleClose = () => {
+    hideTimerRef.current = setTimeout(() => setOpen(false), 220)
+  }
+  const cancelClose = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+  }
+
+  return (
+    <>
+      <Tooltip label="Add Experiment" position="left" withArrow>
+        <ActionIcon
+          size="md"
+          variant="filled"
+          color="grape"
+          radius="xl"
+          onMouseEnter={() => {
+            cancelClose()
+            setOpen(true)
+            onHoverStart?.()
+          }}
+          onMouseLeave={() => {
+            scheduleClose()
+            onHoverEnd?.()
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerUp={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+          }}
+          style={{
+            position: "absolute",
+            right: -44,
+            top: 4 + index * 36,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            animation: "bubble-in 150ms ease-out",
+            touchAction: "none",
+          }}
+        >
+          <IconPlayerPlay size={16} />
+        </ActionIcon>
+      </Tooltip>
+
+      {open && (
+        <Paper
+          shadow="md"
+          p={6}
+          radius="sm"
+          onMouseEnter={() => {
+            cancelClose()
+            onHoverStart?.()
+          }}
+          onMouseLeave={() => {
+            scheduleClose()
+            onHoverEnd?.()
+          }}
+          style={{
+            position: "absolute",
+            right: -300,
+            top: 4 + index * 36 - 2,
+            zIndex: 210,
+            minWidth: 245,
+          }}
+        >
+          <Stack gap={4}>
+            <Text size="xs" fw={600} c="dimmed">
+              Create experiment from process
+            </Text>
+            {processes.length === 0 ? (
+              <Text size="xs" c="dimmed">
+                No process available yet.
+              </Text>
+            ) : (
+              processes.map((p) => (
+                <Button
+                  key={p.id}
+                  size="compact-xs"
+                  variant="subtle"
+                  color="grape"
+                  styles={{ inner: { justifyContent: "flex-start" } }}
+                  onPointerDown={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
+                    setOpen(false)
+                    onSelectProcess(p.id)
+                  }}
+                >
+                  {p.name || p.id}
+                </Button>
+              ))
+            )}
+          </Stack>
+        </Paper>
+      )}
+    </>
+  )
+}
+
+function ResultsActionBubble({
+  index,
+  groupedExperiments,
+  onSelectExperiment,
+  onHoverStart,
+  onHoverEnd,
+}: {
+  index: number
+  groupedExperiments: Array<{
+    processId: string
+    processName: string
+    experiments: Array<{ id: string; name: string; date: string }>
+  }>
+  onSelectExperiment: (experimentId: string) => void
+  onHoverStart?: () => void
+  onHoverEnd?: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleClose = () => {
+    hideTimerRef.current = setTimeout(() => setOpen(false), 220)
+  }
+  const cancelClose = () => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
+  }
+
+  return (
+    <>
+      <Tooltip label="Add Results" position="left" withArrow>
+        <ActionIcon
+          size="md"
+          variant="filled"
+          color="orange"
+          radius="xl"
+          onMouseEnter={() => {
+            cancelClose()
+            setOpen(true)
+            onHoverStart?.()
+          }}
+          onMouseLeave={() => {
+            scheduleClose()
+            onHoverEnd?.()
+          }}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+          }}
+          onPointerUp={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+            ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+          }}
+          style={{
+            position: "absolute",
+            right: -44,
+            top: 4 + index * 36,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            animation: "bubble-in 150ms ease-out",
+            touchAction: "none",
+          }}
+        >
+          <IconDownload size={16} />
+        </ActionIcon>
+      </Tooltip>
+
+      {open && (
+        <Paper
+          shadow="md"
+          p={6}
+          radius="sm"
+          onMouseEnter={() => {
+            cancelClose()
+            onHoverStart?.()
+          }}
+          onMouseLeave={() => {
+            scheduleClose()
+            onHoverEnd?.()
+          }}
+          style={{
+            position: "absolute",
+            right: -360,
+            top: 4 + index * 36 - 2,
+            zIndex: 210,
+            minWidth: 305,
+            maxHeight: 320,
+          }}
+        >
+          <Stack gap={4}>
+            <Text size="xs" fw={600} c="dimmed">
+              Upload results for experiment
+            </Text>
+            {groupedExperiments.length === 0 ? (
+              <Text size="xs" c="dimmed">
+                No experiment available yet.
+              </Text>
+            ) : (
+              <ScrollArea h={260}>
+                <Stack gap={6}>
+                  {groupedExperiments.map((group) => (
+                    <Stack key={group.processId} gap={4}>
+                      <Text size="xs" fw={600} c="gray.7">
+                        {group.processName}
+                      </Text>
+                      {group.experiments.map((exp) => (
+                        <Button
+                          key={exp.id}
+                          size="compact-xs"
+                          variant="subtle"
+                          color="orange"
+                          styles={{ inner: { justifyContent: "space-between" } }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            setOpen(false)
+                            onSelectExperiment(exp.id)
+                          }}
+                        >
+                          <span>{exp.name || exp.id}</span>
+                          <span style={{ opacity: 0.7 }}>{exp.date || "-"}</span>
+                        </Button>
+                      ))}
+                      <Divider />
+                    </Stack>
+                  ))}
+                </Stack>
+              </ScrollArea>
+            )}
+          </Stack>
+        </Paper>
+      )}
+    </>
+  )
+}
+
 function CollectionEl({
   el,
   planeId,
@@ -1284,6 +1554,28 @@ function CollectionEl({
     navigate({ to: routeForKind[kind] })
   }
 
+  const handleAddExperimentFromProcess = (processId: string) => {
+    setPendingCollectionLink({
+      collectionId: el.id,
+      planeId,
+      kind: "experiment",
+      selectedProcessId: processId,
+      requestId: crypto.randomUUID(),
+    })
+    navigate({ to: routeForKind.experiment })
+  }
+
+  const handleAddResultsForExperiment = (experimentId: string) => {
+    setPendingCollectionLink({
+      collectionId: el.id,
+      planeId,
+      kind: "result",
+      selectedExperimentId: experimentId,
+      requestId: crypto.randomUUID(),
+    })
+    navigate({ to: routeForKind.result })
+  }
+
   const handleRefIconClick = (kind: CollectionRef["kind"]) => {
     setActiveCollectionId(el.id)
     setActivePlaneId(planeId)
@@ -1323,7 +1615,11 @@ function CollectionEl({
     }
     if (kind === "result") {
       const r = results.find((x) => x.id === id)
-      return r ? r.id : id
+      if (!r) {
+        return id
+      }
+      const exp = experiments.find((x) => x.id === r.experimentId)
+      return `Results for experiment ${exp ? exp.name || exp.id : r.experimentId}`
     }
     return id
   }
@@ -1337,6 +1633,37 @@ function CollectionEl({
     { label: "Add Solution", Icon: IconFlask, color: "blue", kind: "solution" },
     { label: "Add Process", Icon: IconStack3, color: "gray", kind: "process" },
   ]
+
+  const processOptions = [...processes]
+    .map((p) => ({ id: p.id, name: p.name || p.id }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const groupedExperiments = [...experiments]
+    .sort((a, b) => {
+      const da = Date.parse(a.date || "")
+      const db = Date.parse(b.date || "")
+      return (Number.isNaN(db) ? 0 : db) - (Number.isNaN(da) ? 0 : da)
+    })
+    .reduce<
+      Array<{
+        processId: string
+        processName: string
+        experiments: Array<{ id: string; name: string; date: string }>
+      }>
+    >((acc, exp) => {
+      const process = processes.find((p) => p.id === exp.processId)
+      const processId = process?.id || "unassigned"
+      const processName = process?.name || "Unassigned Process"
+      const existing = acc.find((g) => g.processId === processId)
+      const payload = { id: exp.id, name: exp.name || exp.id, date: exp.date }
+      if (existing) {
+        existing.experiments.push(payload)
+      } else {
+        acc.push({ processId, processName, experiments: [payload] })
+      }
+      return acc
+    }, [])
+    .sort((a, b) => a.processName.localeCompare(b.processName))
 
   // When dragging, render using fixed positioning so the element appears above
   // the toolbar and plane tabs instead of being clipped by overflow:hidden.
@@ -1623,6 +1950,24 @@ function CollectionEl({
               onHoverEnd={scheduleHoverHide}
             />
           ))}
+          {processOptions.length > 0 && (
+            <ExperimentActionBubble
+              index={3}
+              processes={processOptions}
+              onSelectProcess={handleAddExperimentFromProcess}
+              onHoverStart={activateHover}
+              onHoverEnd={scheduleHoverHide}
+            />
+          )}
+          {experiments.length > 0 && (
+            <ResultsActionBubble
+              index={processOptions.length > 0 ? 4 : 3}
+              groupedExperiments={groupedExperiments}
+              onSelectExperiment={handleAddResultsForExperiment}
+              onHoverStart={activateHover}
+              onHoverEnd={scheduleHoverHide}
+            />
+          )}
         </>
       )}
 
@@ -2661,7 +3006,7 @@ function PlaneCanvas({
           return ref.id
         }
         const exp = experiments.find((x) => x.id === r.experimentId)
-        return `Results${exp ? ` for ${exp.name || exp.id}` : ""}`
+        return `Results for ${exp ? exp.name || exp.id : r.experimentId}`
       }
       return `Analysis ${ref.id}`
     },

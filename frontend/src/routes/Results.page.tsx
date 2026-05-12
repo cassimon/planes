@@ -2499,8 +2499,13 @@ export function ResultsPage() {
     }
     processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
 
-    const { collectionId, planeId } = pendingCollectionLink
+    const { collectionId, planeId, selectedExperimentId } = pendingCollectionLink
     setPendingCollectionLink(null)
+
+    if (selectedExperimentId) {
+      selectExperiment(selectedExperimentId)
+      return
+    }
 
     const plane = planes.find((p) => p.id === planeId)
     const collection = plane?.elements.find((e) => e.id === collectionId)
@@ -2515,6 +2520,7 @@ export function ResultsPage() {
       selectExperiment(linkedExperimentId)
     }
   }, [
+    experiments,
     pendingCollectionLink,
     planes,
     setPendingCollectionLink,

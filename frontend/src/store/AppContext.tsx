@@ -967,6 +967,8 @@ type AppContextValue = {
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    selectedProcessId?: string
+    selectedExperimentId?: string
     materialCategory?: MaterialCategory
     processAttachment?: {
       processId: string
@@ -982,6 +984,8 @@ type AppContextValue = {
       collectionId: string
       planeId: string
       kind: CollectionRef["kind"]
+      selectedProcessId?: string
+      selectedExperimentId?: string
       materialCategory?: MaterialCategory
       processAttachment?: {
         processId: string
@@ -1055,6 +1059,8 @@ export function AppProvider({
     collectionId: string
     planeId: string
     kind: CollectionRef["kind"]
+    selectedProcessId?: string
+    selectedExperimentId?: string
     materialCategory?: MaterialCategory
     processAttachment?: {
       processId: string
