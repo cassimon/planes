@@ -13,6 +13,7 @@ import math
 import uuid
 import yaml
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -59,6 +60,7 @@ from app.models import ExperimentResults
 from app.services.nomad import (
     NomadAuthError,
     NomadUploadError,
+    TEMP_UPLOAD_DIR,
     cleanup_temp_archive,
     create_nomad_metadata_yaml,
     create_secure_zip,
@@ -324,6 +326,30 @@ async def upload_files_for_nomad(
     except Exception as e:
         logger.error(f"Failed to create zip archive: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create archive: {e}")
+
+
+@router.post("/upload/archive/discard")
+async def discard_uploaded_archive(
+    current_user: CurrentUser,
+    archive_path: str = Form(...),
+) -> dict[str, Any]:
+    """Discard a previously created temporary archive from /upload/files."""
+    _require_nomad_upload_authorized(current_user)
+
+    try:
+        candidate = Path(archive_path).resolve()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid archive path") from e
+
+    allowed_root = TEMP_UPLOAD_DIR.resolve()
+    if not str(candidate).startswith(str(allowed_root)):
+        raise HTTPException(status_code=403, detail="Archive path is not allowed")
+
+    deleted = cleanup_temp_archive(candidate)
+    return {
+        "success": deleted,
+        "archive_path": str(candidate),
+    }
 
 
 @router.post("/upload/nomad", response_model=NomadUploadResponse)

@@ -9,7 +9,6 @@ import {
   Divider,
   Group,
   Loader,
-  Modal,
   Paper,
   ScrollArea,
   Select,
@@ -27,9 +26,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconChevronRight,
-  IconClipboard,
   IconCloudUpload,
-  IconDownload,
   IconExternalLink,
   IconFile,
   IconFlask,
@@ -42,6 +39,7 @@ import { OpenAPI } from "../client/core/OpenAPI"
 import { NomadService } from "../client/sdk.gen"
 import type {
   NomadConfigResponse,
+  NomadMetadataPreview,
   NomadUploadRequest,
   NomadUploadResponse,
 } from "../client/types.gen"
@@ -493,11 +491,13 @@ function ExperimentListItem({
   isSelected,
   onSelect,
   collectionColor,
+  hasUnfinishedUpload,
 }: {
   experiment: Experiment
   isSelected: boolean
   onSelect: () => void
   collectionColor?: string
+  hasUnfinishedUpload?: boolean
 }) {
   const status = getExperimentStatus(experiment)
   const statusColor =
@@ -533,6 +533,11 @@ function ExperimentListItem({
             <Badge size="xs" color={statusColor} variant="dot">
               {statusLabel}
             </Badge>
+            {hasUnfinishedUpload && (
+              <Badge size="xs" color="orange" variant="light">
+                Unfinished
+              </Badge>
+            )}
           </Group>
           <Group gap="xs">
             <Text size="xs" c="dimmed">
@@ -820,10 +825,12 @@ function ResultsDetail({
   experiment,
   experimentResults,
   onUpdateResults,
+  onUpdateExperiment,
 }: {
   experiment: Experiment
   experimentResults: ExperimentResults | null
   onUpdateResults: (results: ExperimentResults) => void
+  onUpdateExperiment: (experiment: Experiment) => void
 }) {
   const [expandedSubstrates, setExpandedSubstrates] = useState<Set<string>>(new Set())
   const [expandedUnmatchedGroups, setExpandedUnmatchedGroups] = useState<Set<string>>(new Set())
@@ -841,16 +848,14 @@ function ResultsDetail({
     null,
   )
   const [nomadUploading, setNomadUploading] = useState(false)
-  const [nomadMetadataPreview, setNomadMetadataPreview] = useState<
-    string | null
-  >(null)
-  const [showMetadataModal, setShowMetadataModal] = useState(false)
-  const [fabricationMetadataPreview, setFabricationMetadataPreview] = useState<
-    string | null
-  >(null)
-  const [showFabricationModal, setShowFabricationModal] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [lastArchivePath, setLastArchivePath] = useState<string | null>(null)
+  const [workflowStep, setWorkflowStep] = useState<1 | 2 | 3>(1)
+  const [isResultsCardOpen, setIsResultsCardOpen] = useState(false)
+  const [reviewConfirmed, setReviewConfirmed] = useState(false)
+  const [nomadUploadHistory, setNomadUploadHistory] = useState<
+    Array<{ uploadId: string; entryIds: string[]; uploadTime?: string }>
+  >([])
   const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(
     null,
   )
@@ -875,11 +880,96 @@ function ResultsDetail({
     }
   }, [experiment.id])
 
+  useEffect(() => {
+    try {
+      const key = `nomad_uploads:${experiment.id}`
+      const raw = sessionStorage.getItem(key)
+      if (!raw) {
+        setNomadUploadHistory([])
+        return
+      }
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        setNomadUploadHistory(parsed)
+      }
+    } catch (_e) {
+      setNomadUploadHistory([])
+    }
+  }, [experiment.id])
+
+  useEffect(() => {
+    try {
+      const key = `nomad_uploads:${experiment.id}`
+      sessionStorage.setItem(key, JSON.stringify(nomadUploadHistory))
+    } catch (_e) {
+      // ignore sessionStorage errors
+    }
+  }, [experiment.id, nomadUploadHistory])
+
   const fallbackResults = useMemo(
     () => newExperimentResults(experiment.id),
     [experiment.id],
   )
   const results = experimentResults ?? fallbackResults
+
+  const discardTemporaryArchive = useCallback(async () => {
+    if (!lastArchivePath) {
+      return
+    }
+
+    try {
+      const form = new FormData()
+      form.append("archive_path", lastArchivePath)
+      const token =
+        typeof OpenAPI.TOKEN === "function"
+          ? await OpenAPI.TOKEN({} as any)
+          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+
+      await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      })
+    } catch (_e) {
+      // best effort cleanup
+    }
+
+    try {
+      sessionStorage.removeItem(`nomad_archive:${experiment.id}`)
+    } catch (_e) {
+      // ignore
+    }
+    setLastArchivePath(null)
+  }, [experiment.id, lastArchivePath])
+
+  useEffect(() => {
+    const hasInProgress = results.files.length > 0 || !!lastArchivePath
+    if (!hasInProgress) {
+      return
+    }
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+
+      if (lastArchivePath) {
+        const token = localStorage.getItem("access_token")
+        const form = new FormData()
+        form.append("archive_path", lastArchivePath)
+        fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
+          method: "POST",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          body: form,
+          keepalive: true,
+        }).catch(() => {})
+      }
+    }
+
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload)
+    }
+  }, [lastArchivePath, results.files.length])
 
   const toggleSubstrateExpand = (substrateId: string) => {
     setExpandedSubstrates((prev) => {
@@ -1104,6 +1194,9 @@ function ResultsDetail({
         deviceGroups: matchedGroups,
         updatedAt: new Date().toISOString(),
       })
+      setIsResultsCardOpen(true)
+      setReviewConfirmed(false)
+      setWorkflowStep(2)
     },
     [
       experiment.substrates,
@@ -1340,13 +1433,236 @@ function ResultsDetail({
       deviceGroups: [],
       updatedAt: new Date().toISOString(),
     })
+    setUploadedFiles([])
+    setWorkflowStep(1)
+    setReviewConfirmed(false)
+    setIsResultsCardOpen(false)
+    void discardTemporaryArchive()
   }
 
   const substrates = experiment.substrates.map((s) => ({
     id: s.id,
     name: s.name,
   }))
-  
+
+  const buildNomadUploadRequest = useCallback((): NomadUploadRequest => {
+    return {
+      experiment_id: experiment.id,
+      experiment_name: experiment.name,
+      custom_metadata: {
+        experiment,
+      },
+      substrates,
+      measurement_files: results.files.map((f) => ({
+        fileName: f.fileName,
+        fileType: f.fileType,
+        deviceName: f.deviceName,
+        cell: f.cell,
+        pixel: f.pixel,
+        value: f.value,
+      })),
+      device_groups: results.deviceGroups.map((g) => ({
+        id: g.id,
+        deviceName: g.deviceName,
+        assignedSubstrateId: g.assignedSubstrateId,
+        files: g.files.map((f) => ({
+          fileName: f.fileName,
+          fileType: f.fileType,
+          deviceName: f.deviceName,
+          cell: f.cell,
+          pixel: f.pixel,
+          value: f.value,
+        })),
+      })),
+    }
+  }, [experiment, results.deviceGroups, results.files, substrates])
+
+  const handleUploadToNomad = useCallback(async () => {
+    if (!nomadConfig?.enabled) {
+      notifications.show({
+        title: "NOMAD Not Configured",
+        message:
+          "Please configure NOMAD credentials in the auth file (../sensitive config/.nomad_auth)",
+        color: "orange",
+      })
+      return
+    }
+
+    setNomadUploading(true)
+    try {
+      const requestData = buildNomadUploadRequest()
+
+      const formData = new FormData()
+      formData.append("request_json", JSON.stringify(requestData))
+      for (const file of uploadedFiles) {
+        formData.append("files", file)
+      }
+
+      const token =
+        typeof OpenAPI.TOKEN === "function"
+          ? await OpenAPI.TOKEN({} as any)
+          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+      const response = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/nomad`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      const result: NomadUploadResponse = await response.json()
+      if (!result.success) {
+        notifications.show({
+          title: "Upload Failed",
+          message: result.message || "Unknown error occurred",
+          color: "red",
+        })
+        return
+      }
+
+      if (result.upload_id) {
+        setNomadUploadHistory((prev) => [
+          {
+            uploadId: result.upload_id as string,
+            entryIds: result.entry_ids ?? [],
+            uploadTime: result.upload_create_time ?? undefined,
+          },
+          ...prev,
+        ])
+      }
+
+      await discardTemporaryArchive()
+
+      onUpdateResults({
+        ...results,
+        files: [],
+        deviceGroups: [],
+        nomad: {
+          upload_id: result.upload_id ?? undefined,
+          entry_ids: result.entry_ids ?? undefined,
+          upload_time: result.upload_create_time ?? undefined,
+          status: result.processing_status ?? undefined,
+        },
+        updatedAt: new Date().toISOString(),
+      })
+
+      // Mark experiment as having completed upload
+      onUpdateExperiment({
+        ...experiment,
+        hasCompletedUpload: true,
+      })
+
+      setUploadedFiles([])
+      setReviewConfirmed(false)
+      setIsResultsCardOpen(false)
+      setWorkflowStep(1)
+
+      notifications.show({
+        title: "Upload Successful",
+        message: `Created NOMAD upload ${result.upload_id}`,
+        color: "green",
+      })
+    } catch (err) {
+      notifications.show({
+        title: "Upload Error",
+        message: err instanceof Error ? err.message : "Failed to upload to NOMAD",
+        color: "red",
+      })
+    } finally {
+      setNomadUploading(false)
+    }
+  }, [
+    buildNomadUploadRequest,
+    discardTemporaryArchive,
+    nomadConfig?.enabled,
+    onUpdateExperiment,
+    onUpdateResults,
+    results,
+    uploadedFiles,
+  ])
+
+  const openExperimentMetadataPreview = useCallback(async () => {
+    try {
+      const requestData = buildNomadUploadRequest()
+      const preview: NomadMetadataPreview = await NomadService.previewNomadMetadata({
+        requestBody: requestData,
+      })
+
+      modals.open({
+        title: "NOMAD Metadata Preview",
+        size: "xl",
+        children: (
+          <ScrollArea>
+            <Stack gap="sm">
+              <Text size="xs" c="dimmed">
+                Generated from backend NOMAD service using current experiment state.
+              </Text>
+              <div>
+                <Text fw={600} size="sm">Perovskite Metadata (YAML)</Text>
+                <Code block>{preview.metadata_yaml}</Code>
+              </div>
+              <div>
+                <Text fw={600} size="sm">Upload Archive Metadata (YAML)</Text>
+                <Code block>{preview.yaml_content}</Code>
+              </div>
+            </Stack>
+          </ScrollArea>
+        ),
+      })
+    } catch (err) {
+      notifications.show({
+        title: "Preview Error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Failed to generate NOMAD metadata preview",
+        color: "red",
+      })
+    }
+  }, [buildNomadUploadRequest])
+
+  const openMeasurementMetadataPreview = useCallback(() => {
+    modals.open({
+      title: "Measurement Files Metadata Preview",
+      size: "lg",
+      children: (
+        <ScrollArea>
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">{results.files.length} files to upload</Text>
+            <Table striped>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>File Name</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Device</Table.Th>
+                  <Table.Th>Cell</Table.Th>
+                  <Table.Th>Pixel</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {results.files.map((file) => (
+                  <Table.Tr key={file.id}>
+                    <Table.Td>
+                      <Tooltip label={file.fileName} withArrow>
+                        <Text size="xs" truncate style={{ maxWidth: 250 }}>
+                          {file.fileName}
+                        </Text>
+                      </Tooltip>
+                    </Table.Td>
+                    <Table.Td><Text size="xs">{file.fileType}</Text></Table.Td>
+                    <Table.Td><Text size="xs">{file.deviceName}</Text></Table.Td>
+                    <Table.Td><Text size="xs">{file.cell || "—"}</Text></Table.Td>
+                    <Table.Td><Text size="xs">{file.pixel || "—"}</Text></Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Stack>
+        </ScrollArea>
+      ),
+    })
+  }, [results.files])
+
   // Separate matched groups (assigned to substrates) from unmatched
   const matchedGroups = useMemo(
     () => results.deviceGroups.filter((g) => g.assignedSubstrateId),
@@ -1420,9 +1736,46 @@ function ResultsDetail({
     return groups.flatMap((g) => g.files)
   }
   
-  const totalMatchedFiles = matchedGroups.reduce((sum, g) => sum + g.files.length, 0)
   const totalUnmatchedFiles = unmatchedGroups.reduce((sum, g) => sum + g.files.length, 0)
   const allFilesMatched = results.files.length > 0 && unmatchedGroups.length === 0
+  const canOpenUpload = allFilesMatched && reviewConfirmed
+
+  useEffect(() => {
+    if (results.files.length > 0) {
+      setIsResultsCardOpen(true)
+    }
+  }, [results.files.length])
+
+  useEffect(() => {
+    if (totalUnmatchedFiles > 0 && reviewConfirmed) {
+      setReviewConfirmed(false)
+    }
+  }, [reviewConfirmed, totalUnmatchedFiles])
+
+  const instructionText =
+    workflowStep === 1
+      ? "Drag and drop files here"
+      : workflowStep === 2
+        ? totalUnmatchedFiles > 0
+          ? "You have to assign unmatched files by drag and drop"
+          : "Review all matched files"
+        : "Upload to NOMAD"
+
+  const goToStep = (step: 1 | 2 | 3) => {
+    if (step === 1) {
+      setWorkflowStep(1)
+      return
+    }
+    if (step === 2) {
+      if (results.files.length > 0) {
+        setWorkflowStep(2)
+      }
+      return
+    }
+    if (canOpenUpload) {
+      setWorkflowStep(3)
+    }
+  }
 
   return (
     <Box style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -1455,744 +1808,243 @@ function ResultsDetail({
 
       <ScrollArea style={{ flex: 1 }} p="md">
         <Stack gap="lg">
-          {/* Drop Zone */}
-          <Dropzone
-            onDrop={handleDrop}
-            accept={[
-              MIME_TYPES.png,
-              MIME_TYPES.jpeg,
-              MIME_TYPES.gif,
-              "text/plain",
-              "application/pdf",
-              "application/msword",
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              "application/zip",
-              "application/x-7z-compressed",
-              "image/tiff",
-            ]}
-            maxSize={50 * 1024 ** 2}
-            style={{
-              borderStyle: "dashed",
-              borderWidth: 2,
-              borderColor:
-                results.files.length > 0
-                  ? "var(--mantine-color-green-4)"
-                  : "var(--mantine-color-gray-4)",
-              background:
-                results.files.length > 0
-                  ? "var(--mantine-color-green-0)"
-                  : "var(--mantine-color-gray-0)",
-            }}
-          >
-            <Group
-              justify="center"
-              gap="xl"
-              mih={120}
-              style={{ pointerEvents: "none" }}
-            >
-              <Dropzone.Accept>
-                <IconUpload
-                  size={48}
-                  color={theme.colors.blue[6]}
-                  stroke={1.5}
-                />
-              </Dropzone.Accept>
-              <Dropzone.Reject>
-                <IconX size={48} color={theme.colors.red[6]} stroke={1.5} />
-              </Dropzone.Reject>
-              <Dropzone.Idle>
-                {results.files.length > 0 ? (
-                  <IconCheck
-                    size={48}
-                    color={theme.colors.green[6]}
-                    stroke={1.5}
-                  />
-                ) : (
-                  <IconUpload
-                    size={48}
-                    color={theme.colors.gray[4]}
-                    stroke={1.5}
-                  />
-                )}
-              </Dropzone.Idle>
-
-              <div>
-                <Text size="lg" inline fw={500}>
-                  {results.files.length > 0
-                    ? `${results.files.length} files uploaded`
-                    : "Drop Results here"}
-                </Text>
-                <Text size="sm" c="dimmed" inline mt={7}>
-                  {results.files.length > 0
-                    ? "Drop more files to add them"
-                    : "Drag & drop measurement files (.txt, images, documents)"}
-                </Text>
-              </div>
-            </Group>
-          </Dropzone>
-
-          {lastArchivePath && (
-            <Text size="xs" c="dimmed" mt={8}>
-              Last created archive: {lastArchivePath}
-            </Text>
-          )}
-
-          {results.files.length > 0 && (
-            <>
-              {/* User Instructions */}
-              <Alert color="blue" radius="md" title="Review Automatic Assignments">
-                <Text size="sm">
-                  Files have been automatically grouped by device name and matched to substrates. 
-                  <Text span fw={600}> Check that automatic substrate assignments are correct.</Text>
-                </Text>
-              </Alert>
-
-              {/* Unmatched Files Warning - Only show if there are unmatched items */}
-              {totalUnmatchedFiles > 0 && (
-                <Alert color="red" radius="md" title="Action Required">
-                  <Text size="sm">
-                    <Text span fw={600}>
-                      {totalUnmatchedFiles} file{totalUnmatchedFiles !== 1 ? 's' : ''} need{totalUnmatchedFiles === 1 ? 's' : ''} to be assigned.
-                    </Text>
-                    {" "}Drag and drop files or groups from left to right, or use assignment dropdowns to associate them with substrates.
-                  </Text>
-                </Alert>
-              )}
-
-              {/* Summary */}
-              <Paper
-                withBorder
-                p="sm"
-                radius="md"
-                style={{ background: "var(--mantine-color-blue-0)" }}
-              >
-                <Group justify="space-between">
-                  <Group gap="lg">
-                    <Group gap="xs">
-                      <Text size="sm" fw={600}>
-                        Total Files:
-                      </Text>
-                      <Text size="sm">{results.files.length}</Text>
-                    </Group>
-                    <Group gap="xs">
-                      <Text size="sm" fw={600}>
-                        Matched to Substrates:
-                      </Text>
-                      <Text
-                        size="sm"
-                        c={allFilesMatched ? "green" : "orange"}
-                      >
-                        {totalMatchedFiles} / {results.files.length}
-                      </Text>
-                    </Group>
-                    <Group gap="xs">
-                      <Text size="sm" fw={600}>
-                        Unmatched:
-                      </Text>
-                      <Text size="sm" c={totalUnmatchedFiles > 0 ? "orange" : "green"}>
-                        {totalUnmatchedFiles}
-                      </Text>
-                    </Group>
-                  </Group>
-                </Group>
-              </Paper>
-
-              {/* All-files-matched completion banner */}
-              {allFilesMatched && (
-                <Alert
-                  icon={<IconCheck size={18} />}
-                  color="green"
-                  radius="md"
-                  title="All device groups assigned!"
-                >
-                  <Group justify="space-between" align="center">
+          {nomadUploadHistory.length > 0 && (
+            <Alert icon={<IconCheck size={16} />} color="green" radius="md" title="NOMAD Uploads">
+              <Stack gap="xs">
+                {nomadUploadHistory.map((upload) => (
+                  <Group key={upload.uploadId} justify="space-between" wrap="nowrap">
                     <Text size="sm">
-                      All {results.files.length} file{results.files.length !== 1 ? "s are" : " is"} matched to substrates.
+                      <Text span fw={600}>Upload ID:</Text> <Code>{upload.uploadId}</Code>
                     </Text>
-                    <Group gap="xs">
-                      <Button
-                        size="sm"
-                        variant="light"
-                        color="blue"
-                        onClick={async () => {
-                          try {
-                            const preview =
-                              await NomadService.previewNomadMetadata({
-                                requestBody: {
-                                  experiment_id: experiment.id,
-                                  experiment_name: experiment.name,
-                                  custom_metadata: {
-                                    experiment,
-                                  },
-                                  substrates: substrates,
-                                  measurement_files: results.files.map((f) => ({
-                                    fileName: f.fileName,
-                                    fileType: f.fileType,
-                                    deviceName: f.deviceName,
-                                    cell: f.cell,
-                                    pixel: f.pixel,
-                                    value: f.value,
-                                  })),
-                                  device_groups: results.deviceGroups.map(
-                                    (g) => ({
-                                      id: g.id,
-                                      deviceName: g.deviceName,
-                                      assignedSubstrateId:
-                                        g.assignedSubstrateId,
-                                      files: g.files.map((f) => ({
-                                        fileName: f.fileName,
-                                        fileType: f.fileType,
-                                        deviceName: f.deviceName,
-                                        cell: f.cell,
-                                        pixel: f.pixel,
-                                        value: f.value,
-                                      })),
-                                    }),
-                                  ),
-                                },
-                              })
-                            setNomadMetadataPreview(preview.yaml_content)
-                            setShowMetadataModal(true)
-                          } catch (_err) {
-                            notifications.show({
-                              title: "Error",
-                              message: "Failed to generate metadata preview",
-                              color: "red",
-                            })
-                          }
-                        }}
-                      >
-                        Preview File Metadata
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="light"
-                        color="violet"
-                        onClick={async () => {
-                          try {
-                            const preview =
-                              await NomadService.previewNomadMetadata({
-                                requestBody: {
-                                  experiment_id: experiment.id,
-                                  experiment_name: experiment.name,
-                                  custom_metadata: {
-                                    experiment,
-                                  },
-                                  substrates: substrates,
-                                  measurement_files: results.files.map((f) => ({
-                                    fileName: f.fileName,
-                                    fileType: f.fileType,
-                                    deviceName: f.deviceName,
-                                    cell: f.cell,
-                                    pixel: f.pixel,
-                                    value: f.value,
-                                  })),
-                                  device_groups: results.deviceGroups.map(
-                                    (g) => ({
-                                      id: g.id,
-                                      deviceName: g.deviceName,
-                                      assignedSubstrateId:
-                                        g.assignedSubstrateId,
-                                      files: g.files.map((f) => ({
-                                        fileName: f.fileName,
-                                        fileType: f.fileType,
-                                        deviceName: f.deviceName,
-                                        cell: f.cell,
-                                        pixel: f.pixel,
-                                        value: f.value,
-                                      })),
-                                    }),
-                                  ),
-                                },
-                              })
-                            // Show fabrication metadata in YAML format
-                            setFabricationMetadataPreview(
-                              preview.metadata_yaml || "No metadata available",
-                            )
-                            setShowFabricationModal(true)
-                          } catch (_err) {
-                            notifications.show({
-                              title: "Error",
-                              message:
-                                "Failed to generate fabrication metadata preview",
-                              color: "red",
-                            })
-                          }
-                        }}
-                      >
-                        Preview Fabrication Metadata
-                      </Button>
-                      <Button
-                        size="sm"
-                        color="green"
-                        leftSection={
-                          nomadUploading ? (
-                            <Loader size={14} color="white" />
-                          ) : (
-                            <IconCloudUpload size={16} />
-                          )
-                        }
-                        disabled={nomadUploading || !nomadConfig?.enabled}
-                        onClick={async () => {
-                          if (!nomadConfig?.enabled) {
-                            notifications.show({
-                              title: "NOMAD Not Configured",
-                              message:
-                                "Please configure NOMAD credentials in the auth file (../sensitive config/.nomad_auth)",
-                              color: "orange",
-                            })
-                            return
-                          }
-
-                          modals.openConfirmModal({
-                            title: "Save to NOMAD",
-                            children: (
-                              <Stack gap="sm">
-                                <Text size="sm">
-                                  This will export all {results.files.length}{" "}
-                                  file
-                                  {results.files.length !== 1 ? "s" : ""} with
-                                  their substrate assignments to NOMAD.
-                                </Text>
-                                <Text size="xs" c="dimmed">
-                                  Using NOMAD URL: {nomadConfig.url}
-                                </Text>
-                              </Stack>
-                            ),
-                            labels: {
-                              confirm: "Upload to NOMAD",
-                              cancel: "Cancel",
-                            },
-                            confirmProps: {
-                              color: "green",
-                              leftSection: <IconCloudUpload size={14} />,
-                            },
-                            onConfirm: async () => {
-                              setNomadUploading(true)
-                              try {
-                                // Build request data
-                                const requestData: NomadUploadRequest = {
-                                  experiment_id: experiment.id,
-                                  experiment_name: experiment.name,
-                                  custom_metadata: {
-                                    experiment,
-                                  },
-                                  substrates: substrates,
-                                  measurement_files: results.files.map((f) => ({
-                                    fileName: f.fileName,
-                                    fileType: f.fileType,
-                                    deviceName: f.deviceName,
-                                    cell: f.cell,
-                                    pixel: f.pixel,
-                                    value: f.value,
-                                  })),
-                                  device_groups: results.deviceGroups.map(
-                                    (g) => ({
-                                      id: g.id,
-                                      deviceName: g.deviceName,
-                                      assignedSubstrateId:
-                                        g.assignedSubstrateId,
-                                      files: g.files.map((f) => ({
-                                        fileName: f.fileName,
-                                        fileType: f.fileType,
-                                        deviceName: f.deviceName,
-                                        cell: f.cell,
-                                        pixel: f.pixel,
-                                        value: f.value,
-                                      })),
-                                    }),
-                                  ),
-                                }
-
-                                // Create FormData for the upload
-                                const formData = new FormData()
-                                formData.append(
-                                  "request_json",
-                                  JSON.stringify(requestData),
-                                )
-
-                                // Add uploaded files if we have them stored
-                                // Note: In production, you'd store the actual File objects
-                                // For now, we'll create placeholder files from the metadata
-                                for (const file of uploadedFiles) {
-                                  formData.append("files", file)
-                                }
-
-                                // If no files stored, we need to handle this differently
-                                // The backend will need to work with metadata only
-                                if (uploadedFiles.length === 0) {
-                                  notifications.show({
-                                    title: "Note",
-                                    message:
-                                      "No files to upload. Metadata will be saved.",
-                                    color: "blue",
-                                  })
-                                }
-
-                                // Make the upload request
-                                const token =
-                                  typeof OpenAPI.TOKEN === "function"
-                                    ? await OpenAPI.TOKEN({} as any)
-                                    : OpenAPI.TOKEN ||
-                                      localStorage.getItem("access_token")
-                                const response = await fetch(
-                                  `${OpenAPI.BASE}/api/v1/nomad/upload/nomad`,
-                                  {
-                                    method: "POST",
-                                    headers: {
-                                      Authorization: `Bearer ${token}`,
-                                    },
-                                    body: formData,
-                                  },
-                                )
-
-                                const result: NomadUploadResponse =
-                                  await response.json()
-
-                                if (result.success) {
-                                  // Update results with NOMAD info
-                                  const updatedResults = {
-                                    ...results,
-                                    nomad: {
-                                      upload_id: result.upload_id ?? undefined,
-                                      entry_ids: result.entry_ids ?? undefined,
-                                      upload_time:
-                                        result.upload_create_time ?? undefined,
-                                      status:
-                                        result.processing_status ?? undefined,
-                                    },
-                                    updatedAt: new Date().toISOString(),
-                                  }
-                                  onUpdateResults(updatedResults)
-
-                                  notifications.show({
-                                    title: "Upload Successful!",
-                                    message: (
-                                      <Stack gap={4}>
-                                        <Text size="sm">
-                                          Data uploaded to NOMAD.
-                                        </Text>
-                                        <Text size="xs" c="dimmed">
-                                          Upload ID: {result.upload_id}
-                                        </Text>
-                                      </Stack>
-                                    ),
-                                    color: "green",
-                                    autoClose: 10000,
-                                  })
-
-                                  // Show success modal with details
-                                  modals.open({
-                                    title: "NOMAD Upload Complete",
-                                    children: (
-                                      <Stack gap="md">
-                                        <Alert
-                                          color="green"
-                                          icon={<IconCheck size={16} />}
-                                        >
-                                          Successfully uploaded to NOMAD
-                                        </Alert>
-                                        <Table>
-                                          <Table.Tbody>
-                                            <Table.Tr>
-                                              <Table.Td fw={600}>
-                                                Upload ID
-                                              </Table.Td>
-                                              <Table.Td>
-                                                <Code>{result.upload_id}</Code>
-                                              </Table.Td>
-                                            </Table.Tr>
-                                            {result.entry_ids &&
-                                              result.entry_ids.length > 0 && (
-                                                <Table.Tr>
-                                                  <Table.Td fw={600}>
-                                                    Entry IDs
-                                                  </Table.Td>
-                                                  <Table.Td>
-                                                    {result.entry_ids.map(
-                                                      (
-                                                        id: string,
-                                                        i: number,
-                                                      ) => (
-                                                        <Code key={i} block>
-                                                          {id}
-                                                        </Code>
-                                                      ),
-                                                    )}
-                                                  </Table.Td>
-                                                </Table.Tr>
-                                              )}
-                                            <Table.Tr>
-                                              <Table.Td fw={600}>
-                                                Upload Time
-                                              </Table.Td>
-                                              <Table.Td>
-                                                {result.upload_create_time}
-                                              </Table.Td>
-                                            </Table.Tr>
-                                            <Table.Tr>
-                                              <Table.Td fw={600}>
-                                                Status
-                                              </Table.Td>
-                                              <Table.Td>
-                                                <Badge color="blue">
-                                                  {result.processing_status ||
-                                                    "Processing"}
-                                                </Badge>
-                                              </Table.Td>
-                                            </Table.Tr>
-                                          </Table.Tbody>
-                                        </Table>
-                                        <Button
-                                          variant="light"
-                                          leftSection={
-                                            <IconExternalLink size={14} />
-                                          }
-                                          onClick={() => {
-                                            const nomadUrl =
-                                              nomadConfig?.url?.replace(
-                                                "/api/v1",
-                                                "",
-                                              )
-                                            if (!nomadUrl) {
-                                              notifications.show({
-                                                title: "NOMAD URL Missing",
-                                                message:
-                                                  "NOMAD base URL is not configured.",
-                                                color: "orange",
-                                              })
-                                              return
-                                            }
-                                            window.open(
-                                              `${nomadUrl}/user/uploads/upload/id/${result.upload_id}`,
-                                              "_blank",
-                                            )
-                                          }}
-                                        >
-                                          View in NOMAD
-                                        </Button>
-                                      </Stack>
-                                    ),
-                                  })
-                                } else {
-                                  notifications.show({
-                                    title: "Upload Failed",
-                                    message:
-                                      result.message ||
-                                      "Unknown error occurred",
-                                    color: "red",
-                                  })
-                                }
-                              } catch (err) {
-                                console.error("NOMAD upload error:", err)
-                                notifications.show({
-                                  title: "Upload Error",
-                                  message:
-                                    err instanceof Error
-                                      ? err.message
-                                      : "Failed to upload to NOMAD",
-                                  color: "red",
-                                })
-                              } finally {
-                                setNomadUploading(false)
-                              }
-                            },
-                          })
-                        }}
-                      >
-                        {nomadUploading ? "Uploading..." : "Save to NOMAD"}
-                      </Button>
-                    </Group>
-                  </Group>
-                </Alert>
-              )}
-
-              {/* NOMAD Info Display (if already uploaded) */}
-              {results.nomad?.upload_id && (
-                <Alert
-                  icon={<IconCloudUpload size={16} />}
-                  color="blue"
-                  radius="md"
-                  title="Uploaded to NOMAD"
-                >
-                  <Stack gap="xs">
-                    <Group gap="lg">
-                      <Text size="sm">
-                        <Text span fw={600}>
-                          Upload ID:
-                        </Text>{" "}
-                        <Code>{results.nomad.upload_id}</Code>
-                      </Text>
-                      {results.nomad.entry_ids &&
-                        results.nomad.entry_ids.length > 0 && (
-                          <Text size="sm">
-                            <Text span fw={600}>
-                              Entries:
-                            </Text>{" "}
-                            {results.nomad.entry_ids.length}
-                          </Text>
-                        )}
-                    </Group>
                     <Button
                       size="xs"
                       variant="light"
                       leftSection={<IconExternalLink size={14} />}
                       onClick={() => {
-                        const nomadUrl = nomadConfig?.url?.replace(
-                          "/api/v1",
-                          "",
-                        )
+                        const nomadUrl = nomadConfig?.url?.replace("/api/v1", "")
                         if (!nomadUrl) {
-                          notifications.show({
-                            title: "NOMAD URL Missing",
-                            message: "NOMAD base URL is not configured.",
-                            color: "orange",
-                          })
                           return
                         }
                         window.open(
-                          `${nomadUrl}/user/uploads/upload/id/${results.nomad?.upload_id}`,
+                          `${nomadUrl}/user/uploads/upload/id/${upload.uploadId}`,
                           "_blank",
                         )
                       }}
                     >
-                      View in NOMAD
-                    </Button>
-                  </Stack>
-                </Alert>
-              )}
-
-              {/* File Metadata Preview Modal */}
-              <Modal
-                opened={showMetadataModal}
-                onClose={() => setShowMetadataModal(false)}
-                title="NOMAD File Metadata Preview"
-                size="xl"
-              >
-                <Stack gap="md">
-                  <Text size="sm" c="dimmed">
-                    This YAML will be included in your upload to describe the
-                    data structure.
-                  </Text>
-                  <ScrollArea
-                    style={{
-                      height: "60vh",
-                      background: "var(--mantine-color-gray-0)",
-                      padding: 8,
-                      borderRadius: 6,
-                    }}
-                  >
-                    <pre
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        margin: 0,
-                      }}
-                    >
-                      {nomadMetadataPreview || ""}
-                    </pre>
-                  </ScrollArea>
-                  <Button onClick={() => setShowMetadataModal(false)}>
-                    Close
-                  </Button>
-                </Stack>
-              </Modal>
-
-              {/* Fabrication Metadata Preview Modal */}
-              <Modal
-                opened={showFabricationModal}
-                onClose={() => setShowFabricationModal(false)}
-                title="Review Fabrication Metadata"
-                size="xl"
-              >
-                <Stack gap="md">
-                  <Text size="sm" c="dimmed">
-                    Perovskite solar cell fabrication metadata for NOMAD upload.
-                    Use the buttons below to download or copy the YAML.
-                  </Text>
-                  <ScrollArea
-                    style={{
-                      height: "60vh",
-                      background: "var(--mantine-color-gray-0)",
-                      padding: 8,
-                      borderRadius: 6,
-                    }}
-                  >
-                    <pre
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        fontFamily: "monospace",
-                        fontSize: 12,
-                        margin: 0,
-                      }}
-                    >
-                      {fabricationMetadataPreview || ""}
-                    </pre>
-                  </ScrollArea>
-                  <Group justify="flex-end">
-                    <Button
-                      variant="light"
-                      color="teal"
-                      leftSection={<IconClipboard size={16} />}
-                      onClick={() => {
-                        navigator.clipboard
-                          .writeText(fabricationMetadataPreview || "")
-                          .then(() => {
-                            notifications.show({
-                              title: "Copied",
-                              message: "Metadata copied to clipboard",
-                              color: "teal",
-                            })
-                          })
-                          .catch(() => {
-                            notifications.show({
-                              title: "Copy failed",
-                              message: "Could not access clipboard",
-                              color: "red",
-                            })
-                          })
-                      }}
-                    >
-                      Copy to Clipboard
-                    </Button>
-                    <Button
-                      variant="light"
-                      color="blue"
-                      leftSection={<IconDownload size={16} />}
-                      onClick={() => {
-                        const blob = new Blob(
-                          [fabricationMetadataPreview || ""],
-                          { type: "application/yaml" },
-                        )
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement("a")
-                        a.href = url
-                        a.download = "archive.yaml"
-                        a.click()
-                        URL.revokeObjectURL(url)
-                      }}
-                    >
-                      Download YAML
-                    </Button>
-                    <Button
-                      variant="subtle"
-                      onClick={() => setShowFabricationModal(false)}
-                    >
-                      Close
+                      Open
                     </Button>
                   </Group>
-                </Stack>
-              </Modal>
+                ))}
+              </Stack>
+            </Alert>
+          )}
 
-              <Divider label="File Organization" labelPosition="center" />
+          {!isResultsCardOpen && (
+            <Button
+              color="blue"
+              onClick={() => {
+                setIsResultsCardOpen(true)
+                setWorkflowStep(1)
+              }}
+            >
+              + Add Results
+            </Button>
+          )}
 
-              <Group align="flex-start" grow wrap="nowrap">
+          {isResultsCardOpen && (
+            <Paper withBorder radius="md" p="md">
+          {isResultsCardOpen && (
+            <>
+              <Paper withBorder p="xs" radius="md" style={{ background: "var(--mantine-color-gray-0)" }}>
+                <Group justify="space-between" align="center">
+                  <Text
+                    size="sm"
+                    fw={600}
+                    c={workflowStep === 2 && totalUnmatchedFiles > 0 ? "red" : undefined}
+                  >
+                    {instructionText}
+                  </Text>
+                  <Group gap="xs">
+                    {workflowStep === 1 && (
+                      <Button size="xs" disabled={results.files.length === 0} onClick={() => goToStep(2)}>
+                        Next
+                      </Button>
+                    )}
+                    {workflowStep === 2 && totalUnmatchedFiles > 0 && (
+                      <Button size="xs" disabled>
+                        Assign unmatched first
+                      </Button>
+                    )}
+                    {workflowStep === 2 && totalUnmatchedFiles === 0 && !reviewConfirmed && (
+                      <Button size="xs" color="green" onClick={() => setReviewConfirmed(true)}>
+                        Confirm review
+                      </Button>
+                    )}
+                    {workflowStep === 2 && totalUnmatchedFiles === 0 && reviewConfirmed && (
+                      <Button size="xs" color="green" onClick={() => goToStep(3)}>
+                        Next
+                      </Button>
+                    )}
+                    {workflowStep === 3 && (
+                      <Button
+                        size="xs"
+                        color="green"
+                        leftSection={
+                          nomadUploading ? (
+                            <Loader size={14} color="white" />
+                          ) : (
+                            <IconCloudUpload size={14} />
+                          )
+                        }
+                        disabled={nomadUploading || !nomadConfig?.enabled || !canOpenUpload}
+                        onClick={handleUploadToNomad}
+                      >
+                        {nomadUploading ? "Uploading..." : "Upload to NOMAD"}
+                      </Button>
+                    )}
+                  </Group>
+                </Group>
+              </Paper>
+
+
+              <Divider label="Pipeline" labelPosition="center" />
+
+              <Group align="flex-start" wrap="nowrap" gap="md">
+                <Paper withBorder p="sm" radius="md" style={{ width: 230, flexShrink: 0 }}>
+                  <Stack gap="xs">
+                    <Text size="sm" fw={700}>Process Flow</Text>
+                    <Button
+                      size="xs"
+                      variant={workflowStep === 1 ? "filled" : "light"}
+                      onClick={() => goToStep(1)}
+                    >
+                      1. File Upload
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant={workflowStep === 2 ? "filled" : "light"}
+                      disabled={results.files.length === 0}
+                      onClick={() => goToStep(2)}
+                    >
+                      2. Review
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant={workflowStep === 3 ? "filled" : "light"}
+                      disabled={!canOpenUpload}
+                      onClick={() => goToStep(3)}
+                    >
+                      3. Upload to NOMAD
+                    </Button>
+                  </Stack>
+                </Paper>
+
+                <Box style={{ flex: 1, minWidth: 0, maxHeight: "64vh", overflow: "auto" }}>
+                {workflowStep === 1 && (
+                  <Stack gap="xs">
+                    <Dropzone
+                      onDrop={handleDrop}
+                      accept={[
+                        MIME_TYPES.png,
+                        MIME_TYPES.jpeg,
+                        MIME_TYPES.gif,
+                        "text/plain",
+                        "application/pdf",
+                        "application/msword",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "application/zip",
+                        "application/x-7z-compressed",
+                        "image/tiff",
+                      ]}
+                      maxSize={50 * 1024 ** 2}
+                      style={{
+                        borderStyle: "dashed",
+                        borderWidth: 2,
+                        borderColor:
+                          results.files.length > 0
+                            ? "var(--mantine-color-green-4)"
+                            : "var(--mantine-color-gray-4)",
+                        background:
+                          results.files.length > 0
+                            ? "var(--mantine-color-green-0)"
+                            : "var(--mantine-color-gray-0)",
+                      }}
+                    >
+                      <Group
+                        justify="center"
+                        gap="xl"
+                        mih={120}
+                        style={{ pointerEvents: "none" }}
+                      >
+                        <Dropzone.Accept>
+                          <IconUpload
+                            size={48}
+                            color={theme.colors.blue[6]}
+                            stroke={1.5}
+                          />
+                        </Dropzone.Accept>
+                        <Dropzone.Reject>
+                          <IconX size={48} color={theme.colors.red[6]} stroke={1.5} />
+                        </Dropzone.Reject>
+                        <Dropzone.Idle>
+                          {results.files.length > 0 ? (
+                            <IconCheck
+                              size={48}
+                              color={theme.colors.green[6]}
+                              stroke={1.5}
+                            />
+                          ) : (
+                            <IconUpload
+                              size={48}
+                              color={theme.colors.gray[4]}
+                              stroke={1.5}
+                            />
+                          )}
+                        </Dropzone.Idle>
+
+                        <div>
+                          <Text size="lg" inline fw={500}>
+                            {results.files.length > 0
+                              ? `${results.files.length} files uploaded`
+                              : nomadUploadHistory.length > 0
+                                ? "Add Files"
+                                : "Drop Results here"}
+                          </Text>
+                          <Text size="sm" c="dimmed" inline mt={7}>
+                            {results.files.length > 0
+                              ? "Drop more files to add them"
+                              : nomadUploadHistory.length > 0
+                                ? "Start a new upload cycle (Upload -> Review -> NOMAD)"
+                                : "Drag & drop measurement files (.txt, images, documents)"}
+                          </Text>
+                        </div>
+                      </Group>
+                    </Dropzone>
+
+                    {lastArchivePath && (
+                      <Text size="xs" c="dimmed">
+                        Last created archive: {lastArchivePath}
+                      </Text>
+                    )}
+                  </Stack>
+                )}
+                <Group
+                  align="flex-start"
+                  grow
+                  wrap="nowrap"
+                  style={{ display: workflowStep === 2 ? undefined : "none" }}
+                >
+                {totalUnmatchedFiles > 0 && (
                 <Paper
                   withBorder
                   p="sm"
                   radius="md"
-                  style={{ flex: 1, minWidth: 0 }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    borderColor: "var(--mantine-color-red-4)",
+                    background: "var(--mantine-color-red-0)",
+                  }}
                 >
                   <Stack gap="sm">
                     <Group justify="space-between" align="center">
@@ -2206,12 +2058,7 @@ function ResultsDetail({
                       </Group>
                     </Group>
 
-                    {totalUnmatchedFiles === 0 ? (
-                      <Text size="sm" c="dimmed" ta="center" py="md">
-                        All files matched to substrates!
-                      </Text>
-                    ) : (
-                      <Stack gap="sm">
+                    <Stack gap="sm">
                         <Group justify="space-between" align="center">
                           <Text size="xs" c="dimmed">
                             Drag individual files or groups onto a substrate, or mark files for batch assignment.
@@ -2413,9 +2260,9 @@ function ResultsDetail({
                           </Paper>
                         )}
                       </Stack>
-                    )}
                   </Stack>
                 </Paper>
+                )}
 
                 <Paper
                   withBorder
@@ -2497,7 +2344,67 @@ function ResultsDetail({
                   </Stack>
                 </Paper>
               </Group>
+                {workflowStep === 3 && (
+                  <Paper withBorder p="md" radius="md">
+                    <Stack gap="sm">
+                      {results.files.length > 0 && (
+                        <Alert title="Unfinished Upload" color="blue">
+                          <Text size="sm">
+                            You have {results.files.length} file{results.files.length !== 1 ? "s" : ""} ready to upload to NOMAD.
+                          </Text>
+                        </Alert>
+                      )}
+                      
+                      <Text size="sm">
+                        Ready to upload {results.files.length} file
+                        {results.files.length !== 1 ? "s" : ""} to NOMAD.
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        If needed, use Process Flow to go back and add more files.
+                      </Text>
+
+                      <Group wrap="wrap" gap="xs">
+                        <Button
+                          size="xs"
+                          variant="default"
+                          onClick={openExperimentMetadataPreview}
+                        >
+                          Preview Experiment Metadata
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="default"
+                          onClick={openMeasurementMetadataPreview}
+                          disabled={results.files.length === 0}
+                        >
+                          Preview Measurement Files
+                        </Button>
+                      </Group>
+
+                      <Button
+                        size="sm"
+                        color="green"
+                        leftSection={
+                          nomadUploading ? (
+                            <Loader size={14} color="white" />
+                          ) : (
+                            <IconCloudUpload size={14} />
+                          )
+                        }
+                        disabled={nomadUploading || !nomadConfig?.enabled || !canOpenUpload}
+                        onClick={handleUploadToNomad}
+                        fullWidth
+                      >
+                        {nomadUploading ? "Uploading..." : "Upload to NOMAD"}
+                      </Button>
+                    </Stack>
+                  </Paper>
+                )}
+                </Box>
+              </Group>
             </>
+          )}
+            </Paper>
           )}
         </Stack>
       </ScrollArea>
@@ -2528,7 +2435,45 @@ export function ResultsPage() {
     string | null
   >(() => lastSelectedByKind.experiment ?? null)
 
-  const selectExperiment = (id: string | null) => {
+  const selectExperiment = async (id: string | null) => {
+    if (selectedExperimentId && id !== selectedExperimentId) {
+      const activeResult = results.find(
+        (r) => r.experimentId === selectedExperimentId,
+      )
+      const hasInProgressPipeline = !!activeResult && activeResult.files.length > 0
+
+      if (hasInProgressPipeline) {
+        const shouldDiscard = window.confirm(
+          "You are leaving in the middle of the upload process. Your current data and temporary archive will be discarded. Continue?",
+        )
+        if (!shouldDiscard) {
+          return
+        }
+
+        try {
+          const key = `nomad_archive:${selectedExperimentId}`
+          const archivePath = sessionStorage.getItem(key)
+          if (archivePath) {
+            const form = new FormData()
+            form.append("archive_path", archivePath)
+            const token = localStorage.getItem("access_token")
+            await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
+              method: "POST",
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              body: form,
+            })
+            sessionStorage.removeItem(key)
+          }
+        } catch (_e) {
+          // best effort cleanup
+        }
+
+        setResults((prev) =>
+          prev.filter((r) => r.experimentId !== selectedExperimentId),
+        )
+      }
+    }
+
     setSelectedExperimentId(id)
     setActiveEntity(id ? { kind: "experiment", id } : null)
     if (id) updateLastSelected("experiment", id)
@@ -2709,6 +2654,11 @@ export function ResultsPage() {
             experiment={selectedExperiment}
             experimentResults={experimentResults}
             onUpdateResults={updateResults}
+            onUpdateExperiment={(updatedExp) => {
+              setExperiments((prev) =>
+                prev.map((e) => (e.id === updatedExp.id ? updatedExp : e)),
+              )
+            }}
           />
         ) : (
           <Box
@@ -2767,17 +2717,23 @@ export function ResultsPage() {
                 </Text>
               </Paper>
             ) : (
-              visibleExperiments.map((exp) => (
-                <ExperimentListItem
-                  key={exp.id}
-                  experiment={exp}
-                  isSelected={selectedExperimentId === exp.id}
-                  onSelect={() => selectExperiment(exp.id)}
-                  collectionColor={
-                    getEntityColor("experiment", exp.id) ?? undefined
-                  }
-                />
-              ))
+              visibleExperiments.map((exp) => {
+                const expResults = results.find((r) => r.experimentId === exp.id)
+                const hasUnfinishedUpload =
+                  !!expResults && expResults.files.length > 0 && !exp.hasCompletedUpload
+                return (
+                  <ExperimentListItem
+                    key={exp.id}
+                    experiment={exp}
+                    isSelected={selectedExperimentId === exp.id}
+                    onSelect={() => selectExperiment(exp.id)}
+                    collectionColor={
+                      getEntityColor("experiment", exp.id) ?? undefined
+                    }
+                    hasUnfinishedUpload={hasUnfinishedUpload}
+                  />
+                )
+              })
             )}
           </Stack>
         </ScrollArea>

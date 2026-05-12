@@ -316,8 +316,10 @@ export type Experiment = {
   substrates: Substrate[]
   // Absolute processing times keyed by process stage id
   processingTimes?: { [stageId: string]: string }
-  // Results uploaded (makes experiment "Finished")
+  // Results uploaded (makes experiment "Finished" only if actually uploaded to NOMAD)
   hasResults: boolean
+  // Track if at least one NOMAD upload has been completed (needed for "finished" status)
+  hasCompletedUpload?: boolean
 } // NOTE: Layer stack is now managed in the linked Process
 
 /** Fields required for an experiment to be 'ready' */
@@ -336,7 +338,8 @@ export function getExperimentMissingFields(exp: Experiment): string[] {
 export function getExperimentStatus(
   exp: Experiment,
 ): "incomplete" | "ready" | "finished" {
-  if (exp.hasResults) {
+  // Only mark as "finished" if there's an actual completed NOMAD upload
+  if (exp.hasCompletedUpload) {
     return "finished"
   }
   if (getExperimentMissingFields(exp).length === 0) {
