@@ -241,6 +241,102 @@ function parseTxtContent(
 }
 
 /** Compute similarity score between two strings (0-1) */
+/** Parse a name into components: base name, numeric indices, and letter indices */
+function parseNameComponents(
+  name: string,
+): {
+  baseName: string
+  numericIndices: number[]
+  letterIndices: string[]
+} {
+  const lowerName = name.toLowerCase()
+  const numericIndices: number[] = []
+  const letterIndices: string[] = []
+  let baseName = lowerName
+
+  // Extract standalone letter indices like "_A", "_B", "_C" etc.
+  const letterPattern = /_([a-z])(?:_|$)/gi
+  const letterMatches = Array.from(lowerName.matchAll(letterPattern))
+  for (const match of letterMatches) {
+    letterIndices.push(match[1].toUpperCase())
+  }
+  // Remove standalone letter indices from base name
+  baseName = baseName.replace(/_[a-z](?:_|$)/gi, "_")
+
+  // Extract numeric indices like "35" or "44"
+  const numPattern = /(\d+)/g
+  let numMatch
+  while ((numMatch = numPattern.exec(baseName)) !== null) {
+    numericIndices.push(parseInt(numMatch[1], 10))
+  }
+  // Remove all numbers from base name
+  baseName = baseName.replace(/\d+/g, "")
+  // Clean up underscores and dashes
+  baseName = baseName.replace(/[_\-]+/g, "_").replace(/^_+|_+$/g, "")
+
+  return { baseName, numericIndices, letterIndices }
+}
+
+/** Compare two parsed name components with exact matching for indices */
+function compareNameComponents(
+  fileComp: ReturnType<typeof parseNameComponents>,
+  substrateComp: ReturnType<typeof parseNameComponents>,
+): number {
+  // Rule 1: Numeric indices must match exactly
+  if (fileComp.numericIndices.length !== substrateComp.numericIndices.length) {
+    return 0 // No match if different number of numeric indices
+  }
+  for (let i = 0; i < fileComp.numericIndices.length; i++) {
+    if (fileComp.numericIndices[i] !== substrateComp.numericIndices[i]) {
+      return 0 // Numeric indices must match exactly
+    }
+  }
+
+  // Rule 2: Letter indices must match exactly
+  if (fileComp.letterIndices.length !== substrateComp.letterIndices.length) {
+    return 0 // No match if different number of letter indices
+  }
+  for (let i = 0; i < fileComp.letterIndices.length; i++) {
+    if (fileComp.letterIndices[i] !== substrateComp.letterIndices[i]) {
+      return 0 // Letter indices must match exactly
+    }
+  }
+
+  // Rule 3: Fuzzy match base names (only if indices matched)
+  // Use length-relative threshold for fuzzy matching
+  const s1 = fileComp.baseName
+  const s2 = substrateComp.baseName
+
+  if (s1 === s2) {
+    return 1
+  }
+  if (s1.length === 0 || s2.length === 0) {
+    return 0.5 // If one is empty, it's a weak match since indices matched
+  }
+
+  // Simple fuzzy matching
+  const longer = s1.length > s2.length ? s1 : s2
+  const shorter = s1.length > s2.length ? s2 : s1
+
+  if (longer.includes(shorter)) {
+    return 0.9 // Very good match if one contains the other
+  }
+
+  // Count matching characters in order
+  let matches = 0
+  let j = 0
+  for (let i = 0; i < longer.length && j < shorter.length; i++) {
+    if (longer[i] === shorter[j]) {
+      matches++
+      j++
+    }
+  }
+
+  const baseSimilarity = (2 * matches) / (s1.length + s2.length)
+  // Scale fuzzy match to 0.6-1.0 range (indices already matched perfectly)
+  return 0.6 + baseSimilarity * 0.4
+}
+
 function stringSimilarity(str1: string, str2: string): number {
   const s1 = str1.trim().toLowerCase()
   const s2 = str2.trim().toLowerCase()
@@ -273,26 +369,28 @@ function stringSimilarity(str1: string, str2: string): number {
   return (2 * matches) / (s1.length + s2.length)
 }
 
-/** Search for substrate names within a filename */
+/** Search for substrate names within a filename using smart component matching */
 function findSubstrateNamesInFile(
   fileName: string,
   substrates: { id: string; name: string }[],
 ): { id: string; name: string; confidence: number }[] {
-  const baseName = fileName.replace(/\.[^/.]+$/, "").toLowerCase()
+  const baseName = fileName.replace(/\.[^/.]+$/, "")
+  const fileComp = parseNameComponents(baseName)
   const matches: { id: string; name: string; confidence: number }[] = []
 
   for (const substrate of substrates) {
-    const subName = substrate.name.toLowerCase()
-    
-    // Exact match (e.g., "AI44" in filename)
-    if (baseName.includes(subName)) {
-      matches.push({ ...substrate, confidence: 1.0 })
-    }
-    // Fuzzy match (e.g., partial match or similar)
-    else {
-      const similarity = stringSimilarity(baseName, subName)
-      if (similarity > 0.7) {
-        matches.push({ ...substrate, confidence: similarity })
+    const substrateComp = parseNameComponents(substrate.name)
+    const componentScore = compareNameComponents(fileComp, substrateComp)
+
+    // Only accept matches where indices matched perfectly (score > 0)
+    if (componentScore > 0) {
+      matches.push({ ...substrate, confidence: componentScore })
+    } else {
+      // Fallback: try exact substring match for backwards compatibility
+      const baseLower = baseName.toLowerCase()
+      const subNameLower = substrate.name.toLowerCase()
+      if (baseLower.includes(subNameLower)) {
+        matches.push({ ...substrate, confidence: 1.0 })
       }
     }
   }
