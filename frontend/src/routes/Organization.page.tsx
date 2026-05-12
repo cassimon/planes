@@ -18,6 +18,7 @@ import {
   Textarea,
   TextInput,
   Tooltip,
+  useComputedColorScheme,
 } from "@mantine/core"
 import { modals } from "@mantine/modals"
 import {
@@ -148,16 +149,21 @@ function mixColors(hex1: string, hex2: string): string {
 // Color palette
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Palette for user-selectable element colors (no gray default)
+// Palette for user-selectable element colors – mid-tone hues, dark/light compatible, no black/gray.
+// Ordered by hue so auto-rotation cycles through visually distinct colors.
 const PALETTE = [
-  "#ffe066",
-  "#8ce99a",
-  "#74c0fc",
-  "#b197fc",
-  "#f783ac",
-  "#ffa94d",
-  "#63e6be",
-  "#f8f9fa",
+  "#ffd43b", // yellow
+  "#a9e34b", // lime
+  "#69db7c", // green
+  "#38d9a9", // teal
+  "#66d9e8", // cyan
+  "#4dabf7", // sky blue
+  "#748ffc", // indigo
+  "#cc5de8", // purple
+  "#f06595", // pink
+  "#ff6b6b", // coral
+  "#ff922b", // orange
+  "#ffa94d", // amber
 ]
 
 // Inject keyframes for bubble animation
@@ -2717,6 +2723,9 @@ function PlaneCanvas({
     moveElementToPlane,
   } = useAppContext()
 
+  const colorScheme = useComputedColorScheme("light")
+  const isDark = colorScheme === "dark"
+
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [pan, setPan] = useState<Vec2>({ x: 0, y: 0 })
   const panStart = useRef<{ mouse: Vec2; origin: Vec2 } | null>(null)
@@ -2741,9 +2750,9 @@ function PlaneCanvas({
   const [elementPickerPos, setElementPickerPos] = useState<Vec2 | null>(null)
   const [elementPickerOpen, setElementPickerOpen] = useState(false)
   // Start with a real color – gray default is not available for new elements
-  const [selectedColor, setSelectedColor] = useState<string>(PALETTE[2]) // #74c0fc (light blue)
-  // Plain text formatting options (default: black text, no formatting)
-  const [textColor, setTextColor] = useState<string>("#000000")
+  const [selectedColor, setSelectedColor] = useState<string>(PALETTE[5]) // sky blue
+  // Plain text formatting options (default: black text in light mode, white in dark)
+  const [textColor, setTextColor] = useState<string>(isDark ? "#ffffff" : "#000000")
   const [textFormatting, setTextFormatting] = useState<TextFormatting>({
     bold: false,
     italic: false,
@@ -2759,7 +2768,65 @@ function PlaneCanvas({
   const drawingKindRef = useRef<"line" | "pen" | "rectangle" | null>(null)
   const plaintextEditingRef = useRef(false)
 
-  // ── Collection fusion state ────────────────────────────────────────────────────────────────
+  // ── Track color scheme changes to auto-invert plain text colors ─────────
+  const prevSchemeRef = useRef(colorScheme)
+  useEffect(() => {
+    if (prevSchemeRef.current === colorScheme) return
+    const nowDark = colorScheme === "dark"
+    prevSchemeRef.current = colorScheme
+    // Update toolbar default text color
+    setTextColor((prev) => {
+      if (nowDark && prev === "#000000") return "#ffffff"
+      if (!nowDark && prev === "#ffffff") return "#000000"
+      return prev
+    })
+    // Invert existing plain text element colors (black ↔ white only)
+    const updated = plane.elements.map((el) => {
+      if (el.type !== "plaintext") return el
+      const ptel = el as CanvasPlainTextElement
+      if (nowDark && ptel.color === "#000000")
+        return { ...ptel, color: "#ffffff" }
+      if (!nowDark && ptel.color === "#ffffff")
+        return { ...ptel, color: "#000000" }
+      return el
+    })
+    if (updated.some((el, i) => el !== plane.elements[i])) {
+      updatePlane({ ...plane, elements: updated })
+    }
+  }, [colorScheme]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Pick next free collection color (hue-rotation) ─────────────────────
+  const nextCollectionColor = (): string => {
+    const usedColors = new Set(
+      (
+        plane.elements.filter(
+          (e) => e.type === "collection",
+        ) as CanvasCollectionElement[]
+      ).map((c) => c.color),
+    )
+    const free = PALETTE.find((c) => !usedColors.has(c))
+    if (free) return free
+    // All used – pick the one used least (wrap around cycle)
+    const counts = new Map(PALETTE.map((c) => [c, 0]))
+    for (const el of plane.elements) {
+      if (el.type === "collection") {
+        const col = el as CanvasCollectionElement
+        if (col.color && counts.has(col.color))
+          counts.set(col.color, (counts.get(col.color) ?? 0) + 1)
+      }
+    }
+    let minColor = PALETTE[0]
+    let minCount = Infinity
+    for (const [c, count] of counts) {
+      if (count < minCount) {
+        minCount = count
+        minColor = c
+      }
+    }
+    return minColor
+  }
+
+
   // srcId = dragged collection, dstId = collection being hovered over
   const [fuseCandidate, setFuseCandidate] = useState<{
     srcId: string
@@ -3427,8 +3494,10 @@ function PlaneCanvas({
       setEditingPlaintextId(newEl.id)
       // keep tool selected so formatting options stay visible
     } else if (tool === "collection") {
+      const color = nextCollectionColor()
       const el = addCollectionElement(plane.id, pos)
-      updateElement(plane.id, { ...el, color: selectedColor })
+      updateElement(plane.id, { ...el, color })
+      setSelectedColor(color)
       setTool("select")
     } else if (tool === "line") {
       const el = addLineElement(plane.id, pos)
@@ -3879,7 +3948,8 @@ function PlaneCanvas({
           </ActionIcon>
         </Tooltip>
         <Divider orientation="vertical" />
-        {/* Color picker */}
+        {/* Color picker — hidden when text tools are active (they have their own picker) */}
+        {tool !== "text" && tool !== "plaintext" && (
         <Popover withArrow shadow="md">
           <Popover.Target>
             <Tooltip
@@ -3899,7 +3969,7 @@ function PlaneCanvas({
             </Tooltip>
           </Popover.Target>
           <Popover.Dropdown p={6}>
-            <Group gap={4} wrap="wrap" w={120}>
+            <Group gap={4} wrap="wrap" w={160}>
               {PALETTE.map((c) => {
                 const isSelected = activeCollection
                   ? activeCollection.color === c
@@ -3930,6 +4000,7 @@ function PlaneCanvas({
             </Group>
           </Popover.Dropdown>
         </Popover>
+        )}
         <Divider orientation="vertical" />
         <Text size="xs" c="dimmed">
           {tool === "pointer" &&
@@ -3970,8 +4041,7 @@ function PlaneCanvas({
                 : tool === "pointer"
                   ? "default"
                   : "crosshair",
-            backgroundImage:
-              "radial-gradient(circle, var(--mantine-color-gray-3) 1px, transparent 1px)",
+            backgroundImage: `radial-gradient(circle, ${isDark ? "var(--mantine-color-dark-4)" : "var(--mantine-color-gray-4)"} 1px, transparent 1px)`,
             backgroundSize: `${GRID}px ${GRID}px`,
             backgroundPosition: `${pan.x % GRID}px ${pan.y % GRID}px`,
           }}
@@ -4129,8 +4199,10 @@ function PlaneCanvas({
                       containerRef,
                       pan,
                     )
+                    const color = nextCollectionColor()
                     const el = addCollectionElement(plane.id, pos)
-                    updateElement(plane.id, { ...el, color: selectedColor })
+                    updateElement(plane.id, { ...el, color })
+                    setSelectedColor(color)
                     setElementPickerOpen(false)
                     setElementPickerPos(null)
                   }}
@@ -4139,7 +4211,7 @@ function PlaneCanvas({
                     borderRadius: 10,
                     border: `2px solid ${selectedColor || "var(--mantine-color-teal-5)"}`,
                     boxShadow: `0 0 0 3px ${selectedColor ? selectedColor + "33" : "var(--mantine-color-teal-2)"}`,
-                    background: "white",
+                    background: "var(--mantine-color-body)",
                     padding: "10px 16px",
                     transition: "box-shadow 120ms",
                   }}
@@ -4149,7 +4221,7 @@ function PlaneCanvas({
                       size={16}
                       color={selectedColor || "var(--mantine-color-teal-6)"}
                     />
-                    <Text size="sm" fw={600} c="dark">
+                    <Text size="sm" fw={600}>
                       Add Data Collection
                     </Text>
                   </Group>
