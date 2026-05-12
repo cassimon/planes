@@ -399,6 +399,24 @@ function findSubstrateNamesInFile(
   return matches.sort((a, b) => b.confidence - a.confidence)
 }
 
+/** Resolve the stable automatic unmatched group label for a file */
+function getAutoUnmatchedGroupName(
+  file: MeasurementFile,
+  substrates: { id: string; name: string }[],
+): string {
+  const matches = findSubstrateNamesInFile(file.fileName, substrates)
+  if (matches.length > 0) {
+    return matches[0].name
+  }
+
+  const extracted = (file.deviceName || "").trim()
+  if (extracted.length > 0) {
+    return extracted.toUpperCase()
+  }
+
+  return "Miscellaneous"
+}
+
 /** Group files by substrate names found within them */
 function groupFilesBySubstrateMatch(
   files: MeasurementFile[],
@@ -446,7 +464,7 @@ function groupFilesBySubstrateMatch(
     // Group by extracted device name
     const filesByDevice = new Map<string, MeasurementFile[]>()
     for (const file of unassignedFiles) {
-      const key = file.deviceName.toUpperCase()
+      const key = getAutoUnmatchedGroupName(file, substrates)
       const existing = filesByDevice.get(key) ?? []
       existing.push(file)
       filesByDevice.set(key, existing)
@@ -568,6 +586,8 @@ function SubstrateCard({
   substrateMaterial,
   files,
   onUnmatchFile,
+  onUnmatchFiles,
+  onDeleteFiles,
   onDropFile,
   onDropGroup,
   onDragEnter,
@@ -575,11 +595,16 @@ function SubstrateCard({
   isDropTarget,
   expanded,
   onToggleExpand,
+  selectedFileIds,
+  onToggleSelectFile,
+  onToggleSelectAll,
 }: {
   substrate: { id: string; name: string; substrateMaterialId?: string }
   substrateMaterial?: Material
   files: MeasurementFile[]
   onUnmatchFile: (fileId: string) => void
+  onUnmatchFiles: (fileIds: string[]) => void
+  onDeleteFiles: (fileIds: string[]) => void
   onDropFile: (fileId: string) => void
   onDropGroup: (groupId: string) => void
   onDragEnter: () => void
@@ -587,7 +612,13 @@ function SubstrateCard({
   isDropTarget: boolean
   expanded: boolean
   onToggleExpand: () => void
+  selectedFileIds: Set<string>
+  onToggleSelectFile: (fileId: string, checked: boolean) => void
+  onToggleSelectAll: (checked: boolean) => void
 }) {
+  const selectedCount = files.filter((f) => selectedFileIds.has(f.id)).length
+  const allSelected = files.length > 0 && selectedCount === files.length
+
   return (
     <Paper
       withBorder
@@ -645,9 +676,47 @@ function SubstrateCard({
 
       {expanded && files.length > 0 && (
         <Box mt="sm" pl="xl">
+          <Group justify="space-between" mb="xs">
+            <Group gap="xs">
+              <Checkbox
+                size="xs"
+                checked={allSelected}
+                indeterminate={selectedCount > 0 && selectedCount < files.length}
+                onChange={(e) => onToggleSelectAll(e.currentTarget.checked)}
+                aria-label={`Select all files in ${substrate.name}`}
+              />
+              <Text size="xs" c="dimmed">
+                {selectedCount} selected
+              </Text>
+            </Group>
+            <Group gap="xs">
+              <Button
+                size="xs"
+                variant="light"
+                disabled={selectedCount === 0}
+                onClick={() =>
+                  onUnmatchFiles(files.filter((f) => selectedFileIds.has(f.id)).map((f) => f.id))
+                }
+              >
+                Move {selectedCount} to unmatched
+              </Button>
+              <Button
+                size="xs"
+                color="red"
+                variant="light"
+                disabled={selectedCount === 0}
+                onClick={() =>
+                  onDeleteFiles(files.filter((f) => selectedFileIds.has(f.id)).map((f) => f.id))
+                }
+              >
+                Delete {selectedCount}
+              </Button>
+            </Group>
+          </Group>
           <Table striped>
             <Table.Thead>
               <Table.Tr>
+                <Table.Th style={{ width: 36 }} />
                 <Table.Th>File</Table.Th>
                 <Table.Th>Type</Table.Th>
                 <Table.Th>Cell</Table.Th>
@@ -667,6 +736,16 @@ function SubstrateCard({
                   }}
                   style={{ cursor: "grab" }}
                 >
+                  <Table.Td>
+                    <Checkbox
+                      size="xs"
+                      checked={selectedFileIds.has(file.id)}
+                      onChange={(e) =>
+                        onToggleSelectFile(file.id, e.currentTarget.checked)
+                      }
+                      aria-label={`Select file ${file.fileName}`}
+                    />
+                  </Table.Td>
                   <Table.Td style={{ maxWidth: 260 }}>
                     <Tooltip
                       label={file.fileName}
@@ -749,6 +828,9 @@ function ResultsDetail({
   const [expandedSubstrates, setExpandedSubstrates] = useState<Set<string>>(new Set())
   const [expandedUnmatchedGroups, setExpandedUnmatchedGroups] = useState<Set<string>>(new Set())
   const [selectedUnmatchedFileIds, setSelectedUnmatchedFileIds] = useState<Set<string>>(new Set())
+  const [selectedSubstrateFileIdsBySubstrate, setSelectedSubstrateFileIdsBySubstrate] = useState<
+    Record<string, Set<string>>
+  >({})
   const [batchAssignTargetSubstrateId, setBatchAssignTargetSubstrateId] = useState<string | null>(null)
   const seenUnmatchedGroupIdsRef = useRef<Set<string>>(new Set())
   const { materials } = useAppContext()
@@ -799,21 +881,6 @@ function ResultsDetail({
   )
   const results = experimentResults ?? fallbackResults
 
-  const groupedFileIds = useMemo(() => {
-    const ids = new Set<string>()
-    for (const group of results.deviceGroups) {
-      for (const file of group.files) {
-        ids.add(file.id)
-      }
-    }
-    return ids
-  }, [results.deviceGroups])
-
-  const ungroupedFiles = useMemo(
-    () => results.files.filter((file) => !groupedFileIds.has(file.id)),
-    [results.files, groupedFileIds],
-  )
-
   const toggleSubstrateExpand = (substrateId: string) => {
     setExpandedSubstrates((prev) => {
       const next = new Set(prev)
@@ -837,79 +904,6 @@ function ResultsDetail({
       return next
     })
   }
-
-  // Group files by device name based on strategy
-  const groupFilesByDevice = useCallback(
-    (
-      files: MeasurementFile[],
-      strategy: "exact" | "search" | "fuzzy",
-    ): DeviceGroup[] => {
-      const groups: DeviceGroup[] = []
-      const filesByDevice = new Map<string, MeasurementFile[]>()
-
-      if (strategy === "exact") {
-        // Group by exact device name
-        for (const file of files) {
-          const key = file.deviceName
-          const existing = filesByDevice.get(key) ?? []
-          existing.push(file)
-          filesByDevice.set(key, existing)
-        }
-      } else if (strategy === "search") {
-        // Group by exact device name — same as the Python app's
-        // "Search by Device Name" which uses groupby("Device Name").
-        // Files are only grouped together when their extracted device name
-        // is identical (case-insensitive). Substring inclusion was removed
-        // because it caused false merges (e.g. "AI4" folded into "AI44").
-        for (const file of files) {
-          const key = file.deviceName.toUpperCase()
-          const existing = filesByDevice.get(key) ?? []
-          existing.push(file)
-          filesByDevice.set(key, existing)
-        }
-      } else {
-        // Fuzzy matching - group similar names together
-        const assigned = new Set<string>()
-        for (const file of files) {
-          if (assigned.has(file.id)) {
-            continue
-          }
-
-          const groupFiles = [file]
-          assigned.add(file.id)
-
-          for (const other of files) {
-            if (assigned.has(other.id)) {
-              continue
-            }
-            const similarity = stringSimilarity(
-              file.deviceName,
-              other.deviceName,
-            )
-            if (similarity > 0.8) {
-              groupFiles.push(other)
-              assigned.add(other.id)
-            }
-          }
-
-          const key = file.deviceName || `group-${groups.length}`
-          filesByDevice.set(key, groupFiles)
-        }
-      }
-
-      for (const [deviceName, groupFiles] of filesByDevice.entries()) {
-        groups.push({
-          id: crypto.randomUUID(),
-          deviceName,
-          files: groupFiles,
-          assignedSubstrateId: null,
-        })
-      }
-
-      return groups
-    },
-    [],
-  )
 
   // Match groups to substrates
   const matchGroupsToSubstrates = useCallback(
@@ -1097,8 +1091,12 @@ function ResultsDetail({
         "fuzzy",
       )
       
-      // Step 5: Combine all groups
-      const matchedGroups = [...matchedSubstrateGroups, ...matchedRemainingGroups]
+      // Step 5: Combine all groups and keep prior manual review state
+      const matchedGroups = [
+        ...results.deviceGroups,
+        ...matchedSubstrateGroups,
+        ...matchedRemainingGroups,
+      ]
 
       onUpdateResults({
         ...results,
@@ -1110,9 +1108,7 @@ function ResultsDetail({
     [
       experiment.substrates,
       results,
-      groupedFileIds,
       onUpdateResults,
-      groupFilesByDevice,
       matchGroupsToSubstrates,
     ],
   )
@@ -1185,22 +1181,82 @@ function ResultsDetail({
     [onUpdateResults, results],
   )
 
-  // Move a file from substrate to unmatched
-  const handleUnmatchFile = (fileId: string, fromSubstrateId: string) => {
-    const updatedGroups = results.deviceGroups.map((g) => {
-      if (g.assignedSubstrateId !== fromSubstrateId) return g
-      return {
-        ...g,
-        files: g.files.filter((f) => f.id !== fileId),
+  const moveFilesToUnmatched = useCallback(
+    (fileIds: string[]) => {
+      if (fileIds.length === 0) {
+        return
       }
-    }).filter((g) => g.files.length > 0)
 
-    onUpdateResults({
-      ...results,
-      deviceGroups: updatedGroups,
-      updatedAt: new Date().toISOString(),
-    })
+      const fileIdSet = new Set(fileIds)
+      const filesToMove = results.files.filter((f) => fileIdSet.has(f.id))
+      if (filesToMove.length === 0) {
+        return
+      }
+
+      const retainedGroups = results.deviceGroups
+        .map((g) => ({
+          ...g,
+          files: g.files.filter((f) => !fileIdSet.has(f.id)),
+        }))
+        .filter((g) => g.files.length > 0)
+
+      const unmatchedGroups = retainedGroups.filter((g) => !g.assignedSubstrateId)
+      const matchedGroups = retainedGroups.filter((g) => g.assignedSubstrateId)
+
+      for (const file of filesToMove) {
+        const targetGroupName = getAutoUnmatchedGroupName(file, experiment.substrates)
+        const existing = unmatchedGroups.find((g) => g.deviceName === targetGroupName)
+        if (existing) {
+          existing.files = [...existing.files, file]
+        } else {
+          unmatchedGroups.push({
+            id: crypto.randomUUID(),
+            deviceName: targetGroupName,
+            files: [file],
+            assignedSubstrateId: null,
+            matchScore: 0,
+          })
+        }
+      }
+
+      onUpdateResults({
+        ...results,
+        deviceGroups: [...matchedGroups, ...unmatchedGroups],
+        updatedAt: new Date().toISOString(),
+      })
+    },
+    [experiment.substrates, onUpdateResults, results],
+  )
+
+  // Move a file from substrate back to its automatic unmatched group
+  const handleUnmatchFile = (fileId: string, _fromSubstrateId: string) => {
+    moveFilesToUnmatched([fileId])
   }
+
+  const handleDeleteFiles = useCallback(
+    (fileIds: string[]) => {
+      if (fileIds.length === 0) {
+        return
+      }
+
+      const fileIdSet = new Set(fileIds)
+      const updatedFiles = results.files.filter((f) => !fileIdSet.has(f.id))
+      const updatedGroups = results.deviceGroups
+        .map((g) => ({
+          ...g,
+          files: g.files.filter((f) => !fileIdSet.has(f.id)),
+        }))
+        .filter((g) => g.files.length > 0)
+
+      onUpdateResults({
+        ...results,
+        files: updatedFiles,
+        deviceGroups: updatedGroups,
+        updatedAt: new Date().toISOString(),
+      })
+    },
+    [onUpdateResults, results],
+  )
 
   // Assign file from unmatched to substrate
   const handleAssignFileToSubstrate = (fileId: string, substrateId: string) => {
@@ -1235,6 +1291,44 @@ function ResultsDetail({
       } else {
         next.delete(fileId)
       }
+      return next
+    })
+  }
+
+  const toggleSelectSubstrateFile = (
+    substrateId: string,
+    fileId: string,
+    checked: boolean,
+  ) => {
+    setSelectedSubstrateFileIdsBySubstrate((prev) => {
+      const next = { ...prev }
+      const current = new Set(next[substrateId] ?? [])
+      if (checked) {
+        current.add(fileId)
+      } else {
+        current.delete(fileId)
+      }
+      next[substrateId] = current
+      return next
+    })
+  }
+
+  const toggleSelectAllSubstrateFiles = (
+    substrateId: string,
+    fileIds: string[],
+    checked: boolean,
+  ) => {
+    setSelectedSubstrateFileIdsBySubstrate((prev) => {
+      const next = { ...prev }
+      const current = new Set(next[substrateId] ?? [])
+      for (const id of fileIds) {
+        if (checked) {
+          current.add(id)
+        } else {
+          current.delete(id)
+        }
+      }
+      next[substrateId] = current
       return next
     })
   }
@@ -1288,7 +1382,6 @@ function ResultsDetail({
 
     setSelectedUnmatchedFileIds((prev) => {
       const validFileIds = new Set<string>([
-        ...ungroupedFiles.map((f) => f.id),
         ...unmatchedGroups.flatMap((g) => g.files.map((f) => f.id)),
       ])
       const next = new Set<string>()
@@ -1299,7 +1392,27 @@ function ResultsDetail({
       }
       return next
     })
-  }, [unmatchedGroups, ungroupedFiles])
+
+    setSelectedSubstrateFileIdsBySubstrate((prev) => {
+      const next: Record<string, Set<string>> = {}
+      for (const substrate of experiment.substrates) {
+        const currentSelection = prev[substrate.id] ?? new Set<string>()
+        const currentFileIds = new Set(
+          results.deviceGroups
+            .filter((g) => g.assignedSubstrateId === substrate.id)
+            .flatMap((g) => g.files.map((f) => f.id)),
+        )
+        const filtered = new Set<string>()
+        for (const id of currentSelection) {
+          if (currentFileIds.has(id)) {
+            filtered.add(id)
+          }
+        }
+        next[substrate.id] = filtered
+      }
+      return next
+    })
+  }, [experiment.substrates, results.deviceGroups, unmatchedGroups])
   
   // Get files for each substrate
   const getSubstrateFiles = (substrateId: string) => {
@@ -1308,8 +1421,8 @@ function ResultsDetail({
   }
   
   const totalMatchedFiles = matchedGroups.reduce((sum, g) => sum + g.files.length, 0)
-  const totalUnmatchedFiles = unmatchedGroups.reduce((sum, g) => sum + g.files.length, 0) + ungroupedFiles.length
-  const allFilesMatched = results.files.length > 0 && ungroupedFiles.length === 0 && unmatchedGroups.length === 0
+  const totalUnmatchedFiles = unmatchedGroups.reduce((sum, g) => sum + g.files.length, 0)
+  const allFilesMatched = results.files.length > 0 && unmatchedGroups.length === 0
 
   return (
     <Box style={{ height: "100%", display: "flex", flexDirection: "column" }}>
@@ -2299,110 +2412,6 @@ function ResultsDetail({
                             </Table>
                           </Paper>
                         )}
-                        
-                        {/* Individual ungrouped files */}
-                        {ungroupedFiles.length > 0 && (
-                          <Paper withBorder p="sm" radius="md">
-                            <Text size="xs" fw={600} mb="xs" c="dimmed">
-                              Individual Files
-                            </Text>
-                            <Table striped>
-                              <Table.Thead>
-                                <Table.Tr>
-                                  <Table.Th style={{ width: 36 }}>
-                                    <Checkbox
-                                      size="xs"
-                                      checked={
-                                        ungroupedFiles.length > 0 &&
-                                        ungroupedFiles.every((f) =>
-                                          selectedUnmatchedFileIds.has(f.id),
-                                        )
-                                      }
-                                      onChange={(e) => {
-                                        const checked = e.currentTarget.checked
-                                        for (const file of ungroupedFiles) {
-                                          toggleSelectUnmatchedFile(file.id, checked)
-                                        }
-                                      }}
-                                      aria-label="Select all individual files"
-                                    />
-                                  </Table.Th>
-                                  <Table.Th>File</Table.Th>
-                                  <Table.Th>Type</Table.Th>
-                                  <Table.Th>Device</Table.Th>
-                                  <Table.Th style={{ width: 180 }}>Assign to</Table.Th>
-                                </Table.Tr>
-                              </Table.Thead>
-                              <Table.Tbody>
-                                {ungroupedFiles.map((file) => (
-                                  <Table.Tr
-                                    key={file.id}
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.dataTransfer.setData("text/plain", file.id)
-                                      e.dataTransfer.effectAllowed = "move"
-                                    }}
-                                    style={{ cursor: "grab" }}
-                                  >
-                                    <Table.Td>
-                                      <Checkbox
-                                        size="xs"
-                                        checked={selectedUnmatchedFileIds.has(file.id)}
-                                        onChange={(e) =>
-                                          toggleSelectUnmatchedFile(
-                                            file.id,
-                                            e.currentTarget.checked,
-                                          )
-                                        }
-                                        aria-label={`Select file ${file.fileName}`}
-                                      />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <Group
-                                        gap={4}
-                                        wrap="nowrap"
-                                        style={{ overflow: "hidden", maxWidth: 200 }}
-                                      >
-                                        <IconFile
-                                          size={14}
-                                          style={{ flexShrink: 0 }}
-                                        />
-                                        <Text
-                                          size="xs"
-                                          style={{
-                                            overflow: "hidden",
-                                            textOverflow: "ellipsis",
-                                            whiteSpace: "nowrap",
-                                          }}
-                                        >
-                                          {file.fileName}
-                                        </Text>
-                                      </Group>
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <FileTypeBadge type={file.fileType} />
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <Text size="xs">{file.deviceName || "—"}</Text>
-                                    </Table.Td>
-                                    <Table.Td>
-                                      <Select
-                                        size="xs"
-                                        placeholder="Select substrate..."
-                                        value={null}
-                                        onChange={(v) => v && handleAssignFileToSubstrate(file.id, v)}
-                                        data={substrates.map((s) => ({
-                                          value: s.id,
-                                          label: s.name,
-                                        }))}
-                                      />
-                                    </Table.Td>
-                                  </Table.Tr>
-                                ))}
-                              </Table.Tbody>
-                            </Table>
-                          </Paper>
-                        )}
                       </Stack>
                     )}
                   </Stack>
@@ -2444,6 +2453,20 @@ function ResultsDetail({
                               substrateMaterial={substrateMaterial}
                               files={files}
                               onUnmatchFile={(fileId) => handleUnmatchFile(fileId, substrate.id)}
+                              onUnmatchFiles={(fileIds) => {
+                                moveFilesToUnmatched(fileIds)
+                                setSelectedSubstrateFileIdsBySubstrate((prev) => ({
+                                  ...prev,
+                                  [substrate.id]: new Set<string>(),
+                                }))
+                              }}
+                              onDeleteFiles={(fileIds) => {
+                                handleDeleteFiles(fileIds)
+                                setSelectedSubstrateFileIdsBySubstrate((prev) => ({
+                                  ...prev,
+                                  [substrate.id]: new Set<string>(),
+                                }))
+                              }}
                               onDropFile={(fileId) => handleAssignFileToSubstrate(fileId, substrate.id)}
                               onDropGroup={(groupId) => handleAssignGroupToSubstrate(groupId, substrate.id)}
                               onDragEnter={() => setDropTargetGroupId(substrate.id)}
@@ -2455,6 +2478,17 @@ function ResultsDetail({
                               isDropTarget={dropTargetGroupId === substrate.id}
                               expanded={expandedSubstrates.has(substrate.id)}
                               onToggleExpand={() => toggleSubstrateExpand(substrate.id)}
+                              selectedFileIds={selectedSubstrateFileIdsBySubstrate[substrate.id] ?? new Set<string>()}
+                              onToggleSelectFile={(fileId, checked) =>
+                                toggleSelectSubstrateFile(substrate.id, fileId, checked)
+                              }
+                              onToggleSelectAll={(checked) =>
+                                toggleSelectAllSubstrateFiles(
+                                  substrate.id,
+                                  files.map((f) => f.id),
+                                  checked,
+                                )
+                              }
                             />
                           )
                         })}
