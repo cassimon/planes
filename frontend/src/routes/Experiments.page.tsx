@@ -25,7 +25,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react"
 import * as React from "react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   type CanvasCollectionElement,
   type Experiment,
@@ -1282,6 +1282,8 @@ export default function ExperimentsPage() {
     updateElement,
     activeCollectionId,
     activePlaneId,
+    pendingCollectionLink,
+    setPendingCollectionLink,
   } = useAppContext()
 
   const [selectedExpId, setSelectedExpId] = useState<string | null>(
@@ -1301,6 +1303,49 @@ export default function ExperimentsPage() {
   const [nextStepDefaults, setNextStepDefaults] = useState<Record<number, string>>(
     {},
   )
+
+  // Track processed pending request IDs to avoid double-firing
+  const processedPendingRequestIdsRef = useRef(new Set<string>())
+
+  // Auto-create experiment + link to collection when navigated from action bubble
+  React.useEffect(() => {
+    if (!pendingCollectionLink || pendingCollectionLink.kind !== "experiment") {
+      return
+    }
+    if (processedPendingRequestIdsRef.current.has(pendingCollectionLink.requestId)) {
+      return
+    }
+    processedPendingRequestIdsRef.current.add(pendingCollectionLink.requestId)
+
+    const { collectionId, planeId } = pendingCollectionLink
+    setPendingCollectionLink(null)
+
+    // Need at least one process to create an experiment
+    const processId = processes[0]?.id
+    if (!processId) return
+
+    const newExp = newExperiment(processId)
+    setExperiments((prev) => [...prev, newExp])
+
+    // Link back to collection
+    const plane = planes.find((p) => p.id === planeId)
+    if (plane) {
+      const col = plane.elements.find((e) => e.id === collectionId)
+      if (col && col.type === "collection") {
+        updateElement(planeId, {
+          ...col,
+          refs: [...col.refs, { kind: "experiment" as const, id: newExp.id }],
+        })
+      }
+    }
+  }, [
+    pendingCollectionLink,
+    setPendingCollectionLink,
+    processes,
+    setExperiments,
+    planes,
+    updateElement,
+  ])
 
   const selectedExperiment = experiments.find((e) => e.id === selectedExpId)
   const selectedProcess =

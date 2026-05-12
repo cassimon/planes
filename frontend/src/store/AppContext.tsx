@@ -329,9 +329,6 @@ export function getExperimentMissingFields(exp: Experiment): string[] {
   if (!exp.date) {
     missing.push("date")
   }
-  if (!exp.numSubstrates || exp.numSubstrates < 1) {
-    missing.push("numSubstrates")
-  }
   return missing
 }
 
