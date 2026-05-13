@@ -63,7 +63,7 @@ function NomadCallback() {
         return response.json()
       })
       .then((data) => {
-        localStorage.setItem("access_token", data.access_token)
+        sessionStorage.setItem("access_token", data.access_token)
         navigate({ to: "/" })
       })
       .catch((err: Error) => {

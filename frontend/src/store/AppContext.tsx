@@ -1041,7 +1041,7 @@ export function AppProvider({
   backend?: BackendAdapter
 }) {
   // Use HttpBackend by default if user is authenticated, fall back to InMemory
-  const getToken = useCallback(() => localStorage.getItem("access_token"), [])
+  const getToken = useCallback(() => sessionStorage.getItem("access_token"), [])
 
   const defaultBackend = useMemo(() => {
     const token = getToken()
