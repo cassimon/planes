@@ -199,16 +199,21 @@ def preview_nomad_metadata(
     """
     try:
         experiment_snapshot = None
+        process_snapshot = None
         if request.custom_metadata and isinstance(request.custom_metadata, dict):
             candidate = request.custom_metadata.get("experiment")
             if isinstance(candidate, dict):
                 experiment_snapshot = candidate
+            proc_candidate = request.custom_metadata.get("process")
+            if isinstance(proc_candidate, dict):
+                process_snapshot = proc_candidate
 
         metadata_json = create_nomad_metadata_yaml(
             experiment_id=request.experiment_id,
             user_name=current_user.full_name or current_user.email,
             session=session,
             experiment_snapshot=experiment_snapshot,
+            process_snapshot=process_snapshot,
         )
         
         logger.info(f"DEBUG: metadata_json type: {type(metadata_json)}, keys: {list(metadata_json.keys()) if isinstance(metadata_json, dict) else 'N/A'}")
@@ -396,10 +401,14 @@ async def upload_to_nomad_endpoint(
     
     try:
         experiment_snapshot = None
+        process_snapshot = None
         if request.custom_metadata and isinstance(request.custom_metadata, dict):
             candidate = request.custom_metadata.get("experiment")
             if isinstance(candidate, dict):
                 experiment_snapshot = candidate
+            proc_candidate = request.custom_metadata.get("process")
+            if isinstance(proc_candidate, dict):
+                process_snapshot = proc_candidate
 
         # Generate metadata JSON
         metadata_json = create_nomad_metadata_yaml(
@@ -407,6 +416,7 @@ async def upload_to_nomad_endpoint(
             user_name=current_user.full_name or current_user.email,
             session=session,
             experiment_snapshot=experiment_snapshot,
+            process_snapshot=process_snapshot,
         )
         # Convert to YAML for NOMAD upload
         metadata_yaml = yaml.dump(metadata_json, default_flow_style=False, allow_unicode=True, sort_keys=False)

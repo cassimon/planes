@@ -840,7 +840,7 @@ function ResultsDetail({
   >({})
   const [batchAssignTargetSubstrateId, setBatchAssignTargetSubstrateId] = useState<string | null>(null)
   const seenUnmatchedGroupIdsRef = useRef<Set<string>>(new Set())
-  const { materials } = useAppContext()
+  const { materials, processes } = useAppContext()
   const theme = useMantineTheme()
 
   // NOMAD upload state
@@ -1446,11 +1446,13 @@ function ResultsDetail({
   }))
 
   const buildNomadUploadRequest = useCallback((): NomadUploadRequest => {
+    const linkedProcess = processes.find((p) => p.id === experiment.processId) ?? null
     return {
       experiment_id: experiment.id,
       experiment_name: experiment.name,
       custom_metadata: {
         experiment,
+        process: linkedProcess,
       },
       substrates,
       measurement_files: results.files.map((f) => ({
@@ -1475,7 +1477,7 @@ function ResultsDetail({
         })),
       })),
     }
-  }, [experiment, results.deviceGroups, results.files, substrates])
+  }, [experiment, processes, results.deviceGroups, results.files, substrates])
 
   const handleUploadToNomad = useCallback(async () => {
     if (!nomadConfig?.enabled) {

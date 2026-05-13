@@ -111,4 +111,4 @@ data:
     default_Voc: 1.5
     default_Jsc: 20
     default_FF: 80
-    default_PCE: 13
+    default_PCE: 13https://github.com/FAIRmat-NFDI/nomad-perovskite-solar-cells-database/tree/main/src/perovskite_solar_cell_database/schema_sections
