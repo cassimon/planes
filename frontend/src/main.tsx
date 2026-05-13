@@ -15,13 +15,12 @@ import "./index.css"
 import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
-OpenAPI.TOKEN = async (_options?: unknown) => {
-  return localStorage.getItem("access_token") || ""
-}
+OpenAPI.WITH_CREDENTIALS = true
+OpenAPI.TOKEN = undefined
 
 const handleApiError = (error: Error) => {
   if (error instanceof ApiError && [401, 403].includes(error.status)) {
-    localStorage.removeItem("access_token")
+    localStorage.removeItem("logged_in")
     window.location.href = "/login"
   }
 }

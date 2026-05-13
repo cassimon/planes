@@ -8,7 +8,7 @@ import {
   type UserRegister,
   UsersService,
 } from "@/client"
-import { isLoggedIn } from "@/lib/auth"
+import { clearLoggedIn, isLoggedIn, setLoggedIn } from "@/lib/auth"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
 
@@ -37,10 +37,10 @@ const useAuth = () => {
   })
 
   const login = async (data: AccessToken) => {
-    const response = await LoginService.loginAccessToken({
-      formData: data,
-    })
-    localStorage.setItem("access_token", response.access_token)
+    // The backend sets an httpOnly cookie — we only need a non-sensitive
+    // presence flag in localStorage to know we're logged in.
+    await LoginService.loginAccessToken({ formData: data })
+    setLoggedIn()
   }
 
   const loginMutation = useMutation({
@@ -52,8 +52,13 @@ const useAuth = () => {
     onError: handleError.bind(showErrorToast),
   })
 
-  const logout = () => {
-    localStorage.removeItem("access_token")
+  const logout = async () => {
+    // Clear the httpOnly cookie server-side, then clear the local flag.
+    try {
+      await LoginService.logout()
+    } catch { /* ignore network errors on logout */ }
+    clearLoggedIn()
+    queryClient.clear()
     navigate({ to: "/login" })
   }
 

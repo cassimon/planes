@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -24,10 +24,13 @@ router = APIRouter(tags=["login"])
 
 @router.post("/login/access-token")
 def login_access_token(
-    session: SessionDep, form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+    response: Response,
+    session: SessionDep,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     """
-    OAuth2 compatible token login, get an access token for future requests
+    OAuth2 compatible token login, get an access token for future requests.
+    Sets an httpOnly cookie with the token to prevent XSS token theft.
     """
     user = crud.authenticate(
         session=session, email=form_data.username, password=form_data.password
@@ -37,11 +40,29 @@ def login_access_token(
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    return Token(
-        access_token=security.create_access_token(
-            user.id, expires_delta=access_token_expires
-        )
+    access_token = security.create_access_token(
+        user.id, expires_delta=access_token_expires
     )
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENVIRONMENT == "production",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    return Token(access_token=access_token)
+
+
+@router.post("/login/logout")
+def logout(response: Response) -> Message:
+    """Clear the httpOnly session cookie."""
+    response.delete_cookie(
+        key="access_token",
+        samesite="lax",
+        secure=settings.ENVIRONMENT == "production",
+    )
+    return Message(message="Logged out")
 
 
 @router.post("/login/test-token", response_model=UserPublic)
@@ -160,11 +181,12 @@ def nomad_oauth_authorize() -> NomadAuthorizeParams:
 
 
 @router.post("/login/nomad/exchange")
-def nomad_oauth_exchange(body: NomadExchangeRequest) -> Token:
+def nomad_oauth_exchange(response: Response, body: NomadExchangeRequest) -> Token:
     """
     Exchange a Keycloak authorization code (+ PKCE code_verifier) for an
     access token.  Plains re-uses the Keycloak access token as its own bearer
     token so that the NOMAD upload service can forward it when needed.
+    Sets an httpOnly cookie with the token to prevent XSS token theft.
     """
     if not settings.NOMAD_OAUTH_ENABLED:
         raise HTTPException(
@@ -215,4 +237,11 @@ def nomad_oauth_exchange(body: NomadExchangeRequest) -> Token:
     # Validate the token locally via JWKS — ensures it wasn't tampered with
     security.verify_nomad_token(access_token)
 
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.ENVIRONMENT == "production",
+    )
     return Token(access_token=access_token)

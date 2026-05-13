@@ -2,14 +2,20 @@ import { redirect } from "@tanstack/react-router"
 
 import { ApiError, UsersService } from "@/client"
 
-const ACCESS_TOKEN_KEY = "access_token"
+// Non-sensitive session presence flag (not the token itself — the actual token
+// lives in an httpOnly cookie that JavaScript cannot read).
+const LOGGED_IN_KEY = "logged_in"
 
-const clearStoredAccessToken = () => {
-  localStorage.removeItem(ACCESS_TOKEN_KEY)
+export const setLoggedIn = () => {
+  localStorage.setItem(LOGGED_IN_KEY, "1")
+}
+
+export const clearLoggedIn = () => {
+  localStorage.removeItem(LOGGED_IN_KEY)
 }
 
 export const isLoggedIn = () => {
-  return localStorage.getItem(ACCESS_TOKEN_KEY) !== null
+  return localStorage.getItem(LOGGED_IN_KEY) !== null
 }
 
 const isAuthError = (error: unknown) => {
@@ -25,7 +31,7 @@ export const ensureAuthenticated = async () => {
     await UsersService.readUserMe()
   } catch (error) {
     if (isAuthError(error)) {
-      clearStoredAccessToken()
+      clearLoggedIn()
       throw redirect({ to: "/login" })
     }
     throw error
@@ -42,7 +48,7 @@ export const redirectIfAuthenticated = async () => {
     throw redirect({ to: "/" })
   } catch (error) {
     if (isAuthError(error)) {
-      clearStoredAccessToken()
+      clearLoggedIn()
       return
     }
     throw error

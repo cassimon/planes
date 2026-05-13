@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
+import { setLoggedIn } from "@/lib/auth"
 
 export const Route = createFileRoute("/auth/nomad/callback")({
   component: NomadCallback,
@@ -63,7 +64,10 @@ function NomadCallback() {
         return response.json()
       })
       .then((data) => {
-        localStorage.setItem("access_token", data.access_token)
+        // The backend sets an httpOnly cookie — we only store a non-sensitive
+        // presence flag so the frontend knows the user is authenticated.
+        void data
+        setLoggedIn()
         navigate({ to: "/" })
       })
       .catch((err: Error) => {

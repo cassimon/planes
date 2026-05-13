@@ -422,8 +422,8 @@ export class HttpBackend implements BackendAdapter {
     private baseUrl: string = `${import.meta.env.VITE_API_URL}/api/v1`,
   ) {}
 
-  private getToken(): string | null {
-    return localStorage.getItem("access_token")
+  private isLoggedIn(): boolean {
+    return localStorage.getItem("logged_in") !== null
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -431,13 +431,12 @@ export class HttpBackend implements BackendAdapter {
   async load(): Promise<AppSnapshot> {
     try {
       console.log("[HttpBackend] load() called, baseUrl:", this.baseUrl)
-      const token = this.getToken()
-      if (!token) {
-        console.warn("[HttpBackend] load() skipped — no token")
+      if (!this.isLoggedIn()) {
+        console.warn("[HttpBackend] load() skipped — not logged in")
         return { ...EMPTY_SNAPSHOT }
       }
       const stateRes = await fetch(`${this.baseUrl}/state/`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       })
       console.log("[HttpBackend] GET /state/ response:", stateRes.status)
       if (stateRes.ok) {
@@ -493,7 +492,7 @@ export class HttpBackend implements BackendAdapter {
       }
 
       const bulkRes = await fetch(`${this.baseUrl}/state/bulk`, {
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: "include",
       })
       if (!bulkRes.ok) {
         console.warn(
@@ -716,20 +715,17 @@ export class HttpBackend implements BackendAdapter {
       elements: snapshot.planes.reduce((n, p) => n + p.elements.length, 0),
     }
     console.log("[HttpBackend] save() called:", summary)
-    const token = this.getToken()
-    if (!token) {
+    if (!this.isLoggedIn()) {
       console.warn(
-        "[HttpBackend] save() skipped — no token (already logged out)",
+        "[HttpBackend] save() skipped — not logged in (already logged out)",
       )
       return
     }
     try {
       const res = await fetch(`${this.baseUrl}/state/`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ data: snapshot }),
       })
       if (!res.ok) {

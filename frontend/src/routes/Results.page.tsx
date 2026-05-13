@@ -948,14 +948,10 @@ function ResultsDetail({
     try {
       const form = new FormData()
       form.append("archive_path", lastArchivePath)
-      const token =
-        typeof OpenAPI.TOKEN === "function"
-          ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
 
       await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: "include",
         body: form,
       })
     } catch (_e) {
@@ -981,12 +977,11 @@ function ResultsDetail({
       event.returnValue = ""
 
       if (lastArchivePath) {
-        const token = localStorage.getItem("access_token")
         const form = new FormData()
         form.append("archive_path", lastArchivePath)
         fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
           method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          credentials: "include",
           body: form,
           keepalive: true,
         }).catch(() => {})
@@ -1133,16 +1128,9 @@ function ResultsDetail({
             form.append("files", f)
           }
 
-          const token =
-            typeof OpenAPI.TOKEN === "function"
-              ? await OpenAPI.TOKEN({} as any)
-              : OpenAPI.TOKEN || localStorage.getItem("access_token")
-
           const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/files`, {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            credentials: "include",
             body: form,
           })
 
@@ -1530,16 +1518,9 @@ function ResultsDetail({
       formData.append("archive_path", lastArchivePath)
       formData.append("request_json", JSON.stringify(requestData))
 
-      const token =
-        typeof OpenAPI.TOKEN === "function"
-          ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
-
       const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/metadata`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "include",
         body: formData,
       })
 
@@ -1601,15 +1582,9 @@ function ResultsDetail({
         }
       }
 
-      const token =
-        typeof OpenAPI.TOKEN === "function"
-          ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
       const response = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/nomad`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "include",
         body: formData,
       })
 
@@ -1699,16 +1674,9 @@ function ResultsDetail({
       const formData = new FormData()
       formData.append("archive_path", lastArchivePath)
 
-      const token =
-        typeof OpenAPI.TOKEN === "function"
-          ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
-
       const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/metadata/preview`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "include",
         body: formData,
       })
 
@@ -2575,10 +2543,9 @@ export function ResultsPage() {
 
       const form = new FormData()
       form.append("archive_path", archivePath)
-      const token = localStorage.getItem("access_token")
       await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        credentials: "include",
         body: form,
       })
       sessionStorage.removeItem(key)
