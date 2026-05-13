@@ -150,20 +150,21 @@ function mixColors(hex1: string, hex2: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Palette for user-selectable element colors – mid-tone hues, dark/light compatible, no black/gray.
-// Ordered by hue so auto-rotation cycles through visually distinct colors.
+// Ordered for maximum perceptual contrast between consecutive picks in the cycle.
+// Greens/teals are distributed 4 positions apart so they never appear adjacent.
 const PALETTE = [
-  "#ffd43b", // yellow
-  "#a9e34b", // lime
-  "#69db7c", // green
-  "#38d9a9", // teal
-  "#66d9e8", // cyan
-  "#4dabf7", // sky blue
-  "#748ffc", // indigo
-  "#cc5de8", // purple
-  "#f06595", // pink
-  "#ff6b6b", // coral
-  "#ff922b", // orange
-  "#ffa94d", // amber
+  "#4dabf7", // sky blue    (~210°)
+  "#ff6b6b", // coral       (~  0°)
+  "#a9e34b", // lime        (~ 80°)
+  "#cc5de8", // violet      (~290°)
+  "#ffd43b", // yellow      (~ 45°)
+  "#38d9a9", // teal        (~165°)
+  "#f06595", // pink        (~340°)
+  "#748ffc", // indigo      (~245°)
+  "#ff922b", // orange      (~ 30°)
+  "#66d9e8", // cyan        (~185°)
+  "#e64980", // rose        (~325°)
+  "#ffa94d", // amber       (~ 35°)
 ]
 
 // Inject keyframes for bubble animation
@@ -2750,7 +2751,7 @@ function PlaneCanvas({
   const [elementPickerPos, setElementPickerPos] = useState<Vec2 | null>(null)
   const [elementPickerOpen, setElementPickerOpen] = useState(false)
   // Start with a real color – gray default is not available for new elements
-  const [selectedColor, setSelectedColor] = useState<string>(PALETTE[5]) // sky blue
+  const [selectedColor, setSelectedColor] = useState<string>(PALETTE[0]) // sky blue
   // Plain text formatting options (default: black text in light mode, white in dark)
   const [textColor, setTextColor] = useState<string>(isDark ? "#ffffff" : "#000000")
   const [textFormatting, setTextFormatting] = useState<TextFormatting>({
@@ -3286,6 +3287,8 @@ function PlaneCanvas({
     (e) => e.id === activeCollectionId && e.type === "collection",
   ) as CanvasCollectionElement | undefined
   const accentColor = activeCollection?.color || DEFAULT_ACCENT
+  // Pre-compute for element picker preview — avoids IIFE in JSX
+  const pickerNextColor = nextCollectionColor()
 
   // ── Panning (middle-mouse or space+drag) ────────────────────────────────────
   const isPanning = useRef(false)
@@ -3962,7 +3965,7 @@ function PlaneCanvas({
             >
               <ActionIcon variant="subtle" color="gray">
                 <ColorSwatch
-                  color={activeCollection?.color || selectedColor}
+                  color={activeCollection?.color ?? (tool === "collection" ? pickerNextColor : selectedColor)}
                   size={16}
                 />
               </ActionIcon>
@@ -4209,8 +4212,8 @@ function PlaneCanvas({
                   style={{
                     cursor: "pointer",
                     borderRadius: 10,
-                    border: `2px solid ${selectedColor || "var(--mantine-color-teal-5)"}`,
-                    boxShadow: `0 0 0 3px ${selectedColor ? selectedColor + "33" : "var(--mantine-color-teal-2)"}`,
+                    border: `2px solid ${pickerNextColor}`,
+                    boxShadow: `0 0 0 3px ${pickerNextColor}33`,
                     background: "var(--mantine-color-body)",
                     padding: "10px 16px",
                     transition: "box-shadow 120ms",
@@ -4219,7 +4222,7 @@ function PlaneCanvas({
                   <Group gap={6}>
                     <IconFolderPlus
                       size={16}
-                      color={selectedColor || "var(--mantine-color-teal-6)"}
+                      color={pickerNextColor}
                     />
                     <Text size="sm" fw={600}>
                       Add Data Collection
