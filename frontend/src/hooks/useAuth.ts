@@ -40,7 +40,7 @@ const useAuth = () => {
     const response = await LoginService.loginAccessToken({
       formData: data,
     })
-    sessionStorage.setItem("access_token", response.access_token)
+    localStorage.setItem("access_token", response.access_token)
   }
 
   const loginMutation = useMutation({
@@ -53,7 +53,7 @@ const useAuth = () => {
   })
 
   const logout = () => {
-    sessionStorage.removeItem("access_token")
+    localStorage.removeItem("access_token")
     navigate({ to: "/login" })
   }
 

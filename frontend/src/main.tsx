@@ -16,12 +16,12 @@ import { routeTree } from "./routeTree.gen"
 
 OpenAPI.BASE = import.meta.env.VITE_API_URL
 OpenAPI.TOKEN = async (_options?: unknown) => {
-  return sessionStorage.getItem("access_token") || ""
+  return localStorage.getItem("access_token") || ""
 }
 
 const handleApiError = (error: Error) => {
   if (error instanceof ApiError && [401, 403].includes(error.status)) {
-    sessionStorage.removeItem("access_token")
+    localStorage.removeItem("access_token")
     window.location.href = "/login"
   }
 }
