@@ -2729,18 +2729,27 @@ function PlaneCanvas({
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [pan, setPan] = useState<Vec2>({ x: 0, y: 0 })
+  const panRef = useRef<Vec2>({ x: 0, y: 0 })
+  panRef.current = pan
   const panStart = useRef<{ mouse: Vec2; origin: Vec2 } | null>(null)
   const [containerHeight, setContainerHeight] = useState(0)
+  const [containerWidth, setContainerWidth] = useState(0)
+  const containerHeightRef = useRef(0)
+  containerHeightRef.current = containerHeight
 
-  const CANVAS_HEIGHT = 4000
+  // OneNote-style expandable vertical canvas
+  const SECTION_HEIGHT = 800
+  const MIN_SECTIONS = 5 // 5 × 800 = 4000px minimum
+  const [canvasSections, setCanvasSections] = useState(MIN_SECTIONS)
+  const canvasHeight = canvasSections * SECTION_HEIGHT
   // Mutable ref so the wheel listener can read the current value without deps
   const maxPanYRef = useRef(0)
-  maxPanYRef.current = Math.max(0, CANVAS_HEIGHT - containerHeight)
+  maxPanYRef.current = Math.max(0, canvasHeight - containerHeight)
 
-  // Scrollbar geometry (derived from pan.y + containerHeight)
+  // Vertical scrollbar geometry (derived from pan.y + containerHeight)
   const thumbH =
     containerHeight > 0
-      ? Math.max(30, (containerHeight * containerHeight) / CANVAS_HEIGHT)
+      ? Math.max(30, (containerHeight * containerHeight) / canvasHeight)
       : 0
   const thumbTrack = Math.max(0, containerHeight - thumbH)
   const thumbTop =
@@ -3290,6 +3299,28 @@ function PlaneCanvas({
   // Pre-compute for element picker preview — avoids IIFE in JSX
   const pickerNextColor = nextCollectionColor()
 
+  // ── X-axis overflow scrolling (backup for elements beyond viewport) ─────────
+  // Compute the rightmost canvas coordinate of all elements
+  const rightmostX = plane.elements.reduce((acc, el) => {
+    if (el.type === "line") {
+      const line = el as CanvasLineElement
+      return Math.max(acc, ...line.points.map((p) => p.x))
+    }
+    const sized = el as { position: Vec2; size?: Vec2 }
+    return Math.max(acc, sized.position.x + (sized.size?.x ?? 160))
+  }, 0)
+  const maxPanX = Math.max(0, rightmostX + 40 - containerWidth)
+  const maxPanXRef = useRef(0)
+  maxPanXRef.current = maxPanX
+
+  // Horizontal scrollbar geometry (only visible when maxPanX > 0)
+  const xThumbW =
+    containerWidth > 0 && maxPanX > 0
+      ? Math.max(30, (containerWidth * containerWidth) / (containerWidth + maxPanX))
+      : 0
+  const xThumbTrack = Math.max(0, containerWidth - xThumbW)
+  const xThumbLeft = maxPanX > 0 ? (-pan.x / maxPanX) * xThumbTrack : 0
+
   // ── Panning (middle-mouse or space+drag) ────────────────────────────────────
   const isPanning = useRef(false)
   const spaceDown = useRef(false)
@@ -3319,19 +3350,23 @@ function PlaneCanvas({
     }
   }, [])
 
-  // ── Measure container height for scrollbar ─────────────────────────────────
+  // ── Measure container size for scrollbars ──────────────────────────────────
   useEffect(() => {
     const el = containerRef.current
     if (!el) {
       return
     }
-    const ro = new ResizeObserver(() => setContainerHeight(el.clientHeight))
+    const ro = new ResizeObserver(() => {
+      setContainerHeight(el.clientHeight)
+      setContainerWidth(el.clientWidth)
+    })
     ro.observe(el)
     setContainerHeight(el.clientHeight)
+    setContainerWidth(el.clientWidth)
     return () => ro.disconnect()
   }, [])
 
-  // ── Mouse-wheel vertical scrolling (clamped) ────────────────────────────────
+  // ── Mouse-wheel scrolling (x + y) + bottom expansion ──────────────────────
   useEffect(() => {
     const el = containerRef.current
     if (!el) {
@@ -3339,14 +3374,18 @@ function PlaneCanvas({
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      setPan((prev) => ({
-        x: prev.x,
-        y: Math.min(0, Math.max(-maxPanYRef.current, prev.y - e.deltaY)),
-      }))
+      const current = panRef.current
+      const newY = Math.min(0, Math.max(-maxPanYRef.current, current.y - e.deltaY))
+      const newX = Math.min(0, Math.max(-maxPanXRef.current, current.x - e.deltaX))
+      setPan({ x: newX, y: newY })
+      // Expand canvas when scrolling within one section of the bottom
+      if (e.deltaY > 0 && newY <= -(maxPanYRef.current - SECTION_HEIGHT)) {
+        setCanvasSections((s) => s + 1)
+      }
     }
     el.addEventListener("wheel", onWheel, { passive: false })
     return () => el.removeEventListener("wheel", onWheel)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Close element picker when tool changes ─────────────────────────────────
   useEffect(() => {
@@ -3356,7 +3395,35 @@ function PlaneCanvas({
     }
   }, [tool])
 
-  // ── Custom scrollbar thumb drag ─────────────────────────────────────────────
+  // ── Auto-trim canvas sections when scrolling back up ────────────────────────
+  useEffect(() => {
+    if (canvasSections <= MIN_SECTIONS) return
+    const lastSectionStart = (canvasSections - 1) * SECTION_HEIGHT
+    const visibleBottom = -pan.y + containerHeight
+    // Only trim when the view doesn't reach the last section
+    if (visibleBottom < lastSectionStart) {
+      const hasElementInLastSection = plane.elements.some((el) => {
+        if (el.type === "line") {
+          const line = el as CanvasLineElement
+          return line.points.some((p) => p.y >= lastSectionStart)
+        }
+        const positioned = el as { position: Vec2 }
+        return positioned.position.y >= lastSectionStart
+      })
+      if (!hasElementInLastSection) {
+        setCanvasSections((s) => Math.max(MIN_SECTIONS, s - 1))
+      }
+    }
+  }, [pan.y, plane.elements, canvasSections, containerHeight]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Clamp pan.x when maxPanX decreases (elements moved back into view) ─────
+  useEffect(() => {
+    if (pan.x < -maxPanX) {
+      setPan((prev) => ({ ...prev, x: Math.max(-maxPanX, prev.x) }))
+    }
+  }, [maxPanX]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Custom vertical scrollbar thumb drag ───────────────────────────────────
   const thumbDragStart = useRef<{ mouseY: number; panY: number } | null>(null)
 
   const onThumbPointerDown = (e: ReactPointerEvent) => {
@@ -3383,6 +3450,33 @@ function PlaneCanvas({
   const onThumbPointerUp = (e: ReactPointerEvent) => {
     e.stopPropagation()
     thumbDragStart.current = null
+  }
+
+  // ── Custom horizontal scrollbar thumb drag ─────────────────────────────────
+  const xThumbDragStart = useRef<{ mouseX: number; panX: number } | null>(null)
+
+  const onXThumbPointerDown = (e: ReactPointerEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    xThumbDragStart.current = { mouseX: e.clientX, panX: pan.x }
+  }
+  const onXThumbPointerMove = (e: ReactPointerEvent) => {
+    if (!xThumbDragStart.current) return
+    e.stopPropagation()
+    const dx = e.clientX - xThumbDragStart.current.mouseX
+    const newX =
+      xThumbTrack > 0
+        ? xThumbDragStart.current.panX - (dx / xThumbTrack) * maxPanXRef.current
+        : 0
+    setPan((prev) => ({
+      ...prev,
+      x: Math.min(0, Math.max(-maxPanXRef.current, newX)),
+    }))
+  }
+  const onXThumbPointerUp = (e: ReactPointerEvent) => {
+    e.stopPropagation()
+    xThumbDragStart.current = null
   }
 
   const onMouseDown = (e: MouseEvent<HTMLDivElement>) => {
@@ -3539,12 +3633,17 @@ function PlaneCanvas({
 
   const onMouseMove = (e: MouseEvent<HTMLDivElement>) => {
     if (isPanning.current && panStart.current) {
+      const dx = e.clientX - panStart.current.mouse.x
       const dy = e.clientY - panStart.current.mouse.y
+      const newX = Math.min(
+        0,
+        Math.max(-maxPanXRef.current, panStart.current.origin.x + dx),
+      )
       const newY = Math.min(
         0,
         Math.max(-maxPanYRef.current, panStart.current.origin.y + dy),
       )
-      setPan({ x: pan.x, y: newY })
+      setPan({ x: newX, y: newY })
       return
     }
 
@@ -4021,7 +4120,7 @@ function PlaneCanvas({
         </Text>
       </Group>
 
-      {/* Canvas + custom scrollbar */}
+      {/* Canvas + scrollbars */}
       <Box
         style={{
           flex: 1,
@@ -4030,6 +4129,15 @@ function PlaneCanvas({
           overflow: "hidden",
         }}
       >
+        {/* Column: canvas area + optional horizontal scrollbar */}
+        <Box
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
         <Box
           ref={containerRef}
           style={{
@@ -4423,7 +4531,68 @@ function PlaneCanvas({
           )}
         </Box>
 
-        {/* Custom scrollbar track */}
+        {/* Horizontal scrollbar — only shown when elements overflow to the right */}
+        {maxPanX > 0 && (
+          <div
+            role="scrollbar"
+            aria-controls="canvas-area"
+            aria-orientation="horizontal"
+            aria-valuenow={0}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft") {
+                setPan((prev) => ({ ...prev, x: Math.min(0, prev.x + 40) }))
+              } else if (e.key === "ArrowRight") {
+                setPan((prev) => ({
+                  ...prev,
+                  x: Math.max(-maxPanXRef.current, prev.x - 40),
+                }))
+              }
+            }}
+            style={{
+              height: 10,
+              flexShrink: 0,
+              background: "var(--mantine-color-gray-1)",
+              borderTop: "1px solid var(--mantine-color-default-border)",
+              position: "relative",
+              cursor: "default",
+              userSelect: "none",
+            }}
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const frac = (e.clientX - rect.left) / rect.width
+              setPan((prev) => ({
+                ...prev,
+                x: Math.min(0, Math.max(-maxPanXRef.current, -frac * maxPanXRef.current)),
+              }))
+            }}
+          >
+            {xThumbW > 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: xThumbLeft,
+                  top: 1,
+                  bottom: 1,
+                  width: xThumbW,
+                  background: "var(--mantine-color-gray-5)",
+                  borderRadius: 3,
+                  cursor: "grab",
+                  userSelect: "none",
+                  touchAction: "none",
+                }}
+                onPointerDown={onXThumbPointerDown}
+                onPointerMove={onXThumbPointerMove}
+                onPointerUp={onXThumbPointerUp}
+              />
+            )}
+          </div>
+        )}
+        </Box>{/* end column wrapper */}
+
+        {/* Custom vertical scrollbar track */}
         <div
           role="scrollbar"
           aria-controls="canvas-area"
