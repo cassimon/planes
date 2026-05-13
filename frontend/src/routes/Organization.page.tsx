@@ -3180,6 +3180,15 @@ function PlaneCanvas({
         return
       }
 
+      // Delete empty collections immediately without confirmation
+      if (refs.length === 0) {
+        deleteElement(plane.id, collection.id)
+        if (activeCollectionId === collection.id) {
+          setActiveCollectionId(null)
+        }
+        return
+      }
+
       modals.openConfirmModal({
         title: "Delete collection",
         size: "lg",

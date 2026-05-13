@@ -164,6 +164,9 @@ export type ProcessGeneratedStackLayer = {
 export type ProcessGeneratedStack = {
   layers: ProcessGeneratedStackLayer[]
   combination: number
+  architecture?: string
+  pixelAreaCm2?: string
+  numberOfPixels?: string
 }
 
 /** An abstract thin-film deposition process template */

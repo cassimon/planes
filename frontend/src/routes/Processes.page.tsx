@@ -421,6 +421,9 @@ function getDefaultLayerType(
 type GeneratedStack = {
   layers: StackLayer[]
   combination: number // for identifying which alternative combo this represents
+  architecture?: string
+  pixelAreaCm2?: string
+  numberOfPixels?: string
 }
 
 function getStackInvalidationKey(process: Process | null): string {
@@ -613,6 +616,9 @@ function generateStackCombinations(
       stacks.push({
         layers,
         combination: combinationCounter,
+        architecture: "Unknown",
+        pixelAreaCm2: "",
+        numberOfPixels: "4",
       })
       combinationCounter += 1
     }
@@ -625,6 +631,7 @@ type ResultingStacksProps = {
   stacks: GeneratedStack[]
   deletedCombinations: Set<number>
   onLayerChange: (stackIdx: number, layerIdx: number, field: keyof StackLayer, value: string) => void
+  onStackFieldChange: (stackIdx: number, field: "architecture" | "pixelAreaCm2" | "numberOfPixels", value: string) => void
   onDelete: (combination: number) => void
   onRecover: (combination: number) => void
   onRefresh: () => void
@@ -634,6 +641,7 @@ function ResultingStacks({
   stacks,
   deletedCombinations,
   onLayerChange,
+  onStackFieldChange,
   onDelete,
   onRecover,
   onRefresh,
@@ -727,6 +735,85 @@ function ResultingStacks({
                   <IconX size={12} />
                 </ActionIcon>
               </Tooltip>
+
+              {/* Stack-level metadata fields */}
+              <Box mb="md" p="xs" style={{ background: "var(--mantine-color-gray-0)", borderRadius: 6 }}>
+                <Group gap="xs" wrap="nowrap" align="flex-start">
+                  {/* Architecture dropdown */}
+                  <Box style={{ flex: 1 }}>
+                    <Text size="10px" c="dimmed" mb={2}>Architecture</Text>
+                    <select
+                      value={stack.architecture || "Unknown"}
+                      onChange={(e) => onStackFieldChange(stackIdx, "architecture", e.currentTarget.value)}
+                      style={{
+                        width: "100%",
+                        fontSize: 11,
+                        border: "1px solid #dee2e6",
+                        borderRadius: 4,
+                        padding: "4px 6px",
+                        background: "white",
+                        color: "#333",
+                        outline: "none",
+                      }}
+                    >
+                      <option value="Unknown">Unknown</option>
+                      <option value="Pn-Heterojunction">Pn-Heterojunction</option>
+                      <option value="Front contacted">Front contacted</option>
+                      <option value="Back contacted">Back contacted</option>
+                      <option value="pin">pin</option>
+                      <option value="nip">nip</option>
+                      <option value="Schottky">Schottky</option>
+                    </select>
+                  </Box>
+
+                  {/* Pixel area */}
+                  <Box style={{ width: 100 }}>
+                    <Text size="10px" c="dimmed" mb={2}>Area (cm²)</Text>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={stack.pixelAreaCm2 || ""}
+                      onChange={(e) => onStackFieldChange(stackIdx, "pixelAreaCm2", e.currentTarget.value)}
+                      placeholder="—"
+                      style={{
+                        width: "100%",
+                        fontSize: 11,
+                        border: "1px solid #dee2e6",
+                        borderRadius: 4,
+                        padding: "4px 6px",
+                        background: "white",
+                        color: "#333",
+                        outline: "none",
+                        textAlign: "right",
+                      }}
+                    />
+                  </Box>
+
+                  {/* Number of pixels */}
+                  <Box style={{ width: 80 }}>
+                    <Text size="10px" c="dimmed" mb={2}># Pixels</Text>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={stack.numberOfPixels || "4"}
+                      onChange={(e) => onStackFieldChange(stackIdx, "numberOfPixels", e.currentTarget.value)}
+                      style={{
+                        width: "100%",
+                        fontSize: 11,
+                        border: "1px solid #dee2e6",
+                        borderRadius: 4,
+                        padding: "4px 6px",
+                        background: "white",
+                        color: "#333",
+                        outline: "none",
+                        textAlign: "right",
+                      }}
+                    />
+                  </Box>
+                </Group>
+              </Box>
 
               {/* Column headers */}
               <Box style={{ display: "flex", gap: 4, marginBottom: 4, paddingRight: 20 }}>
@@ -1069,7 +1156,7 @@ function ResultingStacks({
 
               {/* Param count badge */}
               {(() => {
-                const paramCount = stack.layers
+                let paramCount = stack.layers
                   .filter((l) => !l.isSubstrate)
                   .reduce((acc, l) => {
                     if (l.thicknessNm) acc++
@@ -1079,6 +1166,11 @@ function ResultingStacks({
                     if (l.perovskiteX) acc++
                     return acc
                   }, 0)
+                // Add stack-level parameters
+                if (stack.architecture && stack.architecture !== "Unknown") paramCount++
+                if (stack.pixelAreaCm2) paramCount++
+                if (stack.numberOfPixels) paramCount++
+                
                 return paramCount > 0 ? (
                   <Box mt="xs" style={{ display: "flex", justifyContent: "flex-end" }}>
                     <Badge size="xs" variant="light" color="teal">
@@ -1447,13 +1539,34 @@ export function ProcessesPage() {
       }
     }
 
-    const preservedStacks = newStacks.map((stack) => ({
-      ...stack,
-      layers: stack.layers.map((layer) => {
-        const existing = existingLayerData.get(layer.id)
-        return existing ? { ...layer, ...existing } : layer
-      }),
-    }))
+    // Preserve stack-level fields by combination number
+    const existingStackData = new Map<
+      number,
+      {
+        architecture?: string
+        pixelAreaCm2?: string
+        numberOfPixels?: string
+      }
+    >()
+    for (const stack of generatedStacks) {
+      existingStackData.set(stack.combination, {
+        architecture: stack.architecture,
+        pixelAreaCm2: stack.pixelAreaCm2,
+        numberOfPixels: stack.numberOfPixels,
+      })
+    }
+
+    const preservedStacks = newStacks.map((stack) => {
+      const existingStack = existingStackData.get(stack.combination)
+      return {
+        ...stack,
+        ...(existingStack || {}),
+        layers: stack.layers.map((layer) => {
+          const existing = existingLayerData.get(layer.id)
+          return existing ? { ...layer, ...existing } : layer
+        }),
+      }
+    })
 
     const updated: Process = {
       ...selectedProcess,
@@ -1513,6 +1626,24 @@ export function ProcessesPage() {
         return l
       }),
     }))
+    const updated: Process = {
+      ...selectedProcess,
+      generatedStacks: updatedStacks as ProcessGeneratedStack[],
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
+  }
+
+  const handleUpdateStackField = (
+    stackIdx: number,
+    field: "architecture" | "pixelAreaCm2" | "numberOfPixels",
+    value: string,
+  ) => {
+    if (!selectedProcess) return
+    const updatedStacks = generatedStacks.map((s, si) =>
+      si === stackIdx ? { ...s, [field]: value } : s
+    )
     const updated: Process = {
       ...selectedProcess,
       generatedStacks: updatedStacks as ProcessGeneratedStack[],
@@ -3432,6 +3563,7 @@ export function ProcessesPage() {
                             stacks={generatedStacks}
                             deletedCombinations={deletedCombinations}
                             onLayerChange={handleUpdateStackLayer}
+                            onStackFieldChange={handleUpdateStackField}
                             onDelete={handleDeleteStack}
                             onRecover={handleRecoverStack}
                             onRefresh={handleGenerateStacks}
