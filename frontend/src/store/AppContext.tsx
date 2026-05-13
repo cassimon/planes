@@ -581,6 +581,12 @@ export type MeasurementFile = {
   content?: string
   /** Parsed value (e.g., PCE percentage) */
   value?: number
+  /** Open-circuit voltage in V (from JV file) */
+  voc?: number
+  /** Short-circuit current density in mA/cm² (from JV or EQE file) */
+  jsc?: number
+  /** Fill factor in % (from JV file) */
+  ff?: number
   /** Date from measurement file */
   measurementDate?: string
   /** User from measurement file */

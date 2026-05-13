@@ -1,4 +1,5 @@
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -34,12 +35,12 @@ import {
   IconUpload,
   IconX,
 } from "@tabler/icons-react"
+import { useBlocker } from "@tanstack/react-router"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { OpenAPI } from "../client/core/OpenAPI"
 import { NomadService } from "../client/sdk.gen"
 import type {
   NomadConfigResponse,
-  NomadMetadataPreview,
   NomadUploadRequest,
   NomadUploadResponse,
 } from "../client/types.gen"
@@ -158,6 +159,9 @@ function parseTxtContent(
 
   let measurementType: MeasurementType = "Document"
   let value: number | undefined
+  let voc: number | undefined
+  let jsc: number | undefined
+  let ff: number | undefined
   let deviceName = ""
   let user = ""
   let measurementDate = ""
@@ -200,9 +204,29 @@ function parseTxtContent(
     }
 
     // Extract PCE value
-    const pceMatch = line.match(/pce[:\s]*(\d+\.?\d*)\s*%?/i)
+    const pceMatch = line.match(/pce[:\s=]*(\d+\.?\d*)\s*%?/i)
     if (pceMatch) {
       value = parseFloat(pceMatch[1])
+    }
+
+    // Extract Voc (V)
+    const vocMatch = line.match(/voc[:\s=]*(\d+\.?\d*)\s*v?/i)
+    if (vocMatch) {
+      voc = parseFloat(vocMatch[1])
+    }
+
+    // Extract Jsc (mA/cm²) — also catches EQE-integrated Jsc
+    const jscMatch = line.match(/(?:integrated\s+)?jsc[:\s=]*(\d+\.?\d*)\s*(?:ma\/cm2?|ma)?/i)
+    if (jscMatch) {
+      jsc = parseFloat(jscMatch[1])
+    }
+
+    // Extract FF (%) — accept decimal (0.xx) or percentage (xx.x)
+    const ffMatch = line.match(/(?:fill\s+factor|ff)[:\s=]*(\d+\.?\d*)\s*%?/i)
+    if (ffMatch) {
+      const raw = parseFloat(ffMatch[1])
+      // Normalise: if value is ≤ 1.0 it is a fraction → convert to %
+      ff = raw <= 1.0 ? raw * 100 : raw
     }
 
     // Extract device name
@@ -233,6 +257,9 @@ function parseTxtContent(
     fileType: measurementType,
     deviceName,
     value,
+    voc,
+    jsc,
+    ff,
     user,
     measurementDate,
   }
@@ -848,6 +875,7 @@ function ResultsDetail({
     null,
   )
   const [nomadUploading, setNomadUploading] = useState(false)
+  const [preparingUpload, setPreparingUpload] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [lastArchivePath, setLastArchivePath] = useState<string | null>(null)
   const [workflowStep, setWorkflowStep] = useState<1 | 2 | 3>(1)
@@ -1462,6 +1490,11 @@ function ResultsDetail({
         cell: f.cell,
         pixel: f.pixel,
         value: f.value,
+        voc: f.voc,
+        jsc: f.jsc,
+        ff: f.ff,
+        user: f.user,
+        measurementDate: f.measurementDate,
       })),
       device_groups: results.deviceGroups.map((g) => ({
         id: g.id,
@@ -1478,6 +1511,68 @@ function ResultsDetail({
       })),
     }
   }, [experiment, processes, results.deviceGroups, results.files, substrates])
+
+  const handlePrepareUpload = useCallback(async () => {
+    if (!lastArchivePath) {
+      notifications.show({
+        title: "No Archive",
+        message: "Please upload files first",
+        color: "orange",
+      })
+      return
+    }
+
+    setPreparingUpload(true)
+    try {
+      const requestData = buildNomadUploadRequest()
+
+      const formData = new FormData()
+      formData.append("archive_path", lastArchivePath)
+      formData.append("request_json", JSON.stringify(requestData))
+
+      const token =
+        typeof OpenAPI.TOKEN === "function"
+          ? await OpenAPI.TOKEN({} as any)
+          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+
+      const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/metadata`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      })
+
+      if (!res.ok) {
+        const text = await res.text()
+        notifications.show({
+          title: "Preparation Error",
+          message: `Failed to prepare upload: ${res.status} ${text}`,
+          color: "red",
+        })
+        return
+      }
+
+      const data = await res.json()
+      
+      setReviewConfirmed(true)
+      
+      notifications.show({
+        title: "Upload Prepared",
+        message: `Archive ready with ${data.metadata_file_count || 0} YAML metadata files`,
+        color: "green",
+      })
+    } catch (err) {
+      console.error("prepare upload error", err)
+      notifications.show({
+        title: "Preparation Error",
+        message: err instanceof Error ? err.message : String(err),
+        color: "red",
+      })
+    } finally {
+      setPreparingUpload(false)
+    }
+  }, [buildNomadUploadRequest, lastArchivePath])
 
   const handleUploadToNomad = useCallback(async () => {
     if (!nomadConfig?.enabled) {
@@ -1496,8 +1591,14 @@ function ResultsDetail({
 
       const formData = new FormData()
       formData.append("request_json", JSON.stringify(requestData))
-      for (const file of uploadedFiles) {
-        formData.append("files", file)
+      
+      // Use pre-created archive if available, otherwise upload files directly
+      if (lastArchivePath) {
+        formData.append("archive_path", lastArchivePath)
+      } else {
+        for (const file of uploadedFiles) {
+          formData.append("files", file)
+        }
       }
 
       const token =
@@ -1576,6 +1677,7 @@ function ResultsDetail({
   }, [
     buildNomadUploadRequest,
     discardTemporaryArchive,
+    lastArchivePath,
     nomadConfig?.enabled,
     onUpdateExperiment,
     onUpdateResults,
@@ -1584,86 +1686,111 @@ function ResultsDetail({
   ])
 
   const openExperimentMetadataPreview = useCallback(async () => {
+    if (!lastArchivePath) {
+      notifications.show({
+        title: "No Archive",
+        message: "Please prepare the upload first",
+        color: "orange",
+      })
+      return
+    }
+
     try {
-      const requestData = buildNomadUploadRequest()
-      const preview: NomadMetadataPreview = await NomadService.previewNomadMetadata({
-        requestBody: requestData,
+      const formData = new FormData()
+      formData.append("archive_path", lastArchivePath)
+
+      const token =
+        typeof OpenAPI.TOKEN === "function"
+          ? await OpenAPI.TOKEN({} as any)
+          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+
+      const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/metadata/preview`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
       })
 
+      if (!res.ok) {
+        const text = await res.text()
+        notifications.show({
+          title: "Preview Error",
+          message: `Failed to load preview: ${res.status} ${text}`,
+          color: "red",
+        })
+        return
+      }
+
+      const data = await res.json()
+
       modals.open({
-        title: "NOMAD Metadata Preview",
+        title: "Review NOMAD Upload",
         size: "xl",
         children: (
           <ScrollArea>
-            <Stack gap="sm">
-              <Text size="xs" c="dimmed">
-                Generated from backend NOMAD service using current experiment state.
-              </Text>
-              <div>
-                <Text fw={600} size="sm">Perovskite Metadata (YAML)</Text>
-                <Code block>{preview.metadata_yaml}</Code>
-              </div>
-              <div>
-                <Text fw={600} size="sm">Upload Archive Metadata (YAML)</Text>
-                <Code block>{preview.yaml_content}</Code>
-              </div>
+            <Stack gap="md">
+              <Alert color="blue" title="Archive Preview">
+                <Text size="sm">
+                  Archive contains {data.total_file_count} files total: {data.metadata_count} metadata files and {data.total_file_count - data.metadata_count} measurement files.
+                </Text>
+              </Alert>
+
+              {/* YAML Files Section */}
+              {data.metadata_count > 0 && (
+                <>
+                  <Title order={4}>Metadata Files (YAML)</Title>
+                  <Accordion variant="separated">
+                    {Object.entries(data.yaml_files).map(([filename, content]) => (
+                      <Accordion.Item key={filename} value={filename}>
+                        <Accordion.Control>
+                          <Group gap="xs">
+                            <IconFile size={16} />
+                            <Text size="sm" fw={500}>{filename}</Text>
+                          </Group>
+                        </Accordion.Control>
+                        <Accordion.Panel>
+                          <ScrollArea h={300}>
+                            <Code block style={{ fontSize: '11px' }}>
+                              {String(content)}
+                            </Code>
+                          </ScrollArea>
+                        </Accordion.Panel>
+                      </Accordion.Item>
+                    ))}
+                  </Accordion>
+                </>
+              )}
+
+              {/* Other Files Section */}
+              <Divider />
+              <Title order={4}>Measurement Files</Title>
+              <Stack gap="xs">
+                {data.all_files
+                  .filter((f: string) => !f.endsWith('.yaml') && !f.endsWith('.yml'))
+                  .map((filename: string) => (
+                    <Group key={filename} gap="xs">
+                      <IconFile size={14} />
+                      <Text size="xs" c="dimmed">{filename}</Text>
+                    </Group>
+                  ))}
+              </Stack>
             </Stack>
           </ScrollArea>
         ),
       })
     } catch (err) {
+      console.error("preview error", err)
       notifications.show({
         title: "Preview Error",
         message:
           err instanceof Error
             ? err.message
-            : "Failed to generate NOMAD metadata preview",
+            : "Failed to load archive preview",
         color: "red",
       })
     }
-  }, [buildNomadUploadRequest])
-
-  const openMeasurementMetadataPreview = useCallback(() => {
-    modals.open({
-      title: "Measurement Files Metadata Preview",
-      size: "lg",
-      children: (
-        <ScrollArea>
-          <Stack gap="sm">
-            <Text size="sm" c="dimmed">{results.files.length} files to upload</Text>
-            <Table striped>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>File Name</Table.Th>
-                  <Table.Th>Type</Table.Th>
-                  <Table.Th>Device</Table.Th>
-                  <Table.Th>Cell</Table.Th>
-                  <Table.Th>Pixel</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {results.files.map((file) => (
-                  <Table.Tr key={file.id}>
-                    <Table.Td>
-                      <Tooltip label={file.fileName} withArrow>
-                        <Text size="xs" truncate style={{ maxWidth: 250 }}>
-                          {file.fileName}
-                        </Text>
-                      </Tooltip>
-                    </Table.Td>
-                    <Table.Td><Text size="xs">{file.fileType}</Text></Table.Td>
-                    <Table.Td><Text size="xs">{file.deviceName}</Text></Table.Td>
-                    <Table.Td><Text size="xs">{file.cell || "—"}</Text></Table.Td>
-                    <Table.Td><Text size="xs">{file.pixel || "—"}</Text></Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Stack>
-        </ScrollArea>
-      ),
-    })
-  }, [results.files])
+  }, [lastArchivePath])
 
   // Separate matched groups (assigned to substrates) from unmatched
   const matchedGroups = useMemo(
@@ -1755,13 +1882,15 @@ function ResultsDetail({
   }, [reviewConfirmed, totalUnmatchedFiles])
 
   const instructionText =
-    workflowStep === 1
-      ? "Drag and drop files here"
-      : workflowStep === 2
-        ? totalUnmatchedFiles > 0
-          ? "You have to assign unmatched files by drag and drop"
-          : "Review all matched files"
-        : "Upload to NOMAD"
+    preparingUpload
+      ? "Preparing upload..."
+      : workflowStep === 1
+        ? "Drag and drop files here"
+        : workflowStep === 2
+          ? totalUnmatchedFiles > 0
+            ? "You have to assign unmatched files by drag and drop"
+            : "Review all matched files"
+          : "Upload to NOMAD"
 
   const goToStep = (step: 1 | 2 | 3) => {
     if (step === 1) {
@@ -1878,8 +2007,14 @@ function ResultsDetail({
                       </Button>
                     )}
                     {workflowStep === 2 && totalUnmatchedFiles === 0 && !reviewConfirmed && (
-                      <Button size="xs" color="green" onClick={() => setReviewConfirmed(true)}>
-                        Confirm review
+                      <Button 
+                        size="xs" 
+                        color="green" 
+                        onClick={handlePrepareUpload}
+                        loading={preparingUpload}
+                        disabled={preparingUpload}
+                      >
+                        {preparingUpload ? "Preparing upload..." : "Confirm review"}
                       </Button>
                     )}
                     {workflowStep === 2 && totalUnmatchedFiles === 0 && reviewConfirmed && (
@@ -2370,16 +2505,9 @@ function ResultsDetail({
                           size="xs"
                           variant="default"
                           onClick={openExperimentMetadataPreview}
+                          disabled={!reviewConfirmed}
                         >
-                          Preview Experiment Metadata
-                        </Button>
-                        <Button
-                          size="xs"
-                          variant="default"
-                          onClick={openMeasurementMetadataPreview}
-                          disabled={results.files.length === 0}
-                        >
-                          Preview Measurement Files
+                          Review NOMAD Upload
                         </Button>
                       </Group>
 
@@ -2437,12 +2565,107 @@ export function ResultsPage() {
     string | null
   >(() => lastSelectedByKind.experiment ?? null)
 
+  const discardArchiveForExperiment = useCallback(async (experimentId: string) => {
+    try {
+      const key = `nomad_archive:${experimentId}`
+      const archivePath = sessionStorage.getItem(key)
+      if (!archivePath) {
+        return
+      }
+
+      const form = new FormData()
+      form.append("archive_path", archivePath)
+      const token = localStorage.getItem("access_token")
+      await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      })
+      sessionStorage.removeItem(key)
+    } catch (_e) {
+      // best effort cleanup
+    }
+  }, [])
+
+  const getInProgressExperimentIds = useCallback((): string[] => {
+    const inProgress = new Set<string>()
+
+    for (const result of results) {
+      if (result.files.length > 0) {
+        inProgress.add(result.experimentId)
+      }
+    }
+
+    try {
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i)
+        if (!key || !key.startsWith("nomad_archive:")) {
+          continue
+        }
+        const experimentId = key.slice("nomad_archive:".length)
+        if (experimentId) {
+          inProgress.add(experimentId)
+        }
+      }
+    } catch (_e) {
+      // ignore sessionStorage errors in restrictive environments
+    }
+
+    return Array.from(inProgress)
+  }, [results])
+
+  const discardInProgressPipelines = useCallback(
+    async (experimentIds: string[]) => {
+      for (const experimentId of experimentIds) {
+        await discardArchiveForExperiment(experimentId)
+      }
+
+      if (experimentIds.length > 0) {
+        const idSet = new Set(experimentIds)
+        setResults((prev) => prev.filter((r) => !idSet.has(r.experimentId)))
+      }
+    },
+    [discardArchiveForExperiment, setResults],
+  )
+
+  useBlocker({
+    shouldBlockFn: async ({ current, next }) => {
+      if (current.pathname === next.pathname) {
+        return false
+      }
+
+      const inProgressIds = getInProgressExperimentIds()
+      if (inProgressIds.length === 0) {
+        return false
+      }
+
+      const shouldDiscard = window.confirm(
+        "You are leaving in the middle of the upload process. Your current data and temporary archive will be discarded. Continue?",
+      )
+
+      if (!shouldDiscard) {
+        return true
+      }
+
+      await discardInProgressPipelines(inProgressIds)
+      return false
+    },
+  })
+
   const selectExperiment = async (id: string | null) => {
     if (selectedExperimentId && id !== selectedExperimentId) {
       const activeResult = results.find(
         (r) => r.experimentId === selectedExperimentId,
       )
-      const hasInProgressPipeline = !!activeResult && activeResult.files.length > 0
+      const hasInProgressPipeline =
+        (!!activeResult && activeResult.files.length > 0) ||
+        (() => {
+          try {
+            return !!sessionStorage.getItem(`nomad_archive:${selectedExperimentId}`)
+          } catch (_e) {
+            return false
+          }
+        })()
 
       if (hasInProgressPipeline) {
         const shouldDiscard = window.confirm(
@@ -2452,23 +2675,7 @@ export function ResultsPage() {
           return
         }
 
-        try {
-          const key = `nomad_archive:${selectedExperimentId}`
-          const archivePath = sessionStorage.getItem(key)
-          if (archivePath) {
-            const form = new FormData()
-            form.append("archive_path", archivePath)
-            const token = localStorage.getItem("access_token")
-            await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
-              method: "POST",
-              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-              body: form,
-            })
-            sessionStorage.removeItem(key)
-          }
-        } catch (_e) {
-          // best effort cleanup
-        }
+        await discardArchiveForExperiment(selectedExperimentId)
 
         setResults((prev) =>
           prev.filter((r) => r.experimentId !== selectedExperimentId),

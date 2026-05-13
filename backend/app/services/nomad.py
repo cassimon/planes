@@ -14,6 +14,7 @@ Uses the nomad_utility_workflows package for NOMAD API interaction.
 
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
@@ -156,34 +157,122 @@ def create_secure_zip(
     return zip_path
 
 
+def add_metadata_to_zip(
+    zip_path: Path,
+    metadata_files: list[tuple[str, str]],
+) -> Path:
+    """
+    Add metadata YAML files to an existing zip archive.
+    
+    This function modifies the zip archive in place by:
+    1. Reading all existing files
+    2. Creating a new zip with existing files + new metadata files
+    3. Replacing the original zip
+    
+    Args:
+        zip_path: Path to the existing zip file
+        metadata_files: List of (filename, yaml_content) tuples to add
+    
+    Returns:
+        Path to the updated zip file (same as input)
+    
+    Raises:
+        FileNotFoundError: If zip_path doesn't exist
+    """
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Zip archive not found: {zip_path}")
+    
+    # Create temporary zip file
+    temp_zip = zip_path.with_suffix('.tmp.zip')
+    
+    try:
+        # Read existing files and add new metadata
+        with zipfile.ZipFile(zip_path, 'r') as old_zip:
+            with zipfile.ZipFile(temp_zip, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                # Copy existing files (skip any existing .yaml files to avoid conflicts)
+                for item in old_zip.namelist():
+                    if not item.endswith('.yaml'):
+                        new_zip.writestr(item, old_zip.read(item))
+                
+                # Add new metadata YAML files
+                for meta_filename, yaml_content in metadata_files:
+                    safe_meta = Path(meta_filename).name
+                    new_zip.writestr(safe_meta, yaml_content)
+        
+        # Replace original with updated version
+        temp_zip.replace(zip_path)
+        logger.info(f"Added {len(metadata_files)} metadata files to archive: {zip_path} ({zip_path.stat().st_size} bytes)")
+        
+    except Exception as e:
+        # Clean up temp file on error
+        if temp_zip.exists():
+            temp_zip.unlink()
+        raise e
+    
+    return zip_path
+
+
+def read_yaml_files_from_zip(zip_path: Path) -> dict[str, str]:
+    """
+    Read all YAML files from a zip archive.
+    
+    Args:
+        zip_path: Path to the zip file
+    
+    Returns:
+        Dict mapping filename to YAML content (as string)
+    
+    Raises:
+        FileNotFoundError: If zip_path doesn't exist
+    """
+    if not zip_path.exists():
+        raise FileNotFoundError(f"Zip archive not found: {zip_path}")
+    
+    yaml_files: dict[str, str] = {}
+    
+    with zipfile.ZipFile(zip_path, 'r') as zipf:
+        for filename in zipf.namelist():
+            if filename.endswith('.yaml') or filename.endswith('.yml'):
+                content = zipf.read(filename).decode('utf-8')
+                yaml_files[filename] = content
+    
+    return yaml_files
+
+
 def create_nomad_metadata_yaml(
     experiment_id: str,
     user_name: str,
     session: Any,
     experiment_snapshot: dict[str, Any] | None = None,
     process_snapshot: dict[str, Any] | None = None,
-) -> dict[tuple[str, str], dict[str, Any]]:
+    measurement_files: list[dict[str, Any]] | None = None,
+    device_groups: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
     """
-    Create NOMAD perovskite solar cell metadata JSON structure from experiment data.
+    Create NOMAD archive YAML structures from experiment and measurement data.
 
-    Uses the Process's generatedStacks to populate layer types, perovskite
-    composition and deposition parameters per the perovskite_solar_cell_database
-    schema conventions:
-      - layers separated by ' | '
-      - sub-steps separated by ' >> '
-      - multiple ions/compounds within one layer separated by '; '
+    Generates one sample archive per pixel (via device groups if provided, otherwise
+    per substrate × devicesPerSubstrate) using the perovskite_solar_cell_database
+    schema, plus one measurement archive per measurement file using the nomad_chose
+    LabJVMeasurement / LabEQEMeasurement / LabStabilityMeasurement schemas.
+
+    Conventions (perovskite_solar_cell_database):
+      - Layers separated by ' | '
+      - Sub-steps separated by ' >> '
+      - Multiple ions/compounds: '; '-separated
+      - Unknown/missing values: 'Unknown' (strings) or 'nan' (numeric fields)
 
     Args:
         experiment_id: UUID of the experiment
-        user_name: Name of user entering the data
-        session: Database session for querying
-        experiment_snapshot: Frontend Experiment object (preferred, reflects live
-            UI state)
-        process_snapshot: Frontend Process object linked to the experiment
-            (optional; fetched from UserState if not provided)
+        user_name: Default operator / person entering data
+        session: DB session for querying
+        experiment_snapshot: Frontend Experiment object (live UI state preferred)
+        process_snapshot: Frontend Process linked to the experiment
+        measurement_files: Flat list of MeasurementFileInfo dicts (optional)
+        device_groups: DeviceGroupInfo dicts with assignedSubstrateId (optional)
 
     Returns:
-        dict keyed by (substrate_id, device_id) → NOMAD archive dict
+        dict[filename, yaml_content_dict] — one entry per .archive.yaml file
     """
     from sqlmodel import select
     from app.models import Experiment, UserState
@@ -366,9 +455,280 @@ def create_nomad_metadata_yaml(
             "surface_treatment_before_next_deposition_step": "Unknown",
         }
     
-    # ── 6. Per (substrate, device) metadata ──────────────────────────────────
-    nomad_map: dict[tuple[str, str], dict[str, Any]] = {}
-    n_stacks = len(active_stacks)
+    # ── 6. Measurement-data helpers ───────────────────────────────────────────
+
+    JV_TYPES: set[str] = {"JV", "Dark JV", "Stability (JV)"}
+    IPCE_TYPES: set[str] = {"IPCE"}
+    STABILITY_TYPES: set[str] = {"Stability (Tracking)", "Stability (Parameters)"}
+
+    def _slug(name: str) -> str:
+        """Filesystem-safe lowercase slug."""
+        s = str(name).replace(" ", "_").replace("/", "-")
+        s = re.sub(r"[^\w\-]", "", s)
+        return s.strip("_") or "unknown"
+
+    def _best_jv(files: list[dict[str, Any]]) -> dict[str, Any] | None:
+        jv = [f for f in files if f.get("fileType") in JV_TYPES]
+        return max(jv, key=lambda f: float(f.get("value") or 0), default=None)
+
+    def _best_ipce(files: list[dict[str, Any]]) -> dict[str, Any] | None:
+        ipce = [f for f in files if f.get("fileType") in IPCE_TYPES]
+        return max(ipce, key=lambda f: float(f.get("jsc") or f.get("value") or 0), default=None)
+
+    def _jv_section(
+        jv_file: dict[str, Any] | None,
+        ipce_file: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        sec: dict[str, Any] = {"light_spectra": "AM 1.5G"}
+        if jv_file:
+            if jv_file.get("value") is not None:
+                sec["default_PCE"] = round(float(jv_file["value"]), 4)
+            if jv_file.get("voc") is not None:
+                sec["default_Voc"] = round(float(jv_file["voc"]), 4)
+            jsc_val = jv_file.get("jsc")
+            if jsc_val is None and ipce_file:
+                jsc_val = ipce_file.get("jsc") or ipce_file.get("value")
+            if jsc_val is not None:
+                sec["default_Jsc"] = round(float(jsc_val), 4)
+            if jv_file.get("ff") is not None:
+                sec["default_FF"] = round(float(jv_file["ff"]), 4)
+        elif ipce_file:
+            jsc_val = ipce_file.get("jsc") or ipce_file.get("value")
+            if jsc_val is not None:
+                sec["default_Jsc"] = round(float(jsc_val), 4)
+        return sec
+
+    def _measurement_archive(
+        meas_file: dict[str, Any],
+        sample_filename: str,
+        operator: str,
+    ) -> dict[str, Any] | None:
+        """Build a LabXxx measurement data dict, or None for non-measurement types."""
+        file_type = meas_file.get("fileType", "Unknown")
+        file_name = meas_file.get("fileName", "")
+        op = str(meas_file.get("user") or operator)
+
+        if file_type in JV_TYPES:
+            return {
+                "m_def": "nomad_chose.schema_packages.schema_package.LabJVMeasurement",
+                "name": file_name,
+                "operator": op,
+                "jv_file": file_name,
+                "pvk_sample": f"{sample_filename}#/data",
+            }
+        if file_type in IPCE_TYPES:
+            return {
+                "m_def": "nomad_chose.schema_packages.schema_package.LabEQEMeasurement",
+                "name": file_name,
+                "operator": op,
+                "eqe_file": file_name,
+                "pvk_sample": f"{sample_filename}#/data",
+            }
+        if file_type in STABILITY_TYPES:
+            entry: dict[str, Any] = {
+                "m_def": "nomad_chose.schema_packages.schema_package.LabStabilityMeasurement",
+                "name": file_name,
+                "operator": op,
+                "pvk_sample": f"{sample_filename}#/data",
+            }
+            if file_type == "Stability (Tracking)":
+                entry["stability_tracking_file"] = file_name
+            else:
+                entry["stability_parameters_file"] = file_name
+            return entry
+        # Document / Image / Archive / Unknown → skip
+        return None
+
+    def _build_sample_data(
+        substrate_layer_name: str,
+        cell_stack_sequence: str,
+        etl_e: list,
+        absorber_e: list,
+        htl_e: list,
+        backcontact_e: list,
+        add_e: list,
+        substrate: dict[str, Any] | None,
+        jv_sec: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Assemble the PerovskiteSolarCell data dict."""
+        d: dict[str, Any] = {
+            "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
+            "ref": {
+                "free_text_comment": comment or "",
+                "name_of_person_entering_the_data": user_name,
+            },
+            "cell": {
+                "stack_sequence": cell_stack_sequence,
+                "architecture": architecture_nomad,
+                "area_total": device_area,
+            },
+            "substrate": {
+                "stack_sequence": substrate_layer_name,
+                "thickness": "nan",
+            },
+        }
+
+        if etl_e:
+            d["etl"] = _build_section(etl_e, substrate, thickness_key="thickness")
+
+        if absorber_e:
+            abs_layer = (absorber_e[0][0].get("_layer") or {})
+            a_ions = abs_layer.get("perovskiteA") or "MA"
+            b_ions = abs_layer.get("perovskiteB") or "Pb"
+            x_ions = abs_layer.get("perovskiteX") or "I"
+            band_gap = str(abs_layer.get("bandgapEv") or "nan")
+            thickness = str(abs_layer.get("thicknessNm") or "nan")
+
+            d["perovskite"] = {
+                "dimension_3D": True,
+                "dimension_list_of_layers": "3D",
+                "composition_a_ions": a_ions,
+                "composition_a_ions_coefficients": _ions_coefficients(a_ions),
+                "composition_b_ions": b_ions,
+                "composition_b_ions_coefficients": _ions_coefficients(b_ions),
+                "composition_c_ions": x_ions,
+                "composition_c_ions_coefficients": _ions_coefficients(x_ions),
+                "composition_short_form": _short_form(a_ions, b_ions, x_ions),
+                "composition_long_form": _short_form(a_ions, b_ions, x_ions),
+                "thickness": thickness,
+                "band_gap": band_gap,
+            }
+            d["perovskite_deposition"] = {
+                "number_of_deposition_steps": len(absorber_e),
+                "procedure": _join_params(absorber_e, "depositionMethod", substrate),
+                "aggregation_state_of_reactants": "Unknown",
+                "synthesis_atmosphere": _join_params(absorber_e, "depositionAtmosphere", substrate),
+                "synthesis_atmosphere_pressure_total": "Unknown",
+                "synthesis_atmosphere_pressure_partial": "Unknown",
+                "synthesis_atmosphere_relative_humidity": "Unknown",
+                "solvents": "Unknown",
+                "solvents_mixing_ratios": "Unknown",
+                "solvents_supplier": "Unknown",
+                "solvents_purity": "Unknown",
+                "reaction_solutions_compounds": "Unknown",
+                "reaction_solutions_compounds_supplier": "Unknown",
+                "reaction_solutions_compounds_purity": "Unknown",
+                "reaction_solutions_concentrations": "Unknown",
+                "reaction_solutions_volumes": _join_params(absorber_e, "solutionVolume", substrate),
+                "reaction_solutions_age": "Unknown",
+                "reaction_solutions_temperature": "Unknown",
+                "substrate_temperature": _join_params(absorber_e, "substrateTemp", substrate),
+                "quenching_induced_crystallisation": False,
+                "quenching_media": _join_params(absorber_e, "dryingMethod", substrate),
+                "quenching_media_mixing_ratios": "Unknown",
+                "quenching_media_volume": "Unknown",
+                "quenching_media_additives_compounds": "Unknown",
+                "quenching_media_additives_concentrations": "Unknown",
+                "thermal_annealing_temperature": _join_params(absorber_e, "annealingTemp", substrate),
+                "thermal_annealing_time": _join_params(absorber_e, "annealingTime", substrate),
+                "thermal_annealing_atmosphere": _join_params(absorber_e, "annealingAtmosphere", substrate),
+                "thermal_annealing_relative_humidity": "Unknown",
+                "thermal_annealing_pressure": "Unknown",
+                "solvent_annealing": False,
+                "solvent_annealing_timing": "Unknown",
+                "solvent_annealing_solvent_atmosphere": "Unknown",
+                "solvent_annealing_time": "Unknown",
+                "solvent_annealing_temperature": "Unknown",
+                "after_treatment_of_formed_perovskite": "false",
+                "after_treatment_of_formed_perovskite_method": "Unknown",
+            }
+        else:
+            d["perovskite"] = {
+                "dimension_3D": True,
+                "dimension_list_of_layers": "3D",
+                "composition_a_ions": "Unknown",
+                "composition_a_ions_coefficients": "x",
+                "composition_b_ions": "Unknown",
+                "composition_b_ions_coefficients": "x",
+                "composition_c_ions": "Unknown",
+                "composition_c_ions_coefficients": "x",
+                "composition_short_form": "Unknown",
+                "composition_long_form": "Unknown",
+                "thickness": "nan",
+                "band_gap": "nan",
+            }
+
+        if htl_e:
+            d["htl"] = _build_section(htl_e, substrate, thickness_key="thickness_list")
+        if backcontact_e:
+            d["backcontact"] = _build_section(backcontact_e, substrate, thickness_key="thickness_list")
+        if add_e:
+            d["add"] = _build_section(add_e, substrate, thickness_key="thickness_list")
+
+        d["jv"] = jv_sec
+        return d
+
+    # ── 7. Per-substrate layer grouping (shared logic) ────────────────────────
+
+    def _layers_for_substrate(
+        sub_idx: int,
+        substrate: dict[str, Any],
+    ) -> tuple[str, str, list, list, list, list, list]:
+        """
+        Return (substrate_layer_name, cell_stack_sequence,
+                etl_entries, absorber_entries, htl_entries,
+                backcontact_entries, add_entries)
+        for the given substrate index using the cyclically-assigned stack.
+        """
+        n = len(active_stacks)
+        stack: dict[str, Any] | None = active_stacks[sub_idx % n] if n > 0 else None
+
+        sub_layer_name: str = substrate_material
+        stack_layers: list[dict[str, Any]] = []
+        if stack:
+            for layer in (stack.get("layers") or []):
+                if not isinstance(layer, dict):
+                    continue
+                if layer.get("isSubstrate"):
+                    sub_layer_name = layer.get("name") or substrate_material
+                else:
+                    stack_layers.append(layer)
+
+        etl_e: list[tuple[dict[str, Any], str]] = []
+        htl_e: list[tuple[dict[str, Any], str]] = []
+        absorber_e: list[tuple[dict[str, Any], str]] = []
+        bc_e: list[tuple[dict[str, Any], str]] = []
+        add_e: list[tuple[dict[str, Any], str]] = []
+        ordered_names: list[str] = []
+
+        for layer in stack_layers:
+            layer_id = layer.get("id", "")
+            layer_name = layer.get("name", "Unknown")
+            ordered_names.append(layer_name)
+            step = dict(step_map.get(layer_id, {}))
+            step["_layer"] = layer
+            entry: tuple[dict[str, Any], str] = (step, layer_name)
+            lt = layer.get("layerType", "")
+            if lt == "ETL":
+                etl_e.append(entry)
+            elif lt == "HTL":
+                htl_e.append(entry)
+            elif lt == "absorber":
+                absorber_e.append(entry)
+            elif lt == "contact":
+                bc_e.append(entry)
+            elif lt == "interlayer":
+                add_e.append(entry)
+
+        stack_seq = sub_layer_name
+        if ordered_names:
+            stack_seq += " | " + " | ".join(ordered_names)
+
+        return sub_layer_name, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e
+
+    # ── 8. Build device-group lookup by substrate ─────────────────────────────
+    groups_by_substrate: dict[str, list[dict[str, Any]]] = {}
+    unassigned_groups: list[dict[str, Any]] = []
+    if device_groups:
+        for group in device_groups:
+            sub_id = str(group.get("assignedSubstrateId") or "")
+            if sub_id:
+                groups_by_substrate.setdefault(sub_id, []).append(group)
+            else:
+                unassigned_groups.append(group)
+
+    # ── 9. Generate archives ──────────────────────────────────────────────────
+    archives: dict[str, dict[str, Any]] = {}
 
     for sub_idx, substrate in enumerate(substrates_list):
         if isinstance(substrate, dict):
@@ -379,174 +739,79 @@ def create_nomad_metadata_yaml(
             substrate_id = str(getattr(substrate, "id", f"substrate_{sub_idx}"))
             substrate = {"id": substrate_id, "name": substrate_id}
 
-        # Select generated stack: cycle if there are multiple stacks
-        stack: dict[str, Any] | None = active_stacks[sub_idx % n_stacks] if n_stacks > 0 else None
+        sub_name_slug = _slug(str(substrate.get("name") or substrate_id))
 
-        # Separate substrate layer from device layers in the generated stack
-        substrate_layer_name: str = substrate_material
-        stack_layers: list[dict[str, Any]] = []
-        if stack:
-            for layer in (stack.get("layers") or []):
-                if layer.get("isSubstrate"):
-                    substrate_layer_name = layer.get("name") or substrate_material
-                else:
-                    stack_layers.append(layer)
+        sub_layer, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e = (
+            _layers_for_substrate(sub_idx, substrate)
+        )
 
-        # Group layers by type; each entry carries the matching ProcessStep + metadata
-        etl_entries: list[tuple[dict[str, Any], str]] = []
-        htl_entries: list[tuple[dict[str, Any], str]] = []
-        absorber_entries: list[tuple[dict[str, Any], str]] = []
-        backcontact_entries: list[tuple[dict[str, Any], str]] = []
-        add_entries: list[tuple[dict[str, Any], str]] = []
-        ordered_layer_names: list[str] = []
+        substrate_groups = groups_by_substrate.get(substrate_id, [])
 
-        for layer in stack_layers:
-            layer_id = layer.get("id", "")
-            layer_name = layer.get("name", "Unknown")
-            ordered_layer_names.append(layer_name)
-            step = dict(step_map.get(layer_id, {}))  # copy so we can attach metadata
-            step["_layer"] = layer
-            entry: tuple[dict[str, Any], str] = (step, layer_name)
-            layer_type = layer.get("layerType", "")
-            if layer_type == "ETL":
-                etl_entries.append(entry)
-            elif layer_type == "HTL":
-                htl_entries.append(entry)
-            elif layer_type == "absorber":
-                absorber_entries.append(entry)
-            elif layer_type == "contact":
-                backcontact_entries.append(entry)
-            elif layer_type == "interlayer":
-                add_entries.append(entry)
+        if substrate_groups:
+            # ── One sample + measurement YAMLs per device group ────────────────
+            for group in substrate_groups:
+                device_name = str(group.get("deviceName") or "device")
+                dev_slug = _slug(device_name)
+                sample_fname = f"{sub_name_slug}_{dev_slug}_sample.archive.yaml"
 
-        # Cell stack sequence: substrate | layer1 | layer2 | ...
-        cell_stack_sequence = substrate_layer_name
-        if ordered_layer_names:
-            cell_stack_sequence += " | " + " | ".join(ordered_layer_names)
+                group_files: list[dict[str, Any]] = list(group.get("files") or [])
+                best_jv = _best_jv(group_files)
+                best_ipce = _best_ipce(group_files)
+                jv_sec = _jv_section(best_jv, best_ipce)
 
-        for dev_idx in range(devices_per_substrate):
-            device_id = f"device_{dev_idx}"
+                sample_data = _build_sample_data(
+                    sub_layer, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e,
+                    substrate, jv_sec,
+                )
+                archives[sample_fname] = {"data": sample_data}
 
-            data: dict[str, Any] = {
-                "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
-                "ref": {
-                    "free_text_comment": comment or "",
-                    "name_of_person_entering_the_data": user_name,
-                },
-                "cell": {
-                    "stack_sequence": cell_stack_sequence,
-                    "architecture": architecture_nomad,
-                    "area_total": device_area,
-                },
-                "substrate": {
-                    "stack_sequence": substrate_layer_name,
-                    "thickness": "nan",
-                },
-            }
+                # ── Measurement YAMLs ──────────────────────────────────────────
+                for meas_file in group_files:
+                    meas_data = _measurement_archive(meas_file, sample_fname, user_name)
+                    if meas_data is None:
+                        continue
+                    meas_stem = _slug(Path(meas_file.get("fileName", "unknown")).stem)
+                    # Avoid filename collisions
+                    meas_fname = f"{meas_stem}.archive.yaml"
+                    counter = 1
+                    while meas_fname in archives:
+                        meas_fname = f"{meas_stem}_{counter}.archive.yaml"
+                        counter += 1
+                    archives[meas_fname] = {"data": meas_data}
+        else:
+            # ── Fallback: one sample YAML per device index, no measurements ────
+            for dev_idx in range(devices_per_substrate):
+                sample_fname = f"{sub_name_slug}_dev{dev_idx + 1}_sample.archive.yaml"
+                jv_sec = {"light_spectra": "AM 1.5G"}
+                sample_data = _build_sample_data(
+                    sub_layer, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e,
+                    substrate, jv_sec,
+                )
+                archives[sample_fname] = {"data": sample_data}
 
-            # ETL section
-            if etl_entries:
-                data["etl"] = _build_section(etl_entries, substrate, thickness_key="thickness")
+    # ── 10. Unassigned device groups (no substrate match) ─────────────────────
+    for group in unassigned_groups:
+        device_name = str(group.get("deviceName") or "unassigned")
+        dev_slug = _slug(device_name)
+        # No sample YAML — just measurement YAMLs with a placeholder reference
+        sample_placeholder = f"sample_{dev_slug}_sample.archive.yaml"
+        group_files = list(group.get("files") or [])
+        for meas_file in group_files:
+            meas_data = _measurement_archive(meas_file, sample_placeholder, user_name)
+            if meas_data is None:
+                continue
+            meas_stem = _slug(Path(meas_file.get("fileName", "unknown")).stem)
+            meas_fname = f"{meas_stem}.archive.yaml"
+            counter = 1
+            while meas_fname in archives:
+                meas_fname = f"{meas_stem}_{counter}.archive.yaml"
+                counter += 1
+            archives[meas_fname] = {"data": meas_data}
 
-            # Perovskite (absorber) section
-            if absorber_entries:
-                abs_layer = (absorber_entries[0][0].get("_layer") or {})
-                a_ions = abs_layer.get("perovskiteA") or "MA"
-                b_ions = abs_layer.get("perovskiteB") or "Pb"
-                x_ions = abs_layer.get("perovskiteX") or "I"
-                band_gap = str(abs_layer.get("bandgapEv") or "nan")
-                thickness = str(abs_layer.get("thicknessNm") or "nan")
-
-                data["perovskite"] = {
-                    "dimension_3D": True,
-                    "dimension_list_of_layers": "3D",
-                    "composition_a_ions": a_ions,
-                    "composition_a_ions_coefficients": _ions_coefficients(a_ions),
-                    "composition_b_ions": b_ions,
-                    "composition_b_ions_coefficients": _ions_coefficients(b_ions),
-                    "composition_c_ions": x_ions,
-                    "composition_c_ions_coefficients": _ions_coefficients(x_ions),
-                    "composition_short_form": _short_form(a_ions, b_ions, x_ions),
-                    "composition_long_form": _short_form(a_ions, b_ions, x_ions),
-                    "thickness": thickness,
-                    "band_gap": band_gap,
-                }
-
-                data["perovskite_deposition"] = {
-                    "number_of_deposition_steps": len(absorber_entries),
-                    "procedure": _join_params(absorber_entries, "depositionMethod", substrate),
-                    "aggregation_state_of_reactants": "Unknown",
-                    "synthesis_atmosphere": _join_params(absorber_entries, "depositionAtmosphere", substrate),
-                    "synthesis_atmosphere_pressure_total": "Unknown",
-                    "synthesis_atmosphere_pressure_partial": "Unknown",
-                    "synthesis_atmosphere_relative_humidity": "Unknown",
-                    "solvents": "Unknown",
-                    "solvents_mixing_ratios": "Unknown",
-                    "solvents_supplier": "Unknown",
-                    "solvents_purity": "Unknown",
-                    "reaction_solutions_compounds": "Unknown",
-                    "reaction_solutions_compounds_supplier": "Unknown",
-                    "reaction_solutions_compounds_purity": "Unknown",
-                    "reaction_solutions_concentrations": "Unknown",
-                    "reaction_solutions_volumes": _join_params(absorber_entries, "solutionVolume", substrate),
-                    "reaction_solutions_age": "Unknown",
-                    "reaction_solutions_temperature": "Unknown",
-                    "substrate_temperature": _join_params(absorber_entries, "substrateTemp", substrate),
-                    "quenching_induced_crystallisation": False,
-                    "quenching_media": _join_params(absorber_entries, "dryingMethod", substrate),
-                    "quenching_media_mixing_ratios": "Unknown",
-                    "quenching_media_volume": "Unknown",
-                    "quenching_media_additives_compounds": "Unknown",
-                    "quenching_media_additives_concentrations": "Unknown",
-                    "thermal_annealing_temperature": _join_params(absorber_entries, "annealingTemp", substrate),
-                    "thermal_annealing_time": _join_params(absorber_entries, "annealingTime", substrate),
-                    "thermal_annealing_atmosphere": _join_params(absorber_entries, "annealingAtmosphere", substrate),
-                    "thermal_annealing_relative_humidity": "Unknown",
-                    "thermal_annealing_pressure": "Unknown",
-                    "solvent_annealing": False,
-                    "solvent_annealing_timing": "Unknown",
-                    "solvent_annealing_solvent_atmosphere": "Unknown",
-                    "solvent_annealing_time": "Unknown",
-                    "solvent_annealing_temperature": "Unknown",
-                    "after_treatment_of_formed_perovskite": "false",
-                    "after_treatment_of_formed_perovskite_method": "Unknown",
-                }
-            else:
-                # No absorber layer found: include minimal placeholder
-                data["perovskite"] = {
-                    "dimension_3D": True,
-                    "dimension_list_of_layers": "3D",
-                    "composition_a_ions": "Unknown",
-                    "composition_a_ions_coefficients": "x",
-                    "composition_b_ions": "Unknown",
-                    "composition_b_ions_coefficients": "x",
-                    "composition_c_ions": "Unknown",
-                    "composition_c_ions_coefficients": "x",
-                    "composition_short_form": "Unknown",
-                    "composition_long_form": "Unknown",
-                    "thickness": "nan",
-                    "band_gap": "nan",
-                }
-
-            # HTL section
-            if htl_entries:
-                data["htl"] = _build_section(htl_entries, substrate, thickness_key="thickness_list")
-
-            # Back contact section
-            if backcontact_entries:
-                data["backcontact"] = _build_section(backcontact_entries, substrate, thickness_key="thickness_list")
-
-            # Additional / interlayer section
-            if add_entries:
-                data["add"] = _build_section(add_entries, substrate, thickness_key="thickness_list")
-
-            # JV section (always present)
-            data["jv"] = {"light_spectra": "AM 1.5G"}
-
-            nomad_map[(substrate_id, device_id)] = {"data": data}
-
-    logger.info(f"Generated NOMAD metadata for {len(nomad_map)} device entries (experiment {experiment_id})")
-    return nomad_map
+    logger.info(
+        f"Generated {len(archives)} NOMAD archive files for experiment {experiment_id}"
+    )
+    return archives
 
 
 def upload_to_nomad(

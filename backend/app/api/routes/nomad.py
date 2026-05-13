@@ -108,7 +108,12 @@ class MeasurementFileInfo(BaseModel):
     deviceName: str | None = None
     cell: str | None = None
     pixel: str | None = None
-    value: float | None = None
+    value: float | None = None        # PCE (%)
+    voc: float | None = None          # Open-circuit voltage (V)
+    jsc: float | None = None          # Short-circuit current density (mA/cm²)
+    ff: float | None = None           # Fill factor (%)
+    user: str | None = None           # Operator / user from file header
+    measurementDate: str | None = None  # Date from file header
 
 
 class DeviceGroupInfo(BaseModel):
@@ -138,8 +143,8 @@ class NomadUploadRequest(BaseModel):
 
 class NomadMetadataPreview(BaseModel):
     """Preview of NOMAD metadata."""
-    metadata_json: dict[tuple[str, str], dict[str, Any]]
-    metadata_yaml: str  # YAML serialization of perovskite solar cell metadata
+    metadata_json: dict[str, Any]      # filename → yaml_content_dict
+    metadata_yaml: str  # YAML serialization of all archive files
     yaml_content: str  # YAML serialization for upload file organization
     file_count: int
     device_group_count: int
@@ -183,108 +188,14 @@ def get_nomad_config(current_user: CurrentUser) -> NomadConfigResponse:
     )
 
 
-@router.post("/metadata/preview", response_model=NomadMetadataPreview)
-def preview_nomad_metadata(
-    session: SessionDep,
-    current_user: CurrentUser,
-    request: NomadUploadRequest,
-) -> NomadMetadataPreview:
-    """
-    Preview the NOMAD metadata JSON that would be generated.
-    
-    This allows users to review the metadata before uploading.
-    Provides both:
-    - metadata_json: Perovskite solar cell JSON structure
-    - yaml_content: Upload archive metadata YAML (file organization)
-    """
-    try:
-        experiment_snapshot = None
-        process_snapshot = None
-        if request.custom_metadata and isinstance(request.custom_metadata, dict):
-            candidate = request.custom_metadata.get("experiment")
-            if isinstance(candidate, dict):
-                experiment_snapshot = candidate
-            proc_candidate = request.custom_metadata.get("process")
-            if isinstance(proc_candidate, dict):
-                process_snapshot = proc_candidate
-
-        metadata_json = create_nomad_metadata_yaml(
-            experiment_id=request.experiment_id,
-            user_name=current_user.full_name or current_user.email,
-            session=session,
-            experiment_snapshot=experiment_snapshot,
-            process_snapshot=process_snapshot,
-        )
-        
-        logger.info(f"DEBUG: metadata_json type: {type(metadata_json)}, keys: {list(metadata_json.keys()) if isinstance(metadata_json, dict) else 'N/A'}")
-        
-        # Generate upload archive metadata (for file organization YAML preview)
-        upload_metadata = {
-            "metadata": {
-                "upload_name": request.experiment_name,
-                "upload_create_time": datetime.now(timezone.utc).isoformat(),
-                "coauthors": [],
-                "references": [],
-                "datasets": [],
-                "embargo_length": 0,
-                "comment": "Automated upload from Plains GUI",
-            },
-            "entries": [
-                {
-                    "mainfile": f.fileName,
-                    "entry_name": f.fileName.replace(".", "_"),
-                    "comment": f"Measurement file: {f.fileType}",
-                    "metadata": {
-                        "device_name": f.deviceName or "Unknown",
-                        "cell": f.cell or "",
-                        "pixel": f.pixel or "",
-                    }
-                }
-                for f in request.measurement_files
-            ],
-            "device_groups": [
-                {
-                    "name": g.deviceName,
-                    "substrate_id": g.assignedSubstrateId or "",
-                    "files": [f.fileName for f in g.files],
-                }
-                for g in request.device_groups
-            ],
-            "substrates": [
-                {"id": str(s.id), "name": s.name}
-                for s in request.substrates
-            ]
-        }
-        
-        # Convert upload metadata to YAML for file organization preview
-        yaml_content = yaml.dump(upload_metadata, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        
-        # Convert perovskite solar cell metadata to YAML (strings quoted, nan as string)
-        metadata_yaml = yaml.dump(metadata_json, Dumper=_QuotedDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        
-        
-        preview = NomadMetadataPreview(
-            metadata_json=metadata_json,
-            metadata_yaml=metadata_yaml,
-            yaml_content=yaml_content,
-            file_count=len(request.measurement_files),
-            device_group_count=len(request.device_groups),
-        )
-        
-        logger.info(f"DEBUG: NomadMetadataPreview created. preview has metadata_json: {'metadata_json' in preview.model_dump()}")
-        
-        return preview
-    except Exception as e:
-        logger.error(f"Error generating metadata preview: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to generate metadata: {str(e)}")
-
-
 @router.post("/upload/files")
 async def upload_files_for_nomad(
+    session: SessionDep,
     current_user: CurrentUser,
     experiment_id: str = Form(...),
     experiment_name: str = Form(...),
     files: list[UploadFile] = File(...),
+    request_json: str | None = Form(None),
 ) -> dict[str, Any]:
     """
     Upload files and create a temporary secure zip archive.
@@ -292,9 +203,13 @@ async def upload_files_for_nomad(
     Files are:
     1. Validated for safety
     2. Compressed into a zip archive
-    3. Stored temporarily for later NOMAD upload
+    3. Optionally combined with NOMAD metadata YAML files (if request_json provided)
+    4. Stored temporarily for later NOMAD upload
     
     Returns the archive ID for use in the upload step.
+    
+    If request_json is provided, YAML metadata files will be generated and included
+    in the archive. This allows the frontend to prepare the upload earlier in the workflow.
     """
     _require_nomad_upload_authorized(current_user)
 
@@ -311,26 +226,236 @@ async def upload_files_for_nomad(
     if not file_data:
         raise HTTPException(status_code=400, detail="No valid files to upload")
     
+    # Generate YAML metadata if request metadata is provided
+    archive_yaml_files: list[tuple[str, str]] = []
+    if request_json:
+        try:
+            request = NomadUploadRequest.model_validate_json(request_json)
+            
+            experiment_snapshot = None
+            process_snapshot = None
+            if request.custom_metadata and isinstance(request.custom_metadata, dict):
+                candidate = request.custom_metadata.get("experiment")
+                if isinstance(candidate, dict):
+                    experiment_snapshot = candidate
+                proc_candidate = request.custom_metadata.get("process")
+                if isinstance(proc_candidate, dict):
+                    process_snapshot = proc_candidate
+
+            measurement_files_dicts = [f.model_dump() for f in request.measurement_files]
+            device_groups_dicts = [g.model_dump() for g in request.device_groups]
+
+            # Generate per-archive YAML files
+            archives = create_nomad_metadata_yaml(
+                experiment_id=request.experiment_id,
+                user_name=current_user.full_name or current_user.email,
+                session=session,
+                experiment_snapshot=experiment_snapshot,
+                process_snapshot=process_snapshot,
+                measurement_files=measurement_files_dicts,
+                device_groups=device_groups_dicts,
+            )
+
+            # Serialise each archive dict to its own YAML string
+            archive_yaml_files = [
+                (
+                    filename,
+                    yaml.dump(
+                        content,
+                        Dumper=_QuotedDumper,
+                        default_flow_style=False,
+                        allow_unicode=True,
+                        sort_keys=False,
+                    ),
+                )
+                for filename, content in archives.items()
+            ]
+            
+            logger.info(f"Generated {len(archive_yaml_files)} YAML metadata files for archive")
+        except Exception as e:
+            logger.error(f"Failed to generate YAML metadata: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to generate metadata: {str(e)}")
+    
     # Create secure zip
     try:
         zip_path = create_secure_zip(
             files=file_data,
+            metadata_files=archive_yaml_files if archive_yaml_files else None,
             archive_name=f"{experiment_id[:8]}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
         )
         
-        logger.info(f"Created temporary zip archive at {zip_path} with {len(file_data)} files, total size: {zip_path.stat().st_size} bytes")
+        logger.info(f"Created temporary zip archive at {zip_path} with {len(file_data)} files + {len(archive_yaml_files)} YAML files, total size: {zip_path.stat().st_size} bytes")
 
         return {
             "success": True,
             "archive_path": str(zip_path),
             "archive_name": zip_path.name,
             "file_count": len(file_data),
+            "metadata_file_count": len(archive_yaml_files),
             "total_size": zip_path.stat().st_size,
         }
         
     except Exception as e:
         logger.error(f"Failed to create zip archive: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create archive: {e}")
+
+
+@router.post("/upload/metadata")
+async def add_metadata_to_archive(
+    session: SessionDep,
+    current_user: CurrentUser,
+    archive_path: str = Form(...),
+    request_json: str = Form(...),
+) -> dict[str, Any]:
+    """
+    Add NOMAD metadata YAML files to an existing archive.
+    
+    This endpoint generates metadata from the provided request and adds
+    the YAML files to an existing zip archive without re-uploading the
+    measurement files.
+    
+    Args:
+        archive_path: Path to the existing zip archive
+        request_json: JSON string containing NomadUploadRequest data
+    
+    Returns:
+        Dict with success status, archive info, and metadata file count
+    """
+    _require_nomad_upload_authorized(current_user)
+    
+    try:
+        request = NomadUploadRequest.model_validate_json(request_json)
+    except Exception as e:
+        logger.error("Invalid NOMAD upload metadata", exc_info=True)
+        raise HTTPException(status_code=422, detail="Invalid upload request metadata")
+    
+    # Validate archive path
+    try:
+        candidate = Path(archive_path).resolve()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid archive path") from e
+    
+    allowed_root = TEMP_UPLOAD_DIR.resolve()
+    if not str(candidate).startswith(str(allowed_root)):
+        raise HTTPException(status_code=403, detail="Archive path is not allowed")
+    
+    if not candidate.exists():
+        raise HTTPException(status_code=404, detail="Archive not found")
+    
+    try:
+        experiment_snapshot = None
+        process_snapshot = None
+        if request.custom_metadata and isinstance(request.custom_metadata, dict):
+            candidate_exp = request.custom_metadata.get("experiment")
+            if isinstance(candidate_exp, dict):
+                experiment_snapshot = candidate_exp
+            proc_candidate = request.custom_metadata.get("process")
+            if isinstance(proc_candidate, dict):
+                process_snapshot = proc_candidate
+        
+        measurement_files_dicts = [f.model_dump() for f in request.measurement_files]
+        device_groups_dicts = [g.model_dump() for g in request.device_groups]
+        
+        # Generate per-archive YAML files
+        archives = create_nomad_metadata_yaml(
+            experiment_id=request.experiment_id,
+            user_name=current_user.full_name or current_user.email,
+            session=session,
+            experiment_snapshot=experiment_snapshot,
+            process_snapshot=process_snapshot,
+            measurement_files=measurement_files_dicts,
+            device_groups=device_groups_dicts,
+        )
+        
+        # Serialize each archive dict to its own YAML string
+        from app.services.nomad import add_metadata_to_zip
+        
+        archive_yaml_files: list[tuple[str, str]] = [
+            (
+                filename,
+                yaml.dump(
+                    content,
+                    Dumper=_QuotedDumper,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+            )
+            for filename, content in archives.items()
+        ]
+        
+        # Add metadata to the existing archive
+        add_metadata_to_zip(candidate, archive_yaml_files)
+        
+        logger.info(f"Added {len(archive_yaml_files)} YAML metadata files to archive {candidate}")
+        
+        return {
+            "success": True,
+            "archive_path": str(candidate),
+            "archive_name": candidate.name,
+            "metadata_file_count": len(archive_yaml_files),
+            "total_size": candidate.stat().st_size,
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to add metadata to archive: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to add metadata: {str(e)}")
+
+
+@router.post("/metadata/preview")
+async def preview_metadata_from_archive(
+    current_user: CurrentUser,
+    archive_path: str = Form(...),
+) -> dict[str, Any]:
+    """
+    Preview NOMAD metadata YAML files from an existing archive.
+    
+    This endpoint reads all .yaml files from the archive and returns
+    their content for review before uploading to NOMAD.
+    
+    Args:
+        archive_path: Path to the zip archive containing YAML files
+    
+    Returns:
+        Dict with yaml_files (dict of filename -> content), file_list, and metadata_count
+    """
+    _require_nomad_upload_authorized(current_user)
+    
+    # Validate archive path
+    try:
+        candidate = Path(archive_path).resolve()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Invalid archive path") from e
+    
+    allowed_root = TEMP_UPLOAD_DIR.resolve()
+    if not str(candidate).startswith(str(allowed_root)):
+        raise HTTPException(status_code=403, detail="Archive path is not allowed")
+    
+    if not candidate.exists():
+        raise HTTPException(status_code=404, detail="Archive not found")
+    
+    try:
+        from app.services.nomad import read_yaml_files_from_zip
+        import zipfile
+        
+        # Read YAML files from archive
+        yaml_files = read_yaml_files_from_zip(candidate)
+        
+        # Get list of all files in archive
+        with zipfile.ZipFile(candidate, 'r') as zipf:
+            all_files = zipf.namelist()
+        
+        return {
+            "success": True,
+            "yaml_files": yaml_files,
+            "all_files": all_files,
+            "metadata_count": len(yaml_files),
+            "total_file_count": len(all_files),
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to read metadata from archive: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to read metadata: {str(e)}")
 
 
 @router.post("/upload/archive/discard")
@@ -410,38 +535,66 @@ async def upload_to_nomad_endpoint(
             if isinstance(proc_candidate, dict):
                 process_snapshot = proc_candidate
 
-        # Generate metadata JSON
-        metadata_json = create_nomad_metadata_yaml(
+        measurement_files_dicts = [f.model_dump() for f in request.measurement_files]
+        device_groups_dicts = [g.model_dump() for g in request.device_groups]
+
+        # Generate per-archive YAML files
+        archives = create_nomad_metadata_yaml(
             experiment_id=request.experiment_id,
             user_name=current_user.full_name or current_user.email,
             session=session,
             experiment_snapshot=experiment_snapshot,
             process_snapshot=process_snapshot,
+            measurement_files=measurement_files_dicts,
+            device_groups=device_groups_dicts,
         )
-        # Convert to YAML for NOMAD upload
-        metadata_yaml = yaml.dump(metadata_json, default_flow_style=False, allow_unicode=True, sort_keys=False)
-        
-        # If files are provided directly, create a new archive
-        if files:
+
+        # Serialise each archive dict to its own YAML string
+        archive_yaml_files: list[tuple[str, str]] = [
+            (
+                filename,
+                yaml.dump(
+                    content,
+                    Dumper=_QuotedDumper,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                ),
+            )
+            for filename, content in archives.items()
+        ]
+
+        # Use pre-created archive or create a new one
+        if archive_path:
+            # Validate and use the pre-created archive
+            try:
+                candidate = Path(archive_path).resolve()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="Invalid archive path") from e
+
+            allowed_root = TEMP_UPLOAD_DIR.resolve()
+            if not str(candidate).startswith(str(allowed_root)):
+                raise HTTPException(status_code=403, detail="Archive path is not allowed")
+            
+            if not candidate.exists():
+                raise HTTPException(status_code=404, detail="Archive not found")
+            
+            zip_path = candidate
+            logger.info(f"Using pre-created archive at {zip_path}")
+        elif files:
+            # Create a new archive from uploaded files
             file_data: list[tuple[str, bytes]] = []
             for f in files:
-                content = await f.read()
+                content_bytes = await f.read()
                 if f.filename:
-                    file_data.append((f.filename, content))
-            
+                    file_data.append((f.filename, content_bytes))
+
             zip_path = create_secure_zip(
                 files=file_data,
-                metadata_files=[("nomad_metadata.yaml", metadata_yaml)],
+                metadata_files=archive_yaml_files,
                 archive_name=f"{request.experiment_id[:8]}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
             )
-        elif archive_path:
-            # Use existing archive - we need to add metadata to it
-            # For now, we'll create a new one (the archive should have been recent)
-            # In a production system, you might want to update the existing archive
-            raise HTTPException(
-                status_code=400,
-                detail="Direct archive upload not yet supported. Please upload files directly.",
-            )
+            logger.info(f"Created new archive at {zip_path}")
         else:
             raise HTTPException(status_code=400, detail="No files or archive provided")
         
