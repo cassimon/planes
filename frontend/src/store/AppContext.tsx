@@ -15,6 +15,7 @@ import {
   InMemoryBackend,
   UNLOAD_BACKUP_KEY,
 } from "./backend"
+import { getTokenSync } from "../lib/keycloakInstance"
 
 // ── Material ────────────────────────────────────────────────────────────────
 
@@ -1041,7 +1042,7 @@ export function AppProvider({
   backend?: BackendAdapter
 }) {
   // Use HttpBackend by default if user is authenticated, fall back to InMemory
-  const getToken = useCallback(() => localStorage.getItem("access_token"), [])
+  const getToken = useCallback(() => getTokenSync(), [])
 
   const defaultBackend = useMemo(() => {
     const token = getToken()

@@ -24,6 +24,7 @@ import type {
   Process,
   Solution,
 } from "./AppContext"
+import { getTokenSync } from "../lib/keycloakInstance"
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -422,8 +423,8 @@ export class HttpBackend implements BackendAdapter {
     private baseUrl: string = `${import.meta.env.VITE_API_URL}/api/v1`,
   ) {}
 
-  private isLoggedIn(): boolean {
-    return localStorage.getItem("logged_in") !== null
+  private getToken(): string | null {
+    return getTokenSync()
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -431,12 +432,13 @@ export class HttpBackend implements BackendAdapter {
   async load(): Promise<AppSnapshot> {
     try {
       console.log("[HttpBackend] load() called, baseUrl:", this.baseUrl)
-      if (!this.isLoggedIn()) {
-        console.warn("[HttpBackend] load() skipped — not logged in")
+      const token = this.getToken()
+      if (!token) {
+        console.warn("[HttpBackend] load() skipped — no token")
         return { ...EMPTY_SNAPSHOT }
       }
       const stateRes = await fetch(`${this.baseUrl}/state/`, {
-        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
       })
       console.log("[HttpBackend] GET /state/ response:", stateRes.status)
       if (stateRes.ok) {
@@ -492,7 +494,7 @@ export class HttpBackend implements BackendAdapter {
       }
 
       const bulkRes = await fetch(`${this.baseUrl}/state/bulk`, {
-        credentials: "include",
+        headers: { Authorization: `Bearer ${token}` },
       })
       if (!bulkRes.ok) {
         console.warn(
@@ -715,17 +717,20 @@ export class HttpBackend implements BackendAdapter {
       elements: snapshot.planes.reduce((n, p) => n + p.elements.length, 0),
     }
     console.log("[HttpBackend] save() called:", summary)
-    if (!this.isLoggedIn()) {
+    const token = this.getToken()
+    if (!token) {
       console.warn(
-        "[HttpBackend] save() skipped — not logged in (already logged out)",
+        "[HttpBackend] save() skipped — no token (already logged out)",
       )
       return
     }
     try {
       const res = await fetch(`${this.baseUrl}/state/`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({ data: snapshot }),
       })
       if (!res.ok) {

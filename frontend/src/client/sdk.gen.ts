@@ -249,19 +249,6 @@ export class LoginService {
     }
     
     /**
-     * Logout
-     * Clear the httpOnly session cookie.
-     * @returns Message Successful Response
-     * @throws ApiError
-     */
-    public static logout(): CancelablePromise<void> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/v1/login/logout',
-        });
-    }
-
-    /**
      * Test Token
      * Test access token
      * @returns UserPublic Successful Response

@@ -1,247 +1,44 @@
-from datetime import timedelta
-from typing import Annotated, Any
-
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-import httpx
 
-from app import crud
-from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
-from app.core import security
 from app.core.config import settings
-from app.models import Message, NewPassword, Token, UserPublic, UserUpdate
-from app.utils import (
-    generate_password_reset_token,
-    generate_reset_password_email,
-    send_email,
-    verify_password_reset_token,
-)
 
 router = APIRouter(tags=["login"])
 
 
-@router.post("/login/access-token")
-def login_access_token(
-    response: Response,
-    session: SessionDep,
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-) -> Token:
+class AuthConfig(BaseModel):
+    keycloak_url: str
+    keycloak_realm: str
+    keycloak_client_id: str
+
+
+@router.get("/auth/config")
+def auth_config() -> AuthConfig:
     """
-    OAuth2 compatible token login, get an access token for future requests.
-    Sets an httpOnly cookie with the token to prevent XSS token theft.
-    """
-    user = crud.authenticate(
-        session=session, email=form_data.username, password=form_data.password
-    )
-    if not user:
-        raise HTTPException(status_code=400, detail="Incorrect email or password")
-    elif not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = security.create_access_token(
-        user.id, expires_delta=access_token_expires
-    )
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
-        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    )
-    return Token(access_token=access_token)
+    Return Keycloak configuration so the frontend can initialise keycloak-js.
 
+    The response contains:
+    - ``keycloak_url``: the Keycloak server base URL (before ``/realms/``)
+    - ``keycloak_realm``: the realm name
+    - ``keycloak_client_id``: the OAuth2 client id (public PKCE client)
 
-@router.post("/login/logout")
-def logout(response: Response) -> Message:
-    """Clear the httpOnly session cookie."""
-    response.delete_cookie(
-        key="access_token",
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
-    )
-    return Message(message="Logged out")
-
-
-@router.post("/login/test-token", response_model=UserPublic)
-def test_token(current_user: CurrentUser) -> Any:
-    """
-    Test access token
-    """
-    return current_user
-
-
-@router.post("/password-recovery/{email}")
-def recover_password(email: str, session: SessionDep) -> Message:
-    """
-    Password Recovery
-    """
-    user = crud.get_user_by_email(session=session, email=email)
-
-    # Always return the same response to prevent email enumeration attacks
-    # Only send email if user actually exists
-    if user:
-        password_reset_token = generate_password_reset_token(email=email)
-        email_data = generate_reset_password_email(
-            email_to=user.email, email=email, token=password_reset_token
-        )
-        send_email(
-            email_to=user.email,
-            subject=email_data.subject,
-            html_content=email_data.html_content,
-        )
-    return Message(
-        message="If that email is registered, we sent a password recovery link"
-    )
-
-
-@router.post("/reset-password/")
-def reset_password(session: SessionDep, body: NewPassword) -> Message:
-    """
-    Reset password
-    """
-    email = verify_password_reset_token(token=body.token)
-    if not email:
-        raise HTTPException(status_code=400, detail="Invalid token")
-    user = crud.get_user_by_email(session=session, email=email)
-    if not user:
-        # Don't reveal that the user doesn't exist - use same error as invalid token
-        raise HTTPException(status_code=400, detail="Invalid token")
-    elif not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-    user_in_update = UserUpdate(password=body.new_password)
-    crud.update_user(
-        session=session,
-        db_user=user,
-        user_in=user_in_update,
-    )
-    return Message(message="Password updated successfully")
-
-
-@router.post(
-    "/password-recovery-html-content/{email}",
-    dependencies=[Depends(get_current_active_superuser)],
-    response_class=HTMLResponse,
-)
-def recover_password_html_content(email: str, session: SessionDep) -> Any:
-    """
-    HTML Content for Password Recovery
-    """
-    user = crud.get_user_by_email(session=session, email=email)
-
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail="The user with this username does not exist in the system.",
-        )
-    password_reset_token = generate_password_reset_token(email=email)
-    email_data = generate_reset_password_email(
-        email_to=user.email, email=email, token=password_reset_token
-    )
-
-    return HTMLResponse(
-        content=email_data.html_content, headers={"subject:": email_data.subject}
-    )
-
-
-class NomadAuthorizeParams(BaseModel):
-    realm_url: str
-    client_id: str
-    redirect_uri: str
-
-
-class NomadExchangeRequest(BaseModel):
-    code: str
-    code_verifier: str
-    redirect_uri: str
-
-
-@router.get("/login/nomad/authorize")
-def nomad_oauth_authorize() -> NomadAuthorizeParams:
-    """
-    Return the Keycloak realm URL, client_id and redirect_uri so the frontend
-    can build a proper Authorization Code + PKCE request.  The frontend is
-    responsible for generating state, nonce and the code_verifier/challenge.
+    This endpoint is intentionally unauthenticated so the login page can
+    fetch it before any token is available.
     """
     if not settings.NOMAD_OAUTH_ENABLED:
         raise HTTPException(
             status_code=400,
-            detail="NOMAD OAuth is not enabled"
+            detail="NOMAD OAuth is not enabled",
         )
 
-    expected_redirect_uri = f"{settings.FRONTEND_HOST.rstrip('/')}/auth/nomad/callback"
+    # NOMAD_KEYCLOAK_REALM_URL format:
+    #   https://nomad-lab.eu/fairdi/keycloak/auth/realms/fairdi_nomad_prod
+    parts = settings.NOMAD_KEYCLOAK_REALM_URL.rsplit("/realms/", 1)
+    keycloak_url = parts[0]
+    keycloak_realm = parts[1] if len(parts) > 1 else ""
 
-    return NomadAuthorizeParams(
-        realm_url=settings.NOMAD_KEYCLOAK_REALM_URL,
-        client_id=settings.NOMAD_OAUTH_CLIENT_ID,
-        redirect_uri=expected_redirect_uri,
+    return AuthConfig(
+        keycloak_url=keycloak_url,
+        keycloak_realm=keycloak_realm,
+        keycloak_client_id=settings.NOMAD_OAUTH_CLIENT_ID,
     )
-
-
-@router.post("/login/nomad/exchange")
-def nomad_oauth_exchange(response: Response, body: NomadExchangeRequest) -> Token:
-    """
-    Exchange a Keycloak authorization code (+ PKCE code_verifier) for an
-    access token.  Plains re-uses the Keycloak access token as its own bearer
-    token so that the NOMAD upload service can forward it when needed.
-    Sets an httpOnly cookie with the token to prevent XSS token theft.
-    """
-    if not settings.NOMAD_OAUTH_ENABLED:
-        raise HTTPException(
-            status_code=400,
-            detail="NOMAD OAuth is not enabled"
-        )
-
-    expected_redirect_uri = f"{settings.FRONTEND_HOST.rstrip('/')}/auth/nomad/callback"
-    if body.redirect_uri != expected_redirect_uri:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid redirect_uri for NOMAD code exchange",
-        )
-
-    # Exchange code at Keycloak token endpoint
-    try:
-        resp = httpx.post(
-            f"{settings.NOMAD_KEYCLOAK_REALM_URL}/protocol/openid-connect/token",
-            data={
-                "grant_type": "authorization_code",
-                "code": body.code,
-                "code_verifier": body.code_verifier,
-                "redirect_uri": body.redirect_uri,
-                "client_id": settings.NOMAD_OAUTH_CLIENT_ID,
-            },
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Keycloak token exchange failed: {e.response.text}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Could not reach Keycloak: {str(e)}"
-        )
-
-    token_data = resp.json()
-    access_token = token_data.get("access_token")
-    if not access_token:
-        raise HTTPException(
-            status_code=401,
-            detail="No access_token in Keycloak response"
-        )
-
-    # Validate the token locally via JWKS — ensures it wasn't tampered with
-    security.verify_nomad_token(access_token)
-
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        samesite="lax",
-        secure=settings.ENVIRONMENT == "production",
-    )
-    return Token(access_token=access_token)
