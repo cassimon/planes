@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import Keycloak from "keycloak-js"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { AuthLayout } from "@/components/Common/AuthLayout"
 import { Button } from "@/components/ui/button"
@@ -20,18 +20,23 @@ function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Initialise keycloak-js on mount.
-  // If the page is loaded after a Keycloak redirect (auth-code in URL),
-  // keycloak.init() silently exchanges the code and sets authenticated = true.
+  // useRef survives React StrictMode's double-effect cycle (unlike the `active`
+  // flag pattern). This ensures keycloak.init() runs exactly once per mount,
+  // preventing the second run from discarding the auth-code after the first
+  // run already exchanged and removed it from the URL.
+  const initDone = useRef(false)
+
   useEffect(() => {
-    let active = true
+    if (initDone.current) return
+    initDone.current = true
+
     ;(async () => {
       try {
         const res = await fetch(
           `${import.meta.env.VITE_API_URL}/api/v1/auth/config`,
         )
         if (!res.ok) {
-          if (active) setError("Auth configuration unavailable.")
+          setError("Auth configuration unavailable.")
           return
         }
         const cfg = await res.json()
@@ -40,28 +45,26 @@ function Login() {
           realm: cfg.keycloak_realm,
           clientId: cfg.keycloak_client_id,
         })
+        // No onLoad — keycloak.init() exchanges a ?code= in the URL if present
+        // (i.e. when Keycloak redirects back after login) but never redirects
+        // the page on its own.
         const authenticated = await keycloak.init({
-          onLoad: "check-sso",
           checkLoginIframe: false,
         })
-        if (!active) return
         setKeycloak(keycloak)
         if (authenticated) navigate({ to: "/" })
       } catch (err) {
         console.error("Keycloak init failed:", err)
-        if (active) setError("Could not reach the NOMAD auth service.")
+        setError("Could not reach the NOMAD auth service.")
       }
     })()
-    return () => {
-      active = false
-    }
   }, [navigate])
 
   const handleLogin = () => {
     setLoading(true)
-    // Redirect to NOMAD Keycloak; after login Keycloak redirects back to /
-    // where keycloak.init() (running on the login page) processes the code.
-    getKeycloak()?.login({ redirectUri: window.location.origin + "/" })
+    // Redirect to NOMAD Keycloak; after login Keycloak redirects back to /login
+    // where keycloak.init() (on next mount) processes the auth code.
+    getKeycloak()?.login({ redirectUri: window.location.origin + "/login" })
   }
 
   return (
