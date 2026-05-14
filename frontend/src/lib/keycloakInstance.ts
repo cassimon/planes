@@ -15,6 +15,11 @@ import Keycloak from "keycloak-js"
 let _keycloak: Keycloak | null = null
 let _refreshInterval: ReturnType<typeof setInterval> | null = null
 
+/** Returns the current Keycloak instance, or null if none is active. */
+export function getKeycloak(): Keycloak | null {
+  return _keycloak
+}
+
 /** Store the initialised Keycloak instance and start the refresh watchdog. */
 export function setKeycloak(kc: Keycloak): void {
   _keycloak = kc

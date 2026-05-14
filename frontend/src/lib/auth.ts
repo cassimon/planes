@@ -1,15 +1,17 @@
 import { redirect } from "@tanstack/react-router"
 
 import { ApiError, UsersService } from "@/client"
+import { isAuthenticated, clearKeycloak } from "@/lib/keycloakInstance"
 
 const ACCESS_TOKEN_KEY = "access_token"
 
 const clearStoredAccessToken = () => {
   localStorage.removeItem(ACCESS_TOKEN_KEY)
+  clearKeycloak()
 }
 
 export const isLoggedIn = () => {
-  return localStorage.getItem(ACCESS_TOKEN_KEY) !== null
+  return isAuthenticated()
 }
 
 const isAuthError = (error: unknown) => {

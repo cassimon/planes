@@ -9,6 +9,7 @@ import {
   UsersService,
 } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
+import { logout as keycloakLogout } from "@/lib/keycloakInstance"
 import { handleError } from "@/utils"
 import useCustomToast from "./useCustomToast"
 
@@ -53,8 +54,11 @@ const useAuth = () => {
   })
 
   const logout = () => {
-    localStorage.removeItem("access_token")
-    navigate({ to: "/login" })
+    // Returns true when a Keycloak redirect is initiated; skip navigate() in that case.
+    const willRedirect = keycloakLogout()
+    if (!willRedirect) {
+      navigate({ to: "/login" })
+    }
   }
 
   return {

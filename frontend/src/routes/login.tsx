@@ -6,8 +6,9 @@ import {
 } from "@tanstack/react-router"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import Keycloak from "keycloak-js"
+import { setKeycloak, getKeycloak } from "@/lib/keycloakInstance"
 
 import type { Body_login_login_access_token as AccessToken } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
@@ -58,7 +59,6 @@ function Login() {
   const userRegistrationEnabled = isUserRegistrationEnabled()
   const nomadOAuthEnabled = isNomadOAuthEnabled()
   const [isLoadingNomad, setIsLoadingNomad] = useState(false)
-  const keycloakRef = useRef<Keycloak | null>(null)
 
   // On mount: initialize keycloak-js so redirect-back from Keycloak is processed
   // automatically (keycloak.init handles the auth-code exchange internally).
@@ -85,10 +85,10 @@ function Login() {
         if (!active) return
 
         if (authenticated && keycloak.token) {
-          localStorage.setItem("access_token", keycloak.token)
+          setKeycloak(keycloak)
           navigate({ to: "/" })
         } else {
-          keycloakRef.current = keycloak
+          setKeycloak(keycloak)
         }
       } catch (err) {
         if (active) console.error("Keycloak init failed:", err)
@@ -117,7 +117,7 @@ function Login() {
 
   const handleNomadLogin = () => {
     setIsLoadingNomad(true)
-    keycloakRef.current?.login({ redirectUri: window.location.href })
+    getKeycloak()?.login({ redirectUri: window.location.href })
   }
 
   return (

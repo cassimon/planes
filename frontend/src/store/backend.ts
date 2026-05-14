@@ -24,6 +24,7 @@ import type {
   Process,
   Solution,
 } from "./AppContext"
+import { getTokenSync } from "../lib/keycloakInstance"
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -423,7 +424,7 @@ export class HttpBackend implements BackendAdapter {
   ) {}
 
   private getToken(): string | null {
-    return localStorage.getItem("access_token")
+    return getTokenSync()
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
