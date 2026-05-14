@@ -887,6 +887,105 @@ function ResultsDetail({
   const [dropTargetGroupId, setDropTargetGroupId] = useState<string | null>(
     null,
   )
+  const [isReviewDragActive, setIsReviewDragActive] = useState(false)
+  const reviewScrollViewportRef = useRef<HTMLDivElement | null>(null)
+  const reviewDragPositionRef = useRef<number | null>(null)
+  const reviewAutoScrollRafRef = useRef<number | null>(null)
+
+  const stopReviewAutoScroll = useCallback(() => {
+    if (reviewAutoScrollRafRef.current !== null) {
+      cancelAnimationFrame(reviewAutoScrollRafRef.current)
+      reviewAutoScrollRafRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isReviewDragActive || workflowStep !== 2) {
+      stopReviewAutoScroll()
+      return
+    }
+
+    const EDGE_PX = 96
+    const MAX_SCROLL_STEP = 22
+
+    const tick = () => {
+      const viewport = reviewScrollViewportRef.current
+      const clientY = reviewDragPositionRef.current
+
+      if (viewport && clientY !== null) {
+        const rect = viewport.getBoundingClientRect()
+        let delta = 0
+
+        if (clientY < rect.top + EDGE_PX) {
+          const intensity = (rect.top + EDGE_PX - clientY) / EDGE_PX
+          delta = -Math.ceil(intensity * MAX_SCROLL_STEP)
+        } else if (clientY > rect.bottom - EDGE_PX) {
+          const intensity = (clientY - (rect.bottom - EDGE_PX)) / EDGE_PX
+          delta = Math.ceil(intensity * MAX_SCROLL_STEP)
+        }
+
+        if (delta !== 0) {
+          viewport.scrollTop += delta
+        }
+      }
+
+      reviewAutoScrollRafRef.current = requestAnimationFrame(tick)
+    }
+
+    reviewAutoScrollRafRef.current = requestAnimationFrame(tick)
+
+    return () => {
+      stopReviewAutoScroll()
+    }
+  }, [isReviewDragActive, stopReviewAutoScroll, workflowStep])
+
+  useEffect(() => {
+    const handleDragFinished = () => {
+      setIsReviewDragActive(false)
+      reviewDragPositionRef.current = null
+      stopReviewAutoScroll()
+    }
+
+    window.addEventListener("dragend", handleDragFinished, true)
+    window.addEventListener("drop", handleDragFinished, true)
+
+    return () => {
+      window.removeEventListener("dragend", handleDragFinished, true)
+      window.removeEventListener("drop", handleDragFinished, true)
+    }
+  }, [stopReviewAutoScroll])
+
+  const handleReviewDragOverCapture = useCallback(
+    (e: React.DragEvent) => {
+      if (workflowStep !== 2) {
+        return
+      }
+
+      reviewDragPositionRef.current = e.clientY
+      if (!isReviewDragActive) {
+        setIsReviewDragActive(true)
+      }
+    },
+    [isReviewDragActive, workflowStep],
+  )
+
+  const handleReviewWheelWhileDragging = useCallback(
+    (e: React.WheelEvent) => {
+      if (!isReviewDragActive || workflowStep !== 2) {
+        return
+      }
+
+      const viewport = reviewScrollViewportRef.current
+      if (!viewport) {
+        return
+      }
+
+      // Keep wheel scrolling responsive while HTML drag-and-drop is active.
+      viewport.scrollTop += e.deltaY
+      e.preventDefault()
+    },
+    [isReviewDragActive, workflowStep],
+  )
 
   // Fetch NOMAD config on mount
   useEffect(() => {
@@ -1512,14 +1611,14 @@ function ResultsDetail({
     }
   }, [experiment, processes, results.deviceGroups, results.files, substrates])
 
-  const handlePrepareUpload = useCallback(async () => {
+  const handlePrepareUpload = useCallback(async (): Promise<boolean> => {
     if (!lastArchivePath) {
       notifications.show({
         title: "No Archive",
         message: "Please upload files first",
         color: "orange",
       })
-      return
+      return false
     }
 
     setPreparingUpload(true)
@@ -1550,7 +1649,7 @@ function ResultsDetail({
           message: `Failed to prepare upload: ${res.status} ${text}`,
           color: "red",
         })
-        return
+        return false
       }
 
       const data = await res.json()
@@ -1562,6 +1661,7 @@ function ResultsDetail({
         message: `Archive ready with ${data.metadata_file_count || 0} YAML metadata files`,
         color: "green",
       })
+      return true
     } catch (err) {
       console.error("prepare upload error", err)
       notifications.show({
@@ -1569,6 +1669,7 @@ function ResultsDetail({
         message: err instanceof Error ? err.message : String(err),
         color: "red",
       })
+      return false
     } finally {
       setPreparingUpload(false)
     }
@@ -1937,7 +2038,7 @@ function ResultsDetail({
         )}
       </Group>
 
-      <ScrollArea style={{ flex: 1 }} p="md">
+      <ScrollArea style={{ flex: 1 }} p="md" viewportRef={reviewScrollViewportRef}>
         <Stack gap="lg">
           {nomadUploadHistory.length > 0 && (
             <Alert icon={<IconCheck size={16} />} color="green" radius="md" title="NOMAD Uploads">
@@ -2006,20 +2107,29 @@ function ResultsDetail({
                         Assign unmatched first
                       </Button>
                     )}
-                    {workflowStep === 2 && totalUnmatchedFiles === 0 && !reviewConfirmed && (
-                      <Button 
-                        size="xs" 
-                        color="green" 
-                        onClick={handlePrepareUpload}
+                    {workflowStep === 2 && totalUnmatchedFiles === 0 && (
+                      <Button
+                        size="xs"
+                        color="green"
+                        onClick={() => {
+                          void (async () => {
+                            if (reviewConfirmed) {
+                              setWorkflowStep(3)
+                              return
+                            }
+
+                            const prepared = await handlePrepareUpload()
+                            if (prepared) {
+                              setWorkflowStep(3)
+                            }
+                          })()
+                        }}
                         loading={preparingUpload}
                         disabled={preparingUpload}
                       >
-                        {preparingUpload ? "Preparing upload..." : "Confirm review"}
-                      </Button>
-                    )}
-                    {workflowStep === 2 && totalUnmatchedFiles === 0 && reviewConfirmed && (
-                      <Button size="xs" color="green" onClick={() => goToStep(3)}>
-                        Next
+                        {preparingUpload
+                          ? "Preparing upload..."
+                          : "Confirm review and proceed"}
                       </Button>
                     )}
                     {workflowStep === 3 && (
@@ -2076,7 +2186,7 @@ function ResultsDetail({
                   </Stack>
                 </Paper>
 
-                <Box style={{ flex: 1, minWidth: 0, maxHeight: "64vh", overflow: "auto" }}>
+                <Box style={{ flex: 1, minWidth: 0 }}>
                 {workflowStep === 1 && (
                   <Stack gap="xs">
                     <Dropzone
@@ -2169,6 +2279,8 @@ function ResultsDetail({
                   align="flex-start"
                   grow
                   wrap="nowrap"
+                  onDragOverCapture={handleReviewDragOverCapture}
+                  onWheelCapture={handleReviewWheelWhileDragging}
                   style={{ display: workflowStep === 2 ? undefined : "none" }}
                 >
                 {totalUnmatchedFiles > 0 && (
