@@ -1,64 +1,51 @@
 /**
  * Module-level Keycloak singleton.
  *
- * Stores the Keycloak instance in memory after a successful NOMAD OAuth login
- * so the rest of the app (OpenAPI client, HttpBackend, auth guards) can read
- * the current access token without ever touching localStorage.
- *
- * Local (email/password) login still stores its token in localStorage under
- * "access_token"; the sync/async getters here fall back to that value so both
- * auth paths work transparently.
+ * All authentication state lives here in memory — nothing is written to
+ * localStorage or sessionStorage.  The Keycloak JS adapter manages the
+ * access/refresh tokens internally; we only expose typed accessors.
  */
 
 import Keycloak from "keycloak-js"
 
 let _keycloak: Keycloak | null = null
-let _refreshInterval: ReturnType<typeof setInterval> | null = null
 
-/** Returns the current Keycloak instance, or null if none is active. */
+/** Returns the current Keycloak instance, or null when not initialised. */
 export function getKeycloak(): Keycloak | null {
   return _keycloak
 }
 
-/** Store the initialised Keycloak instance and start the refresh watchdog. */
+/** Store the initialised Keycloak instance and register the token-expiry handler. */
 export function setKeycloak(kc: Keycloak): void {
   _keycloak = kc
 
-  // Mirror the setInterval from the reference initAuth snippet:
-  // attempt a silent refresh every 10 s; if it fails the session has expired.
-  if (_refreshInterval !== null) clearInterval(_refreshInterval)
-  _refreshInterval = setInterval(() => {
-    if (_keycloak?.authenticated) {
-      _keycloak.updateToken(30).catch(() => {
-        clearKeycloak()
-        window.location.href = "/login"
-      })
-    }
-  }, 10_000)
+  // Keycloak-js fires onTokenExpired at the exact moment the access token expires.
+  // We refresh here so that the next API call never receives a stale token.
+  kc.onTokenExpired = () => {
+    kc.updateToken(30).catch(() => {
+      clearKeycloak()
+      window.location.href = "/login"
+    })
+  }
 }
 
-/** Clear the instance and stop the refresh watchdog (called on logout / error). */
+/** Clear the instance and remove the expiry handler. */
 export function clearKeycloak(): void {
-  if (_refreshInterval !== null) {
-    clearInterval(_refreshInterval)
-    _refreshInterval = null
+  if (_keycloak) {
+    _keycloak.onTokenExpired = undefined
   }
   _keycloak = null
 }
 
-/**
- * Synchronous token read — safe to call from non-async contexts.
- * Returns the cached Keycloak token when an OAuth session is active,
- * otherwise falls back to the localStorage token (local login).
- */
+/** Synchronous token read — returns null when no session is active. */
 export function getTokenSync(): string | null {
   if (_keycloak?.authenticated && _keycloak.token) return _keycloak.token
-  return localStorage.getItem("access_token")
+  return null
 }
 
 /**
- * Async token read — calls updateToken() first so the caller always gets a
- * fresh token.  Used by the OpenAPI client interceptor.
+ * Async token read — silently refreshes the token first so the caller always
+ * gets a valid, non-expired value.  Used by the OpenAPI client interceptor.
  */
 export async function getTokenAsync(): Promise<string> {
   if (_keycloak?.authenticated) {
@@ -71,32 +58,24 @@ export async function getTokenAsync(): Promise<string> {
     }
     return _keycloak.token ?? ""
   }
-  return localStorage.getItem("access_token") ?? ""
+  return ""
 }
 
-/** Returns true when either auth method has an active session. */
+/** True when a Keycloak session is active. */
 export function isAuthenticated(): boolean {
-  if (_keycloak?.authenticated) return true
-  return localStorage.getItem("access_token") !== null
+  return _keycloak?.authenticated === true
 }
 
 /**
- * Unified logout.
- * - Keycloak users: clears the instance and redirects through Keycloak's
- *   logout endpoint (which invalidates the server-side session).
- * - Local users: clears localStorage only.
- *
- * Returns true when a Keycloak redirect was initiated so the caller can skip
- * its own navigation.
+ * Logout: invalidates the Keycloak server-side session and redirects to /login.
+ * Because Keycloak issues a full-page redirect, no further navigation is needed.
  */
-export function logout(): boolean {
-  localStorage.removeItem("access_token")
-  if (_keycloak?.authenticated) {
-    const kc = _keycloak
-    clearKeycloak()
-    kc.logout({ redirectUri: window.location.origin + "/login" })
-    return true
-  }
+export function logout(): void {
+  const kc = _keycloak
   clearKeycloak()
-  return false
+  if (kc?.authenticated) {
+    kc.logout({ redirectUri: window.location.origin + "/login" })
+  } else {
+    window.location.href = "/login"
+  }
 }

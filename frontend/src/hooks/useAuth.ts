@@ -1,22 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate } from "@tanstack/react-router"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import {
-  type Body_login_login_access_token as AccessToken,
-  LoginService,
-  type UserPublic,
-  type UserRegister,
-  UsersService,
-} from "@/client"
+import { type UserPublic, UsersService } from "@/client"
 import { isLoggedIn } from "@/lib/auth"
-import { logout as keycloakLogout } from "@/lib/keycloakInstance"
-import { handleError } from "@/utils"
-import useCustomToast from "./useCustomToast"
+import { logout } from "@/lib/keycloakInstance"
 
 const useAuth = () => {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { showErrorToast } = useCustomToast()
 
   const { data: user } = useQuery<UserPublic | null, Error>({
     queryKey: ["currentUser"],
@@ -25,46 +14,14 @@ const useAuth = () => {
     retry: false,
   })
 
-  const signUpMutation = useMutation({
-    mutationFn: (data: UserRegister) =>
-      UsersService.registerUser({ requestBody: data }),
-    onSuccess: () => {
-      navigate({ to: "/login" })
-    },
-    onError: handleError.bind(showErrorToast),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] })
-    },
-  })
-
-  const login = async (data: AccessToken) => {
-    const response = await LoginService.loginAccessToken({
-      formData: data,
-    })
-    localStorage.setItem("access_token", response.access_token)
-  }
-
-  const loginMutation = useMutation({
-    mutationFn: login,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["currentUser"] })
-      navigate({ to: "/" })
-    },
-    onError: handleError.bind(showErrorToast),
-  })
-
-  const logout = () => {
-    // Returns true when a Keycloak redirect is initiated; skip navigate() in that case.
-    const willRedirect = keycloakLogout()
-    if (!willRedirect) {
-      navigate({ to: "/login" })
-    }
+  const handleLogout = () => {
+    // Clear cached queries then hand off to Keycloak logout (which redirects).
+    queryClient.clear()
+    logout()
   }
 
   return {
-    signUpMutation,
-    loginMutation,
-    logout,
+    logout: handleLogout,
     user,
   }
 }

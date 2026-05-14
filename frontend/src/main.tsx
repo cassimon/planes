@@ -20,7 +20,6 @@ OpenAPI.TOKEN = () => getTokenAsync()
 
 const handleApiError = (error: Error) => {
   if (error instanceof ApiError && [401, 403].includes(error.status)) {
-    localStorage.removeItem("access_token")
     clearKeycloak()
     window.location.href = "/login"
   }

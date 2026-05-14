@@ -3,16 +3,9 @@ import { redirect } from "@tanstack/react-router"
 import { ApiError, UsersService } from "@/client"
 import { isAuthenticated, clearKeycloak } from "@/lib/keycloakInstance"
 
-const ACCESS_TOKEN_KEY = "access_token"
+export const isLoggedIn = () => isAuthenticated()
 
-const clearStoredAccessToken = () => {
-  localStorage.removeItem(ACCESS_TOKEN_KEY)
-  clearKeycloak()
-}
-
-export const isLoggedIn = () => {
-  return isAuthenticated()
-}
+const clearAuth = () => clearKeycloak()
 
 const isAuthError = (error: unknown) => {
   return error instanceof ApiError && [401, 403].includes(error.status)
@@ -27,7 +20,7 @@ export const ensureAuthenticated = async () => {
     await UsersService.readUserMe()
   } catch (error) {
     if (isAuthError(error)) {
-      clearStoredAccessToken()
+      clearAuth()
       throw redirect({ to: "/login" })
     }
     throw error
@@ -44,38 +37,11 @@ export const redirectIfAuthenticated = async () => {
     throw redirect({ to: "/" })
   } catch (error) {
     if (isAuthError(error)) {
-      clearStoredAccessToken()
+      clearAuth()
       return
     }
     throw error
   }
 }
 
-const parseBooleanEnv = (value: string | undefined, fallback: boolean) => {
-  if (value === undefined) {
-    return fallback
-  }
-
-  switch (value.trim().toLowerCase()) {
-    case "true":
-    case "1":
-    case "yes":
-    case "on":
-      return true
-    case "false":
-    case "0":
-    case "no":
-    case "off":
-      return false
-    default:
-      return fallback
-  }
-}
-
-export const isUserRegistrationEnabled = () => {
-  return parseBooleanEnv(import.meta.env.VITE_USERS_OPEN_REGISTRATION, true)
-}
-
-export const isNomadOAuthEnabled = () => {
-  return parseBooleanEnv(import.meta.env.VITE_NOMAD_OAUTH_ENABLED, false)
-}
+// NOMAD OAuth is the only supported login method.
