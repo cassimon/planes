@@ -39,6 +39,7 @@ import { useBlocker } from "@tanstack/react-router"
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { OpenAPI } from "../client/core/OpenAPI"
 import { NomadService } from "../client/sdk.gen"
+import { getTokenSync } from "../lib/keycloakInstance"
 import type {
   NomadConfigResponse,
   NomadUploadRequest,
@@ -1050,7 +1051,7 @@ function ResultsDetail({
       const token =
         typeof OpenAPI.TOKEN === "function"
           ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+          : OpenAPI.TOKEN ?? undefined
 
       await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
         method: "POST",
@@ -1080,7 +1081,7 @@ function ResultsDetail({
       event.returnValue = ""
 
       if (lastArchivePath) {
-        const token = localStorage.getItem("access_token")
+        const token = getTokenSync()
         const form = new FormData()
         form.append("archive_path", lastArchivePath)
         fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
@@ -1235,7 +1236,7 @@ function ResultsDetail({
           const token =
             typeof OpenAPI.TOKEN === "function"
               ? await OpenAPI.TOKEN({} as any)
-              : OpenAPI.TOKEN || localStorage.getItem("access_token")
+              : OpenAPI.TOKEN ?? undefined
 
           const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/files`, {
             method: "POST",
@@ -1632,7 +1633,7 @@ function ResultsDetail({
       const token =
         typeof OpenAPI.TOKEN === "function"
           ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+          : OpenAPI.TOKEN ?? undefined
 
       const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/metadata`, {
         method: "POST",
@@ -1705,7 +1706,7 @@ function ResultsDetail({
       const token =
         typeof OpenAPI.TOKEN === "function"
           ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+          : OpenAPI.TOKEN ?? undefined
       const response = await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/nomad`, {
         method: "POST",
         headers: {
@@ -1803,7 +1804,7 @@ function ResultsDetail({
       const token =
         typeof OpenAPI.TOKEN === "function"
           ? await OpenAPI.TOKEN({} as any)
-          : OpenAPI.TOKEN || localStorage.getItem("access_token")
+          : OpenAPI.TOKEN ?? undefined
 
       const res = await fetch(`${OpenAPI.BASE}/api/v1/nomad/metadata/preview`, {
         method: "POST",
@@ -2687,7 +2688,10 @@ export function ResultsPage() {
 
       const form = new FormData()
       form.append("archive_path", archivePath)
-      const token = localStorage.getItem("access_token")
+      const token =
+        typeof OpenAPI.TOKEN === "function"
+          ? await OpenAPI.TOKEN({} as any)
+          : OpenAPI.TOKEN ?? undefined
       await fetch(`${OpenAPI.BASE}/api/v1/nomad/upload/archive/discard`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
