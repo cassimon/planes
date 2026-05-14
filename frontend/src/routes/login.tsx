@@ -2,10 +2,12 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import {
   createFileRoute,
   Link as RouterLink,
+  useNavigate,
 } from "@tanstack/react-router"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import Keycloak from "keycloak-js"
 
 import type { Body_login_login_access_token as AccessToken } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
@@ -52,10 +54,52 @@ export const Route = createFileRoute("/login")({
 
 function Login() {
   const { loginMutation } = useAuth()
+  const navigate = useNavigate()
   const userRegistrationEnabled = isUserRegistrationEnabled()
   const nomadOAuthEnabled = isNomadOAuthEnabled()
   const [isLoadingNomad, setIsLoadingNomad] = useState(false)
-  
+  const keycloakRef = useRef<Keycloak | null>(null)
+
+  // On mount: initialize keycloak-js so redirect-back from Keycloak is processed
+  // automatically (keycloak.init handles the auth-code exchange internally).
+  useEffect(() => {
+    if (!nomadOAuthEnabled) return
+    let active = true
+
+    ;(async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/auth/config`)
+        const cfg = await res.json()
+
+        const keycloak = new Keycloak({
+          url: cfg.keycloak_url,
+          realm: cfg.keycloak_realm,
+          clientId: cfg.keycloak_client_id,
+        })
+
+        const authenticated = await keycloak.init({
+          onLoad: "check-sso",
+          checkLoginIframe: false,
+        })
+
+        if (!active) return
+
+        if (authenticated && keycloak.token) {
+          localStorage.setItem("access_token", keycloak.token)
+          navigate({ to: "/" })
+        } else {
+          keycloakRef.current = keycloak
+        }
+      } catch (err) {
+        if (active) console.error("Keycloak init failed:", err)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [nomadOAuthEnabled, navigate])
+
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -71,57 +115,9 @@ function Login() {
     loginMutation.mutate(data)
   }
 
-  const handleNomadLogin = async () => {
+  const handleNomadLogin = () => {
     setIsLoadingNomad(true)
-    try {
-      // Fetch base params from backend (realm URL, client_id, redirect_uri)
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/api/v1/login/nomad/authorize`
-      )
-      if (!response.ok) throw new Error("Failed to get authorize params")
-      const { realm_url, client_id, redirect_uri } = await response.json()
-
-      // --- PKCE (RFC 7636) ---
-      // Generate a cryptographically random code_verifier
-      const verifierBytes = new Uint8Array(96)
-      crypto.getRandomValues(verifierBytes)
-      const code_verifier = btoa(String.fromCharCode(...verifierBytes))
-        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
-
-      // Compute SHA-256 of verifier → base64url = code_challenge
-      const digest = await crypto.subtle.digest(
-        "SHA-256",
-        new TextEncoder().encode(code_verifier),
-      )
-      const code_challenge = btoa(String.fromCharCode(...new Uint8Array(digest)))
-        .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "")
-
-      // CSRF state + nonce for replay protection
-      const state = crypto.randomUUID()
-      const nonce = crypto.randomUUID()
-
-      // Persist for the callback page (same origin, clears on tab close)
-      sessionStorage.setItem("nomad_state", state)
-      sessionStorage.setItem("nomad_code_verifier", code_verifier)
-      sessionStorage.setItem("nomad_redirect_uri", redirect_uri)
-
-      // Build authorize URL identical to real NOMAD Oasis
-      const params = new URLSearchParams({
-        client_id,
-        redirect_uri,
-        state,
-        response_mode: "fragment",
-        response_type: "code",
-        scope: "openid",
-        nonce,
-        code_challenge,
-        code_challenge_method: "S256",
-      })
-      window.location.href = `${realm_url}/protocol/openid-connect/auth?${params}`
-    } catch (error) {
-      console.error("Failed to initiate NOMAD login:", error)
-      setIsLoadingNomad(false)
-    }
+    keycloakRef.current?.login({ redirectUri: window.location.href })
   }
 
   return (
