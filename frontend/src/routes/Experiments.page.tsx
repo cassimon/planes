@@ -37,6 +37,7 @@ import {
   type ProcessParameterKey,
   type ProcessStep,
   useAppContext,
+  useEntityCollection,
 } from "../store/AppContext"
 import { SelectCollectionModal, type CollectionConfirmParams } from "../components/SelectCollectionModal"
 
@@ -1285,6 +1286,7 @@ export default function ExperimentsPage() {
     pendingCollectionLink,
     setPendingCollectionLink,
   } = useAppContext()
+  const { getEntityColor, isEntityVisible } = useEntityCollection()
 
   const [selectedExpId, setSelectedExpId] = useState<string | null>(
     () => lastSelectedByKind.experiment ?? null,
@@ -1326,6 +1328,7 @@ export default function ExperimentsPage() {
 
     const newExp = newExperiment(processId)
     setExperiments((prev) => [...prev, newExp])
+    setSelectedExpId(newExp.id)
 
     // Link back to collection
     const plane = planes.find((p) => p.id === planeId)
@@ -1343,6 +1346,7 @@ export default function ExperimentsPage() {
     setPendingCollectionLink,
     processes,
     setExperiments,
+    setSelectedExpId,
     planes,
     updateElement,
   ])
@@ -1536,7 +1540,12 @@ export default function ExperimentsPage() {
     const processNameById = new Map(processes.map((p) => [p.id, p.name]))
     const groups = new Map<string, Experiment[]>()
 
-    for (const exp of experiments) {
+    // Filter to only visible experiments
+    const visibleExperiments = experiments.filter((exp) =>
+      isEntityVisible("experiment", exp.id)
+    )
+
+    for (const exp of visibleExperiments) {
       const key = exp.processId || "__unassigned__"
       const list = groups.get(key)
       if (list) {
@@ -1570,7 +1579,7 @@ export default function ExperimentsPage() {
         })
         return { processId, processName, items: sortedItems }
       })
-  }, [experiments, processes])
+  }, [experiments, processes, isEntityVisible])
 
   return (
     <>
@@ -1593,10 +1602,12 @@ export default function ExperimentsPage() {
             placeholder="Select process..."
             size="xs"
             searchable
-            data={processes.map((process) => ({
-              value: process.id,
-              label: process.name || "Untitled",
-            }))}
+            data={processes
+              .filter((process) => isEntityVisible("process", process.id))
+              .map((process) => ({
+                value: process.id,
+                label: process.name || "Untitled",
+              }))}
             value={newExperimentProcessId}
             onChange={setNewExperimentProcessId}
           />
@@ -1624,6 +1635,7 @@ export default function ExperimentsPage() {
                   const status = getExperimentStatus(exp)
                   const isSelected = exp.id === selectedExpId
 
+                  const collectionColor = getEntityColor("experiment", exp.id)
                   return (
                     <Paper
                       key={exp.id}
@@ -1638,6 +1650,10 @@ export default function ExperimentsPage() {
                         borderColor: isSelected
                           ? "var(--mantine-color-blue-4)"
                           : undefined,
+                        borderLeft: collectionColor
+                          ? `4px solid ${collectionColor}`
+                          : undefined,
+                        paddingLeft: collectionColor ? "calc(var(--mantine-spacing-sm) - 3px)" : undefined,
                       }}
                       onClick={() => setSelectedExpId(exp.id)}
                     >

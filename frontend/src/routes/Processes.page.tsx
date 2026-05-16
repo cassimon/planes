@@ -54,7 +54,6 @@ import {
   type ProcessStep,
   type ProcessStepCategory,
   type Solution,
-  newExperiment,
   newProcess,
   newProcessStep,
   type CanvasCollectionElement,
@@ -1242,7 +1241,6 @@ export function ProcessesPage() {
     experiments,
     processes,
     setProcesses,
-    setExperiments,
     planes,
     updateElement,
     removeCollectionRefs,
@@ -1501,9 +1499,14 @@ export function ProcessesPage() {
   }
 
   const handleSpawnExperiment = (process: Process) => {
-    const exp = newExperiment(process.id)
-    setExperiments((prev) => [...prev, exp])
-    setActiveEntity({ kind: "experiment", id: exp.id })
+    const owner = getEntityCollection("process", process.id)
+    setPendingCollectionLink({
+      collectionId: owner?.collection.id ?? activeCollectionId ?? "",
+      planeId: owner?.plane.id ?? activePlaneId ?? "",
+      kind: "experiment",
+      selectedProcessId: process.id,
+      requestId: crypto.randomUUID(),
+    })
     void navigate({ to: "/experiments" })
   }
 
