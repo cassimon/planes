@@ -552,7 +552,7 @@ def create_nomad_metadata_yaml(
     ) -> dict[str, Any]:
         """Assemble the PerovskiteSolarCell data dict."""
         d: dict[str, Any] = {
-            "m_def": "perovskite_solar_cell_database.schema.PerovskiteSolarCell",
+            "m_def": "nomad_perovskite_solar_cell_sample_plains.schema_packages.sample.PerovskiteSolarCellSample",
             "ref": {
                 "free_text_comment": comment or "",
                 "name_of_person_entering_the_data": user_name,
