@@ -27,7 +27,6 @@ import { Route as GuiMaterialsRouteImport } from './routes/_gui/materials'
 import { Route as GuiExportRouteImport } from './routes/_gui/export'
 import { Route as GuiExperimentsRouteImport } from './routes/_gui/experiments'
 import { Route as GuiAnalysisRouteImport } from './routes/_gui/analysis'
-import { Route as OrganizationPageRouteImport } from './routes/Organization.page'
 import { Route as AuthNomadCallbackRouteImport } from './routes/auth/nomad/callback'
 
 const SignupRoute = SignupRouteImport.update({
@@ -118,11 +117,6 @@ const GuiAnalysisRoute = GuiAnalysisRouteImport.update({
   path: '/analysis',
   getParentRoute: () => GuiRoute,
 } as any)
-const OrganizationPageRoute = OrganizationPageRouteImport.update({
-  id: '/Organization/page',
-  path: '/Organization/page',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthNomadCallbackRoute = AuthNomadCallbackRouteImport.update({
   id: '/auth/nomad/callback',
   path: '/auth/nomad/callback',
@@ -135,7 +129,6 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/Organization/page': typeof OrganizationPageRoute
   '/analysis': typeof GuiAnalysisRoute
   '/experiments': typeof GuiExperimentsRoute
   '/export': typeof GuiExportRoute
@@ -155,7 +148,6 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/Organization/page': typeof OrganizationPageRoute
   '/analysis': typeof GuiAnalysisRoute
   '/experiments': typeof GuiExperimentsRoute
   '/export': typeof GuiExportRoute
@@ -177,7 +169,6 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/Organization/page': typeof OrganizationPageRoute
   '/_gui/analysis': typeof GuiAnalysisRoute
   '/_gui/experiments': typeof GuiExperimentsRoute
   '/_gui/export': typeof GuiExportRoute
@@ -200,7 +191,6 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
-    | '/Organization/page'
     | '/analysis'
     | '/experiments'
     | '/export'
@@ -220,7 +210,6 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
-    | '/Organization/page'
     | '/analysis'
     | '/experiments'
     | '/export'
@@ -241,7 +230,6 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
-    | '/Organization/page'
     | '/_gui/analysis'
     | '/_gui/experiments'
     | '/_gui/export'
@@ -264,7 +252,6 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
-  OrganizationPageRoute: typeof OrganizationPageRoute
   AuthNomadCallbackRoute: typeof AuthNomadCallbackRoute
 }
 
@@ -396,13 +383,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GuiAnalysisRouteImport
       parentRoute: typeof GuiRoute
     }
-    '/Organization/page': {
-      id: '/Organization/page'
-      path: '/Organization/page'
-      fullPath: '/Organization/page'
-      preLoaderRoute: typeof OrganizationPageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth/nomad/callback': {
       id: '/auth/nomad/callback'
       path: '/auth/nomad/callback'
@@ -461,7 +441,6 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
-  OrganizationPageRoute: OrganizationPageRoute,
   AuthNomadCallbackRoute: AuthNomadCallbackRoute,
 }
 export const routeTree = rootRouteImport
