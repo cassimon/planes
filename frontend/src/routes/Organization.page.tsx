@@ -1347,6 +1347,7 @@ function CollectionEl({
   onDropRefs: (
     targetCollectionId: string,
     payload: CollectionRefDragPayload,
+    isCopy: boolean,
   ) => void
   onStartDivide: () => void
   onHoveredPlaneTabChange?: (planeId: string | null) => void
@@ -1382,6 +1383,11 @@ function CollectionEl({
   )
   const isActive = activeCollectionId === el.id
   const showCollectionControls = isActive || isHovered
+  
+  // Drag-over state for showing drop zones
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [dropZoneHovered, setDropZoneHovered] = useState<'copy' | 'move' | null>(null)
+  const dragOverPayloadRef = useRef<CollectionRefDragPayload | null>(null)
 
   const parseRefDragPayload = (
     e: ReactDragEvent<HTMLElement>,
@@ -1702,25 +1708,50 @@ function CollectionEl({
       onDragOver={(e) => {
         const payload = parseRefDragPayload(e)
         if (!payload || payload.sourceCollectionId === el.id) {
+          setIsDragOver(false)
+          dragOverPayloadRef.current = null
           return
         }
         e.preventDefault()
-        e.dataTransfer.dropEffect = "move"
+        e.dataTransfer.dropEffect = dropZoneHovered === 'copy' ? 'copy' : 'move'
+        setIsDragOver(true)
+        dragOverPayloadRef.current = payload
+      }}
+      onDragLeave={(e) => {
+        // Only clear if we're actually leaving the collection (not entering a child)
+        const relatedTarget = e.relatedTarget as HTMLElement | null
+        if (!relatedTarget || !e.currentTarget.contains(relatedTarget)) {
+          setIsDragOver(false)
+          setDropZoneHovered(null)
+          dragOverPayloadRef.current = null
+        }
       }}
       onDrop={(e) => {
         const payload = parseRefDragPayload(e)
         if (!payload || payload.sourceCollectionId === el.id) {
+          setIsDragOver(false)
+          setDropZoneHovered(null)
+          dragOverPayloadRef.current = null
           return
         }
         e.preventDefault()
         e.stopPropagation()
-        onDropRefs(el.id, payload)
+        
+        // Only execute drop if user dropped on one of the drop zones
+        if (dropZoneHovered) {
+          onDropRefs(el.id, payload, dropZoneHovered === 'copy')
+        }
+        
+        // Reset state
+        setIsDragOver(false)
+        setDropZoneHovered(null)
+        dragOverPayloadRef.current = null
       }}
       onMouseEnter={activateHover}
       onMouseLeave={scheduleHoverHide}
     >
       {/* Main card */}
-      {isFuseCandidate && (
+      {isFuseCandidate && !isDragOver && (
         <Badge
           color="violet"
           variant="filled"
@@ -1744,7 +1775,9 @@ function CollectionEl({
         p="xs"
         style={{
           width: 140,
-          border: isFuseCandidate
+          border: isDragOver
+            ? "3px dashed var(--mantine-color-blue-5)"
+            : isFuseCandidate
             ? "3px dashed var(--mantine-color-violet-6)"
             : `3px solid ${el.color || DEFAULT_ACCENT}`,
           background: isFuseCandidate
@@ -1933,6 +1966,58 @@ function CollectionEl({
           <Text size="xs" c="dimmed">
             Empty
           </Text>
+        )}
+        
+        {/* Drop zones - shown when dragging elements over this collection */}
+        {isDragOver && dragOverPayloadRef.current && (
+          <Stack gap={4} mt={8} style={{ borderTop: '1px solid var(--mantine-color-gray-3)', paddingTop: 6 }}>
+            <Box
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setDropZoneHovered('copy')
+              }}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 4,
+                background: dropZoneHovered === 'copy' 
+                  ? 'var(--mantine-color-blue-1)' 
+                  : 'var(--mantine-color-gray-0)',
+                border: dropZoneHovered === 'copy'
+                  ? '2px solid var(--mantine-color-blue-5)'
+                  : '1px dashed var(--mantine-color-gray-4)',
+                cursor: 'copy',
+                transition: 'all 150ms ease',
+              }}
+            >
+              <Text size="xs" fw={dropZoneHovered === 'copy' ? 600 : 400} c={dropZoneHovered === 'copy' ? 'blue' : 'dimmed'} ta="center">
+                📋 Place Copy here...
+              </Text>
+            </Box>
+            <Box
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                setDropZoneHovered('move')
+              }}
+              style={{
+                padding: '4px 8px',
+                borderRadius: 4,
+                background: dropZoneHovered === 'move' 
+                  ? 'var(--mantine-color-green-1)' 
+                  : 'var(--mantine-color-gray-0)',
+                border: dropZoneHovered === 'move'
+                  ? '2px solid var(--mantine-color-green-5)'
+                  : '1px dashed var(--mantine-color-gray-4)',
+                cursor: 'move',
+                transition: 'all 150ms ease',
+              }}
+            >
+              <Text size="xs" fw={dropZoneHovered === 'move' ? 600 : 400} c={dropZoneHovered === 'move' ? 'green' : 'dimmed'} ta="center">
+                ➡️ Move here...
+              </Text>
+            </Box>
+          </Stack>
         )}
       </Paper>
 
@@ -2930,7 +3015,7 @@ function PlaneCanvas({
   }
 
   const handleDropRefs = useCallback(
-    (targetCollectionId: string, payload: CollectionRefDragPayload) => {
+    (targetCollectionId: string, payload: CollectionRefDragPayload, isCopy: boolean) => {
       if (targetCollectionId === payload.sourceCollectionId) {
         return
       }
@@ -2953,7 +3038,9 @@ function PlaneCanvas({
         return
       }
 
-      const nextSourceRefs = source.refs.filter((r) => !shouldMove(r))
+      // For copy: keep refs in source, add to target
+      // For move: remove refs from source, add to target
+      const nextSourceRefs = isCopy ? source.refs : source.refs.filter((r) => !shouldMove(r))
       const nextTargetRefs = [...target.refs]
       for (const r of moving) {
         if (!nextTargetRefs.some((x) => x.kind === r.kind && x.id === r.id)) {
