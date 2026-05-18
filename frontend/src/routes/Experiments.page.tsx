@@ -1319,6 +1319,7 @@ export default function ExperimentsPage() {
     updateLastSelected,
     planes,
     updateElement,
+    removeCollectionRefs,
     activeCollectionId,
     activePlaneId,
     pendingCollectionLink,
@@ -1552,6 +1553,7 @@ export default function ExperimentsPage() {
       confirmProps: { color: "red" },
       onConfirm: () => {
         setExperiments((prev) => prev.filter((e) => e.id !== expId))
+        removeCollectionRefs("experiment", [expId])
         setSelectedExpId(null)
       },
     })

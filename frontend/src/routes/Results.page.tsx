@@ -2667,6 +2667,7 @@ export function ResultsPage() {
     setResults,
     planes,
     updateElement,
+    removeCollectionRefs,
     pendingCollectionLink,
     setPendingCollectionLink,
     setActiveEntity,
@@ -2738,10 +2739,16 @@ export function ResultsPage() {
 
       if (experimentIds.length > 0) {
         const idSet = new Set(experimentIds)
+        const resultIdsToRemove = results
+          .filter((r) => idSet.has(r.experimentId))
+          .map((r) => r.id)
         setResults((prev) => prev.filter((r) => !idSet.has(r.experimentId)))
+        if (resultIdsToRemove.length > 0) {
+          removeCollectionRefs("result", resultIdsToRemove)
+        }
       }
     },
-    [discardArchiveForExperiment, setResults],
+    [discardArchiveForExperiment, setResults, removeCollectionRefs, results],
   )
 
   useBlocker({
@@ -2793,9 +2800,15 @@ export function ResultsPage() {
 
         await discardArchiveForExperiment(selectedExperimentId)
 
+        const resultToRemove = results.find(
+          (r) => r.experimentId === selectedExperimentId,
+        )
         setResults((prev) =>
           prev.filter((r) => r.experimentId !== selectedExperimentId),
         )
+        if (resultToRemove) {
+          removeCollectionRefs("result", [resultToRemove.id])
+        }
       }
     }
 
