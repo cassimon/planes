@@ -1620,7 +1620,7 @@ export function ProcessesPage() {
     const layer = stack.layers[layerIdx]
     if (!layer) return
     // Sync selected fields across ALL stacks that share the same layer (same process step)
-    const syncAcrossStacks = field === "thicknessNm" || field === "bandgapEv"
+    const syncAcrossStacks = field === "thicknessNm" || field === "bandgapEv" || field === "perovskiteA" || field === "perovskiteB" || field === "perovskiteX"
     const updatedStacks = generatedStacks.map((s, si) => ({
       ...s,
       layers: s.layers.map((l, li) => {
@@ -2759,10 +2759,11 @@ export function ProcessesPage() {
                       style={{
                         cursor: "pointer",
                         background: isSelected ? "var(--mantine-color-blue-0)" : undefined,
-                        borderColor: isSelected ? "var(--mantine-color-blue-4)" : undefined,
-                        borderLeft: collectionColor
-                          ? `4px solid ${collectionColor}`
-                          : undefined,
+                        borderLeft: isSelected
+                          ? "4px solid var(--mantine-color-blue-4)"
+                          : collectionColor
+                            ? `4px solid ${collectionColor}`
+                            : undefined,
                       }}
                       onClick={() => {
                         selectProcess(process.id)

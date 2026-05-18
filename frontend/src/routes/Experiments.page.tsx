@@ -25,7 +25,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react"
 import * as React from "react"
-import { useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import {
   type CanvasCollectionElement,
   type Experiment,
@@ -46,6 +46,42 @@ type SubstrateGeneratorConfig = {
   includeDate: boolean
   includeExperimentName: boolean
   addCount: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Performance-optimized TextInput with local state + onBlur
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DeferredTextInput({
+  value,
+  onChange,
+  onBlur,
+  ...props
+}: Omit<React.ComponentProps<typeof TextInput>, "onChange" | "onBlur"> & {
+  value: string
+  onChange?: (value: string) => void
+  onBlur?: (value: string) => void
+}) {
+  const [localValue, setLocalValue] = useState(value)
+
+  React.useEffect(() => {
+    setLocalValue(value)
+  }, [value])
+
+  const handleBlur = () => {
+    if (localValue !== value && onBlur) {
+      onBlur(localValue)
+    }
+  }
+
+  return (
+    <TextInput
+      {...props}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.currentTarget.value)}
+      onBlur={handleBlur}
+    />
+  )
 }
 
 function buildGeneratedSubstrateName(
@@ -122,7 +158,7 @@ function buildStageStepOptions(
 // Edit SubstrateName Generator (simplified display above table)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SubstrateNameGenerator({
+const SubstrateNameGenerator = React.memo(function SubstrateNameGenerator({
   process,
   substrateMaterialOptions,
   materialNameById,
@@ -234,7 +270,7 @@ function SubstrateNameGenerator({
       )}
     </Paper>
   )
-}
+})
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Recipe Selection Modal
@@ -634,16 +670,16 @@ function ExperimentGrid({
     })
   }
 
-  const handleSubstrateNameChange = (substrateId: string, name: string) => {
+  const handleSubstrateNameChange = useCallback((substrateId: string, name: string) => {
     onUpdate({
       ...experiment,
       substrates: experiment.substrates.map((substrate) =>
         substrate.id === substrateId ? { ...substrate, name } : substrate,
       ),
     })
-  }
+  }, [experiment, onUpdate])
 
-  const handleSubstrateMaterialChange = (substrateId: string, materialId: string | null) => {
+  const handleSubstrateMaterialChange = useCallback((substrateId: string, materialId: string | null) => {
     onUpdate({
       ...experiment,
       substrates: experiment.substrates.map((substrate) =>
@@ -652,7 +688,7 @@ function ExperimentGrid({
           : substrate,
       ),
     })
-  }
+  }, [experiment, onUpdate])
 
   const handleDuplicateSubstrate = (substrateId: string) => {
     const source = experiment.substrates.find((substrate) => substrate.id === substrateId)
@@ -795,7 +831,7 @@ function ExperimentGrid({
     applyRemoval()
   }
 
-  const handleProcessingTimeChange = (stageKey: string, value: string) => {
+  const handleProcessingTimeChange = useCallback((stageKey: string, value: string) => {
     onUpdate({
       ...experiment,
       processingTimes: {
@@ -803,9 +839,9 @@ function ExperimentGrid({
         [stageKey]: value,
       },
     })
-  }
+  }, [experiment, onUpdate])
 
-  const handleVariationValueChange = (
+  const handleVariationValueChange = useCallback((
     substrateId: string,
     stepId: string,
     paramKey: ProcessParameterKey,
@@ -826,7 +862,7 @@ function ExperimentGrid({
             },
       ),
     })
-  }
+  }, [experiment, onUpdate])
 
   const isVariationCellEditable = (
     substrateId: string,
@@ -1020,18 +1056,20 @@ function ExperimentGrid({
                     background: "var(--mantine-color-gray-0)",
                   }}
                 >
-                  <TextInput
+                  <DeferredTextInput
                     ref={(node) => {
                       nameInputRefs.current[experiment.substrates.findIndex((s) => s.id === substrate.id)] = node
                     }}
                     size="xs"
                     value={substrate.name}
-                    onChange={(e) => handleSubstrateNameChange(substrate.id, e.currentTarget.value)}
+                    onBlur={(value) => handleSubstrateNameChange(substrate.id, value)}
                     onFocus={(e) => e.currentTarget.select()}
                     onKeyDown={(e) => {
                       const currentIndex = experiment.substrates.findIndex((s) => s.id === substrate.id)
                       if (e.key === "Enter") {
                         e.preventDefault()
+                        const value = e.currentTarget.value
+                        handleSubstrateNameChange(substrate.id, value)
                         focusNameInput(currentIndex + 1)
                       }
                       if (e.key === "Tab") {
@@ -1094,17 +1132,17 @@ function ExperimentGrid({
                         padding: "8px 4px",
                       }}
                     >
-                      <TextInput
+                      <DeferredTextInput
                         size="xs"
                         value={substrate.parameterValues?.[key] ?? ""}
                         disabled={!editable}
                         styles={!editable ? { input: { opacity: 0.55 } } : undefined}
-                        onChange={(e) =>
+                        onBlur={(value) =>
                           handleVariationValueChange(
                             substrate.id,
                             column.stepId,
                             column.paramKey,
-                            e.currentTarget.value,
+                            value,
                           )
                         }
                       />
@@ -1174,12 +1212,12 @@ function ExperimentGrid({
                     borderTop: "2px solid var(--mantine-color-gray-2)",
                   }}
                 >
-                  <TextInput
+                  <DeferredTextInput
                     size="xs"
                     type="datetime-local"
                     value={experiment.processingTimes?.[processingKey] ?? ""}
-                    onChange={(e) =>
-                      handleProcessingTimeChange(processingKey, e.currentTarget.value)
+                    onBlur={(value) =>
+                      handleProcessingTimeChange(processingKey, value)
                     }
                   />
                 </td>
@@ -1454,17 +1492,17 @@ export default function ExperimentsPage() {
   }
 
   // Update experiment
-  const handleUpdateExperiment = (exp: Experiment) => {
+  const handleUpdateExperiment = useCallback((exp: Experiment) => {
     setExperiments((prev) => prev.map((e) => (e.id === exp.id ? exp : e)))
-  }
+  }, [setExperiments])
 
-  const handleUpdateProcess = (updatedProcess: Process) => {
+  const handleUpdateProcess = useCallback((updatedProcess: Process) => {
     setProcesses((prev) =>
       prev.map((process) => (process.id === updatedProcess.id ? updatedProcess : process)),
     )
-  }
+  }, [setProcesses])
 
-  const handleAddSubstratesForMaterial = (materialId: string) => {
+  const handleAddSubstratesForMaterial = useCallback((materialId: string) => {
     if (!selectedExperiment || !selectedProcess) {
       return
     }
@@ -1498,7 +1536,7 @@ export default function ExperimentsPage() {
       numSubstrates: newSubstrates.length,
       substrates: newSubstrates,
     })
-  }
+  }, [selectedExperiment, selectedProcess, generatorConfig, nextStepDefaults, handleUpdateExperiment])
 
   // Delete experiment
   const handleDeleteExperiment = (expId: string) => {
@@ -1647,12 +1685,11 @@ export default function ExperimentsPage() {
                         background: isSelected
                           ? "var(--mantine-color-blue-0)"
                           : undefined,
-                        borderColor: isSelected
-                          ? "var(--mantine-color-blue-4)"
-                          : undefined,
-                        borderLeft: collectionColor
-                          ? `4px solid ${collectionColor}`
-                          : undefined,
+                        borderLeft: isSelected
+                          ? "4px solid var(--mantine-color-blue-4)"
+                          : collectionColor
+                            ? `4px solid ${collectionColor}`
+                            : undefined,
                         paddingLeft: collectionColor ? "calc(var(--mantine-spacing-sm) - 3px)" : undefined,
                       }}
                       onClick={() => setSelectedExpId(exp.id)}
