@@ -41,6 +41,7 @@ export type Material = {
   purity: string
   stateAtRt: MaterialStateAtRt
   substrateRigidity: MaterialSubstrateRigidity
+  heightMm: string
 }
 
 export function newMaterial(
@@ -59,7 +60,13 @@ export function newMaterial(
     purity: "",
     stateAtRt: "",
     substrateRigidity: "",
+    heightMm: "",
   }
+}
+
+export type ProcessSubstrateDimension = {
+  lengthCm: string
+  widthCm: string
 }
 
 // ── Experiment ───────────────────────────────────────────────────────────────
@@ -176,6 +183,7 @@ export type Process = {
   name: string
   description?: string
   substrateIds: string[] // references to substrate Materials
+  substrateDimensionsById?: Record<string, ProcessSubstrateDimension>
   stages: ProcessStage[] // ordered from bottom (index 0) upward
   /** Persisted generated stacks for process editor UI */
   generatedStacks?: ProcessGeneratedStack[]

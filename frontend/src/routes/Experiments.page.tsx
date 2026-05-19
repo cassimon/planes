@@ -48,6 +48,12 @@ type SubstrateGeneratorConfig = {
   addCount: number
 }
 
+type SubstrateMaterialOption = {
+  value: string
+  label: string
+  heightMm: string
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Performance-optimized TextInput with local state + onBlur
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +95,7 @@ function buildGeneratedSubstrateName(
   experiment: Experiment,
   generatorConfig: SubstrateGeneratorConfig,
 ) {
-  const parts: string[] = [generatorConfig.namePrefix || "substrate"]
+  const parts: string[] = [generatorConfig.namePrefix || "sample"]
   if (generatorConfig.includeDate && experiment.date) {
     parts.push(experiment.date)
   }
@@ -170,7 +176,7 @@ const SubstrateNameGenerator = React.memo(function SubstrateNameGenerator({
   onAddSubstratesForMaterial,
 }: {
   process: Process
-  substrateMaterialOptions: Array<{ value: string; label: string }>
+  substrateMaterialOptions: SubstrateMaterialOption[]
   materialNameById: Map<string, string>
   solutionNameById: Map<string, string>
   generatorConfig: SubstrateGeneratorConfig
@@ -188,12 +194,12 @@ const SubstrateNameGenerator = React.memo(function SubstrateNameGenerator({
       style={{ background: "var(--mantine-color-blue-0)" }}
     >
       <Text size="sm" fw={600} mb="xs">
-        Substrate Information
+        Sample Information
       </Text>
       <Group gap="sm" align="flex-end" wrap="nowrap">
         <TextInput
           label="Name Prefix"
-          placeholder="e.g. substrate"
+          placeholder="e.g. sample"
           size="sm"
           value={generatorConfig.namePrefix}
           onChange={(e) => onChangeGeneratorConfig({ namePrefix: e.currentTarget.value })}
@@ -225,7 +231,7 @@ const SubstrateNameGenerator = React.memo(function SubstrateNameGenerator({
       <Divider my="sm" />
 
       <Text size="xs" fw={600} c="dimmed" tt="uppercase" mb="xs">
-        Default Values For Next Added Substrates
+        Default Values For Next Added Samples
       </Text>
       <Group gap="sm" align="flex-end" wrap="wrap">
         {process.stages.map((stage, idx) => (
@@ -259,7 +265,7 @@ const SubstrateNameGenerator = React.memo(function SubstrateNameGenerator({
             leftSection={<IconPlus size={16} />}
             onClick={() => onAddSubstratesForMaterial(option.value)}
           >
-            {`Add Substrates: ${option.label}`}
+            {`Add Samples: ${option.label}`}
           </Button>
         ))}
       </Group>
@@ -415,7 +421,7 @@ function ExperimentGrid({
 }: {
   experiment: Experiment
   process: Process
-  substrateMaterialOptions: Array<{ value: string; label: string }>
+  substrateMaterialOptions: SubstrateMaterialOption[]
   materialNameById: Map<string, string>
   solutionNameById: Map<string, string>
   generatorConfig: SubstrateGeneratorConfig
@@ -1420,6 +1426,7 @@ export default function ExperimentsPage() {
       return {
         value: id,
         label: material?.name || material?.inventoryLabel || material?.casNumber || "Unnamed substrate",
+        heightMm: material?.heightMm ?? "",
       }
     })
   }, [materials, selectedProcess])

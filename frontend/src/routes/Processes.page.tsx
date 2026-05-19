@@ -80,6 +80,7 @@ const STEP_CATEGORY_ICON_MAP: Record<ProcessStepCategory, React.ReactNode> = {
 
 const SUBSTRATE_COLOR = "#6e8c9e"
 const ROW_ACTION_SLOT_WIDTH = 220
+const DEFAULT_SUBSTRATE_DIMENSIONS = { lengthCm: "2", widthCm: "2" }
 const NEW_CHEMICAL_OPTION = "action:new-material:chemical_compound"
 const NEW_COMMERCIAL_MIXTURE_OPTION = "action:new-material:commercial_mixture"
 const NEW_SOLUTION_OPTION = "action:new-solution"
@@ -2122,11 +2123,48 @@ export function ProcessesPage() {
     return hasSubstrate && hasStep
   }, [selectedProcess])
 
+  useEffect(() => {
+    if (!selectedProcess) return
+    const substrateIds = selectedProcess.substrateIds ?? []
+    if (substrateIds.length === 0) return
+
+    const existing = selectedProcess.substrateDimensionsById ?? {}
+    let hasMissing = false
+    for (const substrateId of substrateIds) {
+      if (!existing[substrateId]) {
+        hasMissing = true
+        break
+      }
+    }
+    if (!hasMissing) return
+
+    const nextDimensions = { ...existing }
+    for (const substrateId of substrateIds) {
+      if (!nextDimensions[substrateId]) {
+        nextDimensions[substrateId] = { ...DEFAULT_SUBSTRATE_DIMENSIONS }
+      }
+    }
+
+    const updated: Process = {
+      ...selectedProcess,
+      substrateDimensionsById: nextDimensions,
+    }
+    setProcesses((prev) =>
+      prev.map((p) => (p.id === selectedProcess.id ? updated : p)),
+    )
+  }, [selectedProcess, setProcesses])
+
   const handleAddSubstrate = (substrateId: string) => {
     if (!selectedProcess) return
     const updated: Process = {
       ...selectedProcess,
       substrateIds: [...(selectedProcess.substrateIds ?? []), substrateId],
+      substrateDimensionsById: {
+        ...(selectedProcess.substrateDimensionsById ?? {}),
+        [substrateId]: {
+          ...(selectedProcess.substrateDimensionsById?.[substrateId] ?? DEFAULT_SUBSTRATE_DIMENSIONS),
+        },
+      },
     }
     setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
   }
@@ -2139,6 +2177,11 @@ export function ProcessesPage() {
     const updated: Process = {
       ...selectedProcess,
       substrateIds: currentIds.filter((id) => id !== substrateId),
+      substrateDimensionsById: Object.fromEntries(
+        Object.entries(selectedProcess.substrateDimensionsById ?? {}).filter(
+          ([id]) => id !== substrateId,
+        ),
+      ),
     }
     setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
     setSubstrateSelectingIdx(null)
@@ -2147,8 +2190,41 @@ export function ProcessesPage() {
   const handleReplaceSubstrate = (index: number, substrateId: string) => {
     if (!selectedProcess) return
     const ids = [...(selectedProcess.substrateIds ?? [])]
+    const previousSubstrateId = ids[index]
     ids[index] = substrateId
-    const updated: Process = { ...selectedProcess, substrateIds: ids }
+    const nextDimensions = { ...(selectedProcess.substrateDimensionsById ?? {}) }
+    if (previousSubstrateId && previousSubstrateId !== substrateId) {
+      delete nextDimensions[previousSubstrateId]
+    }
+    nextDimensions[substrateId] = {
+      ...(nextDimensions[substrateId] ?? DEFAULT_SUBSTRATE_DIMENSIONS),
+    }
+    const updated: Process = {
+      ...selectedProcess,
+      substrateIds: ids,
+      substrateDimensionsById: nextDimensions,
+    }
+    setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
+  }
+
+  const handleUpdateSubstrateDimensions = (
+    substrateId: string,
+    patch: Partial<{ lengthCm: string; widthCm: string }>,
+  ) => {
+    if (!selectedProcess) return
+    const current =
+      selectedProcess.substrateDimensionsById?.[substrateId] ??
+      DEFAULT_SUBSTRATE_DIMENSIONS
+    const updated: Process = {
+      ...selectedProcess,
+      substrateDimensionsById: {
+        ...(selectedProcess.substrateDimensionsById ?? {}),
+        [substrateId]: {
+          ...current,
+          ...patch,
+        },
+      },
+    }
     setProcesses((prev) => prev.map((p) => (p.id === selectedProcess.id ? updated : p)))
   }
 
@@ -3001,6 +3077,9 @@ export function ProcessesPage() {
                               >
                                 {subIds.map((subId, idx) => {
                                   const label = getSubstrateLabel(subId)
+                                  const substrateDimensions =
+                                    selectedProcess.substrateDimensionsById?.[subId] ??
+                                    DEFAULT_SUBSTRATE_DIMENSIONS
                                   const isActive = substrateSelectingIdx === idx
                                   const cannotRemove = isLastSubstrate && hasSteps
                                   const replacementOptions = visibleSubstrateOptions.filter(
@@ -3056,35 +3135,85 @@ export function ProcessesPage() {
 
                                         <Box>
                                           {isActive ? (
-                                            <Select
-                                              size="xs"
-                                              placeholder="Select substrate"
-                                              value={subId}
-                                              data={replacementOptions.map((opt) => ({
-                                                value: opt.value,
-                                                label: opt.label,
-                                              }))}
-                                              searchable
-                                              clearable
-                                              comboboxProps={{ withinPortal: false }}
-                                              onClick={(e) => e.stopPropagation()}
-                                              onChange={(value) => {
-                                                if (value) {
-                                                  handleReplaceSubstrate(idx, value)
-                                                } else {
-                                                  handleRemoveSubstrate(subId)
-                                                }
-                                                setSubstrateSelectingIdx(null)
-                                              }}
-                                            />
+                                            <Stack gap={6}>
+                                              <Select
+                                                size="xs"
+                                                placeholder="Select substrate"
+                                                value={subId}
+                                                data={replacementOptions.map((opt) => ({
+                                                  value: opt.value,
+                                                  label: opt.label,
+                                                }))}
+                                                searchable
+                                                clearable
+                                                comboboxProps={{ withinPortal: false }}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={(value) => {
+                                                  if (value) {
+                                                    handleReplaceSubstrate(idx, value)
+                                                  } else {
+                                                    handleRemoveSubstrate(subId)
+                                                  }
+                                                  setSubstrateSelectingIdx(null)
+                                                }}
+                                              />
+
+                                              <Group gap={6} wrap="nowrap">
+                                                <NumberInput
+                                                  size="xs"
+                                                  label="Length (cm)"
+                                                  min={0}
+                                                  value={
+                                                    substrateDimensions.lengthCm
+                                                      ? Number(substrateDimensions.lengthCm)
+                                                      : ""
+                                                  }
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  onChange={(value) =>
+                                                    handleUpdateSubstrateDimensions(subId, {
+                                                      lengthCm:
+                                                        typeof value === "number"
+                                                          ? String(value)
+                                                          : "",
+                                                    })
+                                                  }
+                                                  style={{ flex: 1 }}
+                                                />
+                                                <NumberInput
+                                                  size="xs"
+                                                  label="Width (cm)"
+                                                  min={0}
+                                                  value={
+                                                    substrateDimensions.widthCm
+                                                      ? Number(substrateDimensions.widthCm)
+                                                      : ""
+                                                  }
+                                                  onClick={(e) => e.stopPropagation()}
+                                                  onChange={(value) =>
+                                                    handleUpdateSubstrateDimensions(subId, {
+                                                      widthCm:
+                                                        typeof value === "number"
+                                                          ? String(value)
+                                                          : "",
+                                                    })
+                                                  }
+                                                  style={{ flex: 1 }}
+                                                />
+                                              </Group>
+                                            </Stack>
                                           ) : (
-                                            <Text size="xs" c="dimmed">
-                                              {label?.rigidity === "flexible"
-                                                ? "Flexible"
-                                                : label?.rigidity === "rigid"
-                                                  ? "Rigid"
-                                                  : "—"}
-                                            </Text>
+                                            <Stack gap={2}>
+                                              <Text size="xs" c="dimmed">
+                                                {label?.rigidity === "flexible"
+                                                  ? "Flexible"
+                                                  : label?.rigidity === "rigid"
+                                                    ? "Rigid"
+                                                    : "—"}
+                                              </Text>
+                                              <Text size="xs" c="dimmed">
+                                                {`L ${substrateDimensions.lengthCm || "2"} cm · W ${substrateDimensions.widthCm || "2"} cm`}
+                                              </Text>
+                                            </Stack>
                                           )}
                                         </Box>
                                       </Stack>

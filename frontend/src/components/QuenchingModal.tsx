@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ActionIcon,
   Autocomplete,
@@ -16,6 +16,7 @@ import {
 } from "@mantine/core"
 import type { SelectProps, AutocompleteProps } from "@mantine/core"
 import { IconX } from "@tabler/icons-react"
+import { useAppContext, useEntityCollection } from "@/store/AppContext"
 
 // Wrappers that keep combobox dropdowns inside the Modal portal so they don't
 // trigger the modal close via outside-click / focus-trap detection.
@@ -32,6 +33,11 @@ function ModalAutocomplete(props: AutocompleteProps) {
 
 export type QuenchingType = "Gas" | "Antisolvent" | "Vacuum"
 
+type MediaReference = {
+  kind: "material" | "solution"
+  id: string
+}
+
 interface GasState {
   gasType: string
   pressure: string
@@ -46,7 +52,7 @@ interface GasState {
 }
 
 interface AntisolventState {
-  material: string
+  media: string
   flowRate: string
   depositionMethod: string
   height: string
@@ -86,7 +92,7 @@ function defaultGas(): GasState {
 
 function defaultAntisolvent(): AntisolventState {
   return {
-    material: "",
+    media: "",
     flowRate: "",
     depositionMethod: "",
     height: "",
@@ -106,6 +112,30 @@ function defaultVacuum(): VacuumState {
     deadVolume: "",
     evacuationTime: "",
   }
+}
+
+function parseMediaReference(value: string): MediaReference | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const idx = trimmed.indexOf(":")
+  if (idx === -1) return null
+  const kind = trimmed.slice(0, idx)
+  const id = trimmed.slice(idx + 1).trim()
+  if (!id || (kind !== "material" && kind !== "solution")) return null
+  return { kind, id }
+}
+
+function getMediaLabel(
+  value: string,
+  materials: Array<{ id: string; name: string }>,
+  solutions: Array<{ id: string; name: string }>,
+): string {
+  const ref = parseMediaReference(value)
+  if (!ref) return value
+  if (ref.kind === "material") {
+    return materials.find((material) => material.id === ref.id)?.name || "Unnamed material"
+  }
+  return solutions.find((solution) => solution.id === ref.id)?.name || "Unnamed solution"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +159,7 @@ function buildQuenchingString(
     if (gas.nozzleWidth) parts.push(`nozzleWidth=${gas.nozzleWidth} ${gas.nozzleWidthUnit}`)
     if (gas.nozzleForm) parts.push(`nozzleForm=${gas.nozzleForm}`)
   } else if (type === "Antisolvent") {
-    if (antisolvent.material) parts.push(`material=${antisolvent.material}`)
+    if (antisolvent.media) parts.push(`media=${antisolvent.media}`)
     if (antisolvent.flowRate) parts.push(`flowRate=${antisolvent.flowRate} ul/s`)
     if (antisolvent.depositionMethod) parts.push(`depositionMethod=${antisolvent.depositionMethod}`)
     if (antisolvent.height) parts.push(`height=${antisolvent.height} ${antisolvent.heightUnit}`)
@@ -200,7 +230,8 @@ function parseQuenchingValue(value: string): {
     base.gas = gas
   } else if (type === "Antisolvent") {
     const anti = defaultAntisolvent()
-    if (pairs["material"]) anti.material = pairs["material"]
+    if (pairs["media"]) anti.media = pairs["media"]
+    if (pairs["material"]) anti.media = pairs["material"]
     if (pairs["flowRate"]) {
       const parts = pairs["flowRate"].split(" ")
       anti.flowRate = parts[0] ?? ""
@@ -381,6 +412,34 @@ function AntisolventForm({
   state: AntisolventState
   onChange: (s: AntisolventState) => void
 }) {
+  const { materials, solutions } = useAppContext()
+  const { isEntityOnActivePlane } = useEntityCollection()
+
+  const mediaOptions = useMemo(
+    () => [
+      {
+        group: "Materials",
+        items: materials
+          .filter((material) => isEntityOnActivePlane("material", material.id))
+          .filter((material) => (material.category ?? "chemical_compound") !== "substrate_material")
+          .map((material) => {
+            const label = material.name || "Unnamed material"
+            return { value: `material:${material.id}`, label }
+          }),
+      },
+      {
+        group: "Solutions",
+        items: solutions
+          .filter((solution) => isEntityOnActivePlane("solution", solution.id))
+          .map((solution) => {
+            const label = solution.name || "Unnamed solution"
+            return { value: `solution:${solution.id}`, label }
+          }),
+      },
+    ],
+    [isEntityOnActivePlane, materials, solutions],
+  )
+
   function set(patch: Partial<AntisolventState>) {
     onChange({ ...state, ...patch })
   }
@@ -388,12 +447,15 @@ function AntisolventForm({
   return (
     <SimpleGrid cols={2} spacing="sm" verticalSpacing="sm">
       <Box style={{ gridColumn: "span 2" }}>
-        <FieldLabel>Material (Solvent / Solution)</FieldLabel>
-        <TextInput
+        <FieldLabel>Material / Solution</FieldLabel>
+        <ModalSelect
           size="xs"
-          value={state.material}
-          onChange={(e) => set({ material: e.currentTarget.value })}
-          placeholder="e.g. Chlorobenzene"
+          data={mediaOptions}
+          value={state.media || null}
+          onChange={(v) => set({ media: v ?? "" })}
+          placeholder="Select material or solution"
+          searchable
+          clearable
         />
       </Box>
 
@@ -637,7 +699,11 @@ export interface DryingMethodInputProps {
 }
 
 /** Render a compact human-readable summary of a quenching string. */
-function summariseQuenchingValue(value: string): string {
+function summariseQuenchingValue(
+  value: string,
+  materials: Array<{ id: string; name: string }>,
+  solutions: Array<{ id: string; name: string }>,
+): string {
   if (!value) return ""
   const pairs: Record<string, string> = {}
   value.split("|").forEach((segment) => {
@@ -649,7 +715,7 @@ function summariseQuenchingValue(value: string): string {
   const type = pairs["type"]
   if (!type) return value
 
-  const parts: string[] = [type]
+  const parts: string[] = [`D/Q: ${type}`]
   if (type === "Gas") {
     if (pairs["gasType"]) parts.push(pairs["gasType"])
     if (pairs["flowRate"]) parts.push(`${pairs["flowRate"]}`)
@@ -657,7 +723,8 @@ function summariseQuenchingValue(value: string): string {
     if (pairs["height"]) parts.push(`h=${pairs["height"]}`)
     if (pairs["nozzleForm"]) parts.push(pairs["nozzleForm"])
   } else if (type === "Antisolvent") {
-    if (pairs["material"]) parts.push(pairs["material"])
+    const media = pairs["media"] || pairs["material"]
+    if (media) parts.push(getMediaLabel(media, materials, solutions))
     if (pairs["depositionMethod"]) parts.push(pairs["depositionMethod"])
     if (pairs["flowRate"]) parts.push(`${pairs["flowRate"]}`)
     if (pairs["height"]) parts.push(`h=${pairs["height"]}`)
@@ -672,6 +739,7 @@ function summariseQuenchingValue(value: string): string {
 
 export function DryingMethodInput({ label, param, onChange }: DryingMethodInputProps) {
   const [modalOpen, setModalOpen] = useState(false)
+  const { materials, solutions } = useAppContext()
 
   const hasValue = Boolean(param?.value?.trim())
 
@@ -755,7 +823,7 @@ export function DryingMethodInput({ label, param, onChange }: DryingMethodInputP
           styles={{ inner: { justifyContent: "flex-start" } }}
         >
           <Text size="xs" truncate style={{ maxWidth: "100%" }}>
-            {summariseQuenchingValue(param?.value ?? "")}
+            {summariseQuenchingValue(param?.value ?? "", materials, solutions)}
           </Text>
         </Button>
       </Box>

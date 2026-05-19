@@ -446,6 +446,15 @@ def create_nomad_metadata_yaml(
             parts = [text] if text else []
         return " | ".join(parts) if parts else "Unknown"
 
+    def _parse_media_reference(media: str) -> tuple[str, str]:
+        raw = str(media or "").strip()
+        if not raw:
+            return "", ""
+        if ":" not in raw:
+            return "", raw
+        kind, ref_id = raw.split(":", 1)
+        return kind.strip().lower(), ref_id.strip()
+
     def _flatten_solution_components(
         solution_id: str,
         visited: set[str] | None = None,
@@ -597,6 +606,34 @@ def create_nomad_metadata_yaml(
             "concentrations": _format_layer_token_list(
                 [item["amount"] for item in compound_components],
             ),
+        }
+
+    def _quenching_solution_metadata(solution_id: str) -> dict[str, str]:
+        solution = solutions_by_id.get(solution_id)
+        if not isinstance(solution, dict):
+            return {
+                "media": "Unknown",
+                "volume": "Unknown",
+                "mixing_ratios": "Unknown",
+                "additives_compounds": "Unknown",
+                "additives_concentrations": "Unknown",
+            }
+
+        components = _flatten_solution_components(solution_id)
+        solvent_components = _aggregate_components_by_name(components, solvents=True)
+        compound_components = _aggregate_components_by_name(components, solvents=False)
+
+        media_names = [item["name"] for item in solvent_components]
+        media_amounts = [item["amount"] for item in solvent_components]
+        additive_names = [item["name"] for item in compound_components]
+        additive_amounts = [item["amount"] for item in compound_components]
+
+        return {
+            "media": _format_layer_token_list(media_names) or _clean_value(solution.get("name")),
+            "volume": _format_layer_token_list(media_amounts),
+            "mixing_ratios": _format_layer_token_list(media_amounts),
+            "additives_compounds": _format_layer_token_list(additive_names),
+            "additives_concentrations": _format_layer_token_list(additive_amounts),
         }
 
     def _join_layer_solution_field(
@@ -751,6 +788,14 @@ def create_nomad_metadata_yaml(
             result["induced"] = bool(value.strip())
             result["media"] = value.strip()
             return result
+
+        def _normalize_media(raw: str) -> str:
+            media = raw.strip()
+            for prefix in ("Material:", "Solution:"):
+                if media.startswith(prefix):
+                    return media[len(prefix):].strip() or media
+            return media
+
         result["induced"] = True
         if qtype == "Gas":
             gas_type = pairs.get("gasType", "")
@@ -768,8 +813,16 @@ def create_nomad_metadata_yaml(
                 detail_parts.append(f"Nozzle form: {pairs['nozzleForm']}")
             result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
         elif qtype == "Antisolvent":
-            material = pairs.get("material", "")
-            result["media"] = material if material else "Antisolvent"
+            media = pairs.get("media", "") or pairs.get("material", "")
+            media_kind, media_ref = _parse_media_reference(media)
+            if media_kind == "solution" and media_ref:
+                result.update(_quenching_solution_metadata(media_ref))
+            elif media_kind == "material" and media_ref:
+                material = materials_by_id.get(media_ref)
+                result["media"] = _material_name(material, media_ref)
+            else:
+                result["media"] = _normalize_media(media) if media else "Antisolvent"
+
             detail_parts = []
             if pairs.get("depositionMethod"):
                 detail_parts.append(f"Method: {pairs['depositionMethod']}")
@@ -779,7 +832,8 @@ def create_nomad_metadata_yaml(
                 detail_parts.append(f"Height: {pairs['height']}")
             if pairs.get("pressure"):
                 detail_parts.append(f"Pressure: {pairs['pressure']}")
-            result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
+            if result["volume"] == "Unknown":
+                result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
         elif qtype == "Vacuum":
             result["media"] = "Vacuum"
             detail_parts = []
@@ -1014,15 +1068,30 @@ def create_nomad_metadata_yaml(
                     for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
                     if qd["induced"]
                 ) or "Unknown",
-                "quenching_media_mixing_ratios": "Unknown",
+                "quenching_media_mixing_ratios": " | ".join(
+                    qd["mixing_ratios"]
+                    for e, _ in absorber_e
+                    for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
+                    if qd["induced"] and qd["mixing_ratios"] != "Unknown"
+                ) or "Unknown",
                 "quenching_media_volume": " | ".join(
                     qd["volume"]
                     for e, _ in absorber_e
                     for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
                     if qd["induced"] and qd["volume"] != "Unknown"
                 ) or "Unknown",
-                "quenching_media_additives_compounds": "Unknown",
-                "quenching_media_additives_concentrations": "Unknown",
+                "quenching_media_additives_compounds": " | ".join(
+                    qd["additives_compounds"]
+                    for e, _ in absorber_e
+                    for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
+                    if qd["induced"] and qd["additives_compounds"] != "Unknown"
+                ) or "Unknown",
+                "quenching_media_additives_concentrations": " | ".join(
+                    qd["additives_concentrations"]
+                    for e, _ in absorber_e
+                    for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
+                    if qd["induced"] and qd["additives_concentrations"] != "Unknown"
+                ) or "Unknown",
                 "thermal_annealing_temperature": _join_params(absorber_e, "annealingTemp", substrate),
                 "thermal_annealing_time": _join_params(absorber_e, "annealingTime", substrate),
                 "thermal_annealing_atmosphere": _join_params(absorber_e, "annealingAtmosphere", substrate),

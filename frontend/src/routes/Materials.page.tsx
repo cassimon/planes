@@ -88,6 +88,7 @@ const COMMERCIAL_MIXTURE_COLUMNS: Column[] = [
 const SUBSTRATE_COLUMNS: Column[] = [
   ...COMMON_COLUMNS,
   { key: "substrateRigidity", label: "Flexible / Rigid" },
+  { key: "heightMm", label: "Height (mm)" },
 ]
 
 const CATEGORY_LABEL: Record<MaterialCategory, string> = {
@@ -382,9 +383,17 @@ export function MaterialsPage() {
           }
           if (processAttachment.target === "substrate") {
             const substrateIds = process.substrateIds ?? []
-            return substrateIds.includes(m.id)
-              ? process
-              : { ...process, substrateIds: [...substrateIds, m.id] }
+            if (substrateIds.includes(m.id)) {
+              return process
+            }
+            return {
+              ...process,
+              substrateIds: [...substrateIds, m.id],
+              substrateDimensionsById: {
+                ...(process.substrateDimensionsById ?? {}),
+                [m.id]: { lengthCm: "2", widthCm: "2" },
+              },
+            }
           }
           if (processAttachment.target === "step-material" && processAttachment.stepId) {
             return {
