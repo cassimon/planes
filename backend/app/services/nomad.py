@@ -25,7 +25,6 @@ from typing import Any
 
 import httpx
 import yaml
-import copy
 
 from app.core.config import settings
 
@@ -318,6 +317,11 @@ def create_nomad_metadata_yaml(
         }
 
     # ── 2. Load process ───────────────────────────────────────────────────────
+    us = session.exec(
+        select(UserState).where(UserState.owner_id == experiment.owner_id)
+    ).first()
+    user_state_data = us.data if us and isinstance(us.data, dict) else {}
+
     process_data: dict[str, Any] | None = None
 
     if process_snapshot and isinstance(process_snapshot, dict):
@@ -325,11 +329,8 @@ def create_nomad_metadata_yaml(
     else:
         process_id = exp_data.get("processId")
         if process_id:
-            us = session.exec(
-                select(UserState).where(UserState.owner_id == experiment.owner_id)
-            ).first()
-            if us and isinstance(us.data, dict):
-                processes = us.data.get("processes", [])
+            if user_state_data:
+                processes = user_state_data.get("processes", [])
                 process_data = next(
                     (p for p in processes if p.get("id") == process_id), None
                 )
@@ -339,6 +340,17 @@ def create_nomad_metadata_yaml(
             f"No process data found for experiment {experiment_id}; "
             "generated stacks unavailable – layer sections will be empty"
         )
+
+    materials_by_id: dict[str, dict[str, Any]] = {
+        str(material.get("id")): material
+        for material in (user_state_data.get("materials") or [])
+        if isinstance(material, dict) and material.get("id")
+    }
+    solutions_by_id: dict[str, dict[str, Any]] = {
+        str(solution.get("id")): solution
+        for solution in (user_state_data.get("solutions") or [])
+        if isinstance(solution, dict) and solution.get("id")
+    }
 
     # ── 3. Build step map: step_id → ProcessStep dict ─────────────────────────
     step_map: dict[str, dict[str, Any]] = {}
@@ -390,6 +402,210 @@ def create_nomad_metadata_yaml(
 
     # ── Helper functions ──────────────────────────────────────────────────────
 
+    def _clean_value(value: Any, default: str = "Unknown") -> str:
+        text = str(value or "").strip()
+        return text if text else default
+
+    def _material_name(material: dict[str, Any] | None, fallback: str = "Unknown") -> str:
+        if not isinstance(material, dict):
+            return fallback
+        for key in ("name", "inventoryLabel", "casNumber", "id"):
+            value = str(material.get(key) or "").strip()
+            if value:
+                return value
+        return fallback
+
+    def _material_supplier(material: dict[str, Any] | None) -> str:
+        if not isinstance(material, dict):
+            return "Unknown"
+        return _clean_value(material.get("supplier"))
+
+    def _material_purity(material: dict[str, Any] | None) -> str:
+        if not isinstance(material, dict):
+            return "Unknown"
+        return _clean_value(material.get("purity"))
+
+    def _is_solvent_material(material: dict[str, Any] | None) -> bool:
+        if not isinstance(material, dict):
+            return False
+        material_type = str(material.get("type") or "").lower()
+        state_at_rt = str(material.get("stateAtRt") or "").lower()
+        return "solvent" in material_type or state_at_rt in {"liquid", "gas"}
+
+    def _format_layer_token_list(values: list[str], empty: str = "Unknown") -> str:
+        cleaned = sorted({value.strip() for value in values if value and value.strip()})
+        return "; ".join(cleaned) if cleaned else empty
+
+    def _format_substrate_stack_sequence(raw_value: Any) -> str:
+        text = str(raw_value or "").strip()
+        if not text:
+            return "Unknown"
+        text = re.sub(r"^substrate\s*:\s*", "", text, flags=re.IGNORECASE)
+        parts = [part.strip() for part in re.split(r"\s*[/\\|,;]+\s*", text) if part.strip()]
+        if len(parts) <= 1:
+            parts = [text] if text else []
+        return " | ".join(parts) if parts else "Unknown"
+
+    def _flatten_solution_components(
+        solution_id: str,
+        visited: set[str] | None = None,
+    ) -> list[dict[str, str | bool]]:
+        if not solution_id:
+            return []
+        if visited is None:
+            visited = set()
+        if solution_id in visited:
+            return []
+        visited = {solution_id, *visited}
+
+        solution = solutions_by_id.get(solution_id)
+        if not isinstance(solution, dict):
+            return []
+
+        flattened: list[dict[str, str | bool]] = []
+        for component in (solution.get("components") or []):
+            if not isinstance(component, dict):
+                continue
+            material_id = str(component.get("materialId") or "").strip()
+            nested_solution_id = str(component.get("solutionId") or "").strip()
+
+            if material_id:
+                material = materials_by_id.get(material_id)
+                amount = str(component.get("amount") or "").strip()
+                unit = str(component.get("unit") or "").strip()
+                flattened.append(
+                    {
+                        "name": _material_name(material, material_id),
+                        "supplier": _material_supplier(material),
+                        "purity": _material_purity(material),
+                        "amount": f"{amount} {unit}".strip() if amount else "Unknown",
+                        "is_solvent": _is_solvent_material(material),
+                    }
+                )
+                continue
+
+            if nested_solution_id:
+                flattened.extend(_flatten_solution_components(nested_solution_id, visited))
+
+        return flattened
+
+    def _step_reaction_components(step: dict[str, Any]) -> list[dict[str, str | bool]]:
+        components: list[dict[str, str | bool]] = []
+
+        material_id = str(step.get("materialId") or "").strip()
+        if material_id:
+            material = materials_by_id.get(material_id)
+            components.append(
+                {
+                    "name": _material_name(material, material_id),
+                    "supplier": _material_supplier(material),
+                    "purity": _material_purity(material),
+                    "amount": "Unknown",
+                    "is_solvent": _is_solvent_material(material),
+                }
+            )
+
+        solution_id = str(step.get("solutionId") or "").strip()
+        if solution_id:
+            components.extend(_flatten_solution_components(solution_id))
+
+        return components
+
+    def _is_liquid_deposition(step: dict[str, Any]) -> bool:
+        step_category = str(step.get("stepCategory") or "").strip().lower()
+        if step_category == "wet_deposition":
+            return True
+        for component in _step_reaction_components(step):
+            if bool(component.get("is_solvent")):
+                return True
+        return False
+
+    def _aggregate_components_by_name(
+        components: list[dict[str, str | bool]],
+        *,
+        solvents: bool,
+    ) -> list[dict[str, str]]:
+        grouped: dict[str, dict[str, set[str] | list[str]]] = {}
+
+        for component in components:
+            if bool(component.get("is_solvent")) != solvents:
+                continue
+            name = _clean_value(component.get("name"), default="")
+            if not name:
+                continue
+            bucket = grouped.setdefault(
+                name,
+                {"supplier": set(), "purity": set(), "amounts": []},
+            )
+            supplier = _clean_value(component.get("supplier"))
+            purity = _clean_value(component.get("purity"))
+            amount = _clean_value(component.get("amount"))
+            if supplier != "Unknown":
+                bucket["supplier"].add(supplier)
+            if purity != "Unknown":
+                bucket["purity"].add(purity)
+            if amount != "Unknown":
+                bucket["amounts"].append(amount)
+
+        aggregated: list[dict[str, str]] = []
+        for name in sorted(grouped):
+            bucket = grouped[name]
+            suppliers = sorted(bucket["supplier"])
+            purities = sorted(bucket["purity"])
+            amounts = sorted(set(bucket["amounts"]))
+            aggregated.append(
+                {
+                    "name": name,
+                    "supplier": "; ".join(suppliers) if suppliers else "Unknown",
+                    "purity": "; ".join(purities) if purities else "Unknown",
+                    "amount": ", ".join(amounts) if amounts else "Unknown",
+                }
+            )
+        return aggregated
+
+    def _layer_solution_metadata(step: dict[str, Any]) -> dict[str, str]:
+        if not _is_liquid_deposition(step):
+            return {
+                "solvents": "Unknown",
+                "solvents_supplier": "Unknown",
+                "solvents_purity": "Unknown",
+                "compounds": "Unknown",
+                "compounds_supplier": "Unknown",
+                "compounds_purity": "Unknown",
+                "concentrations": "Unknown",
+            }
+
+        components = _step_reaction_components(step)
+        solvent_components = _aggregate_components_by_name(components, solvents=True)
+        compound_components = _aggregate_components_by_name(components, solvents=False)
+
+        return {
+            "solvents": _format_layer_token_list([item["name"] for item in solvent_components]),
+            "solvents_supplier": _format_layer_token_list(
+                [item["supplier"] for item in solvent_components],
+            ),
+            "solvents_purity": _format_layer_token_list(
+                [item["purity"] for item in solvent_components],
+            ),
+            "compounds": _format_layer_token_list([item["name"] for item in compound_components]),
+            "compounds_supplier": _format_layer_token_list(
+                [item["supplier"] for item in compound_components],
+            ),
+            "compounds_purity": _format_layer_token_list(
+                [item["purity"] for item in compound_components],
+            ),
+            "concentrations": _format_layer_token_list(
+                [item["amount"] for item in compound_components],
+            ),
+        }
+
+    def _join_layer_solution_field(
+        entries: list[tuple[dict[str, Any], str]],
+        field: str,
+    ) -> str:
+        values = [_layer_solution_metadata(step).get(field, "Unknown") for step, _ in entries]
+        return " | ".join(values) if values else "Unknown"
+
     def _get_step_param(
         step: dict[str, Any],
         param_key: str,
@@ -432,6 +648,85 @@ def create_nomad_metadata_yaml(
         squish = lambda s: "".join(i.strip() for i in s.split(";") if i.strip())
         return squish(a_ions) + squish(b_ions) + squish(x_ions)
 
+    def _format_coeff_value(raw: str) -> str:
+        value = raw.strip()
+        if not value:
+            return "x"
+        try:
+            numeric = float(value)
+            if numeric.is_integer():
+                return str(int(numeric))
+            return (f"{numeric:.6f}").rstrip("0").rstrip(".")
+        except ValueError:
+            return value
+
+    def _parse_perovskite_ion_layers(raw_ions: Any) -> tuple[str, str, int]:
+        """
+        Parse perovskite ions into aligned `ions` and `coefficients` strings.
+
+        Supports compact notation like `Cs0.1FA0.9` and explicit notation like
+        `Cs; FA; MA` (with optional coefficients in tokens).
+        """
+        raw_text = str(raw_ions or "").strip()
+        if not raw_text:
+            return "Unknown", "x", 1
+
+        layer_chunks = [chunk.strip() for chunk in raw_text.split("|") if chunk.strip()]
+        if not layer_chunks:
+            return "Unknown", "x", 1
+
+        ion_layers: list[str] = []
+        coeff_layers: list[str] = []
+
+        compact_pattern = re.compile(
+            r"(\([^)]+\)|[A-Za-z][A-Za-z@+\-]*?)(\d+(?:\.\d+)?)"
+        )
+
+        for layer in layer_chunks:
+            tokens = [token.strip() for token in layer.split(";") if token.strip()]
+            parsed_pairs: list[tuple[str, str]] = []
+
+            for token in tokens or [layer]:
+                compact_matches = list(compact_pattern.finditer(token))
+                joined = "".join(match.group(0) for match in compact_matches)
+                if compact_matches and joined == token:
+                    for match in compact_matches:
+                        ion_name = (match.group(1) or "").strip()
+                        coeff = (match.group(2) or "").strip()
+                        if ion_name:
+                            parsed_pairs.append((ion_name, coeff))
+                    continue
+
+                explicit_match = re.match(r"^(.+?)(\d+(?:\.\d+)?)$", token)
+                if explicit_match:
+                    ion_name = (explicit_match.group(1) or "").strip()
+                    coeff = (explicit_match.group(2) or "").strip()
+                    if ion_name:
+                        parsed_pairs.append((ion_name, coeff))
+                        continue
+
+                parsed_pairs.append((token, ""))
+
+            ion_names = [ion for ion, _ in parsed_pairs if ion]
+            if not ion_names:
+                ion_layers.append("Unknown")
+                coeff_layers.append("x")
+                continue
+
+            raw_coeffs = [coeff for _, coeff in parsed_pairs]
+            if len(ion_names) == 1 and not raw_coeffs[0]:
+                coeff_values = ["1"]
+            else:
+                coeff_values = [
+                    _format_coeff_value(coeff) if coeff else "x"
+                    for coeff in raw_coeffs
+                ]
+
+            ion_layers.append("; ".join(ion_names))
+            coeff_layers.append("; ".join(coeff_values))
+
+        return " | ".join(ion_layers), " | ".join(coeff_layers), len(ion_layers)
+
     def _build_section(
         entries: list[tuple[dict[str, Any], str]],
         substrate: dict[str, Any] | None,
@@ -443,9 +738,9 @@ def create_nomad_metadata_yaml(
             thickness_key: _layer_thickness(entries),
             "deposition_procedure": _join_params(entries, "depositionMethod", substrate),
             "deposition_synthesis_atmosphere": _join_params(entries, "depositionAtmosphere", substrate),
-            "deposition_solvents": "Unknown",
-            "deposition_reaction_solutions_compounds": "Unknown",
-            "deposition_reaction_solutions_concentrations": "Unknown",
+            "deposition_solvents": _join_layer_solution_field(entries, "solvents"),
+            "deposition_reaction_solutions_compounds": _join_layer_solution_field(entries, "compounds"),
+            "deposition_reaction_solutions_concentrations": _join_layer_solution_field(entries, "concentrations"),
             "deposition_reaction_solutions_volumes": _join_params(entries, "solutionVolume", substrate),
             "deposition_reaction_solutions_temperature": "Unknown",
             "deposition_substrate_temperature": _join_params(entries, "substrateTemp", substrate),
@@ -576,18 +871,33 @@ def create_nomad_metadata_yaml(
             a_ions = abs_layer.get("perovskiteA") or "MA"
             b_ions = abs_layer.get("perovskiteB") or "Pb"
             x_ions = abs_layer.get("perovskiteX") or "I"
+            parsed_a_ions, parsed_a_coeffs, a_layers = _parse_perovskite_ion_layers(a_ions)
+            parsed_b_ions, parsed_b_coeffs, b_layers = _parse_perovskite_ion_layers(b_ions)
+            parsed_c_ions, parsed_c_coeffs, c_layers = _parse_perovskite_ion_layers(x_ions)
+            max_layers = max(a_layers, b_layers, c_layers, 1)
+            dimension_list = " | ".join(["3.0"] * max_layers)
             band_gap = str(abs_layer.get("bandgapEv") or "nan")
             thickness = str(abs_layer.get("thicknessNm") or "nan")
+            absorber_solution_meta = {
+                "solvents": _join_layer_solution_field(absorber_e, "solvents"),
+                "solvents_supplier": _join_layer_solution_field(absorber_e, "solvents_supplier"),
+                "solvents_purity": _join_layer_solution_field(absorber_e, "solvents_purity"),
+                "compounds": _join_layer_solution_field(absorber_e, "compounds"),
+                "compounds_supplier": _join_layer_solution_field(absorber_e, "compounds_supplier"),
+                "compounds_purity": _join_layer_solution_field(absorber_e, "compounds_purity"),
+                "concentrations": _join_layer_solution_field(absorber_e, "concentrations"),
+            }
 
             d["perovskite"] = {
                 "dimension_3D": True,
-                "dimension_list_of_layers": "3D",
-                "composition_a_ions": a_ions,
-                "composition_a_ions_coefficients": _ions_coefficients(a_ions),
-                "composition_b_ions": b_ions,
-                "composition_b_ions_coefficients": _ions_coefficients(b_ions),
-                "composition_c_ions": x_ions,
-                "composition_c_ions_coefficients": _ions_coefficients(x_ions),
+                "dimension_list_of_layers": dimension_list,
+                "composition_perovskite_ABC3_structure": True,
+                "composition_a_ions": parsed_a_ions,
+                "composition_a_ions_coefficients": parsed_a_coeffs,
+                "composition_b_ions": parsed_b_ions,
+                "composition_b_ions_coefficients": parsed_b_coeffs,
+                "composition_c_ions": parsed_c_ions,
+                "composition_c_ions_coefficients": parsed_c_coeffs,
                 "composition_short_form": _short_form(a_ions, b_ions, x_ions),
                 "composition_long_form": _short_form(a_ions, b_ions, x_ions),
                 "thickness": thickness,
@@ -601,14 +911,14 @@ def create_nomad_metadata_yaml(
                 "synthesis_atmosphere_pressure_total": "Unknown",
                 "synthesis_atmosphere_pressure_partial": "Unknown",
                 "synthesis_atmosphere_relative_humidity": "Unknown",
-                "solvents": "Unknown",
+                "solvents": absorber_solution_meta["solvents"],
                 "solvents_mixing_ratios": "Unknown",
-                "solvents_supplier": "Unknown",
-                "solvents_purity": "Unknown",
-                "reaction_solutions_compounds": "Unknown",
-                "reaction_solutions_compounds_supplier": "Unknown",
-                "reaction_solutions_compounds_purity": "Unknown",
-                "reaction_solutions_concentrations": "Unknown",
+                "solvents_supplier": absorber_solution_meta["solvents_supplier"],
+                "solvents_purity": absorber_solution_meta["solvents_purity"],
+                "reaction_solutions_compounds": absorber_solution_meta["compounds"],
+                "reaction_solutions_compounds_supplier": absorber_solution_meta["compounds_supplier"],
+                "reaction_solutions_compounds_purity": absorber_solution_meta["compounds_purity"],
+                "reaction_solutions_concentrations": absorber_solution_meta["concentrations"],
                 "reaction_solutions_volumes": _join_params(absorber_e, "solutionVolume", substrate),
                 "reaction_solutions_age": "Unknown",
                 "reaction_solutions_temperature": "Unknown",
@@ -683,6 +993,8 @@ def create_nomad_metadata_yaml(
                     sub_layer_name = layer.get("name") or substrate_material
                 else:
                     stack_layers.append(layer)
+
+        sub_layer_name = _format_substrate_stack_sequence(sub_layer_name)
 
         etl_e: list[tuple[dict[str, Any], str]] = []
         htl_e: list[tuple[dict[str, Any], str]] = []

@@ -1,0 +1,251 @@
+from types import SimpleNamespace
+import uuid
+
+from app.services.nomad import create_nomad_metadata_yaml
+
+
+class _FakeResult:
+    def __init__(self, value):
+        self._value = value
+
+    def first(self):
+        return self._value
+
+
+class _FakeSession:
+    def __init__(self, values):
+        self._values = iter(values)
+
+    def exec(self, _statement):
+        return _FakeResult(next(self._values))
+
+
+def test_create_nomad_metadata_yaml_uses_solution_components_for_wet_layers():
+    owner_id = uuid.uuid4()
+    experiment_id = str(uuid.uuid4())
+
+    experiment = SimpleNamespace(
+        id=uuid.UUID(experiment_id),
+        owner_id=owner_id,
+        name="Wet stack experiment",
+        description="",
+        device_type="n-i-p",
+        frontend_data=None,
+    )
+
+    materials = [
+        {
+            "id": "mat-solvent-dmf",
+            "name": "DMF",
+            "type": "solvent",
+            "stateAtRt": "liquid",
+            "supplier": "Sigma",
+            "purity": "99.8%",
+        },
+        {
+            "id": "mat-solvent-dmso",
+            "name": "DMSO",
+            "type": "solvent",
+            "stateAtRt": "liquid",
+            "supplier": "Alfa",
+            "purity": "99.9%",
+        },
+        {
+            "id": "mat-etl",
+            "name": "SnO2",
+            "type": "etl",
+            "stateAtRt": "solid",
+            "supplier": "Merck",
+            "purity": "99%",
+        },
+    ]
+    solutions = [
+        {
+            "id": "solution-etl",
+            "name": "SnO2 precursor",
+            "components": [
+                {"id": "comp-1", "materialId": "mat-etl", "amount": "15", "unit": "mg"},
+                {"id": "comp-2", "materialId": "mat-solvent-dmf", "amount": "1.0", "unit": "ml"},
+                {"id": "comp-3", "materialId": "mat-solvent-dmso", "amount": "0.1", "unit": "ml"},
+            ],
+        }
+    ]
+    user_state = SimpleNamespace(
+        data={
+            "materials": materials,
+            "solutions": solutions,
+            "processes": [],
+        }
+    )
+    session = _FakeSession([experiment, user_state])
+
+    process_snapshot = {
+        "id": "process-1",
+        "stages": [
+            {
+                "index": 0,
+                "alternatives": [
+                    {
+                        "id": "step-etl",
+                        "name": "SnO2 deposition",
+                        "stepCategory": "wet_deposition",
+                        "materialId": "mat-etl",
+                        "solutionId": "solution-etl",
+                        "depositionMethod": {"value": "Spin coating", "mode": "constant"},
+                        "solutionVolume": {"value": "50", "mode": "constant"},
+                    }
+                ],
+            }
+        ],
+        "generatedStacks": [
+            {
+                "combination": 1,
+                "layers": [
+                    {
+                        "id": "substrate-layer",
+                        "name": "substrate: Glass/ITO",
+                        "isSubstrate": True,
+                        "layerType": "",
+                        "thicknessNm": "",
+                        "bandgapEv": "",
+                        "perovskiteA": "",
+                        "perovskiteB": "",
+                        "perovskiteX": "",
+                    },
+                    {
+                        "id": "step-etl",
+                        "name": "SnO2",
+                        "isSubstrate": False,
+                        "layerType": "ETL",
+                        "thicknessNm": "30",
+                        "bandgapEv": "",
+                        "perovskiteA": "",
+                        "perovskiteB": "",
+                        "perovskiteX": "",
+                    },
+                ],
+            }
+        ],
+        "deletedStackCombinations": [],
+    }
+    experiment_snapshot = {
+        "id": experiment_id,
+        "name": "Wet stack experiment",
+        "description": "",
+        "architecture": "n-i-p",
+        "substrateMaterial": "substrate: Glass/ITO",
+        "devicesPerSubstrate": 1,
+        "deviceArea": 0.09,
+        "substrates": [{"id": "sub-1", "name": "sub-1"}],
+    }
+
+    archives = create_nomad_metadata_yaml(
+        experiment_id=experiment_id,
+        user_name="Tester",
+        session=session,
+        experiment_snapshot=experiment_snapshot,
+        process_snapshot=process_snapshot,
+    )
+
+    sample_archive = archives["sub-1_dev1_sample.archive.yaml"]["data"]
+
+    assert sample_archive["substrate"]["stack_sequence"] == "Glass | ITO"
+    assert sample_archive["etl"]["stack_sequence"] == "SnO2"
+    assert sample_archive["etl"]["deposition_solvents"] == "DMF; DMSO"
+    assert sample_archive["etl"]["deposition_reaction_solutions_compounds"] == "SnO2"
+    assert sample_archive["etl"]["deposition_reaction_solutions_concentrations"] == "15 mg"
+
+
+def test_create_nomad_metadata_yaml_formats_perovskite_ions_and_coefficients():
+    owner_id = uuid.uuid4()
+    experiment_id = str(uuid.uuid4())
+
+    experiment = SimpleNamespace(
+        id=uuid.UUID(experiment_id),
+        owner_id=owner_id,
+        name="Perovskite formatting experiment",
+        description="",
+        device_type="n-i-p",
+        frontend_data=None,
+    )
+
+    user_state = SimpleNamespace(data={"materials": [], "solutions": [], "processes": []})
+    session = _FakeSession([experiment, user_state])
+
+    process_snapshot = {
+        "id": "process-2",
+        "stages": [
+            {
+                "index": 0,
+                "alternatives": [
+                    {
+                        "id": "step-absorber",
+                        "name": "Perovskite deposition",
+                        "stepCategory": "wet_deposition",
+                        "depositionMethod": {"value": "Spin coating", "mode": "constant"},
+                    }
+                ],
+            }
+        ],
+        "generatedStacks": [
+            {
+                "combination": 1,
+                "layers": [
+                    {
+                        "id": "substrate-layer",
+                        "name": "Glass/ITO",
+                        "isSubstrate": True,
+                        "layerType": "",
+                        "thicknessNm": "",
+                        "bandgapEv": "",
+                        "perovskiteA": "",
+                        "perovskiteB": "",
+                        "perovskiteX": "",
+                    },
+                    {
+                        "id": "step-absorber",
+                        "name": "Perovskite",
+                        "isSubstrate": False,
+                        "layerType": "absorber",
+                        "thicknessNm": "500",
+                        "bandgapEv": "1.58",
+                        "perovskiteA": "Cs0.1FA0.9",
+                        "perovskiteB": "Sn0.2Pb0.8",
+                        "perovskiteX": "I0.75Br0.25",
+                    },
+                ],
+            }
+        ],
+        "deletedStackCombinations": [],
+    }
+    experiment_snapshot = {
+        "id": experiment_id,
+        "name": "Perovskite formatting experiment",
+        "description": "",
+        "architecture": "n-i-p",
+        "substrateMaterial": "Glass/ITO",
+        "devicesPerSubstrate": 1,
+        "deviceArea": 0.09,
+        "substrates": [{"id": "sub-1", "name": "sub-1"}],
+    }
+
+    archives = create_nomad_metadata_yaml(
+        experiment_id=experiment_id,
+        user_name="Tester",
+        session=session,
+        experiment_snapshot=experiment_snapshot,
+        process_snapshot=process_snapshot,
+    )
+
+    sample_archive = archives["sub-1_dev1_sample.archive.yaml"]["data"]
+    perovskite = sample_archive["perovskite"]
+
+    assert perovskite["dimension_3D"] is True
+    assert perovskite["dimension_list_of_layers"] == "3.0"
+    assert perovskite["composition_perovskite_ABC3_structure"] is True
+    assert perovskite["composition_a_ions"] == "Cs; FA"
+    assert perovskite["composition_a_ions_coefficients"] == "0.1; 0.9"
+    assert perovskite["composition_b_ions"] == "Sn; Pb"
+    assert perovskite["composition_b_ions_coefficients"] == "0.2; 0.8"
+    assert perovskite["composition_c_ions"] == "I; Br"
+    assert perovskite["composition_c_ions_coefficients"] == "0.75; 0.25"
