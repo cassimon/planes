@@ -1,7 +1,7 @@
 """add plane share table
 
 Revision ID: a7b3c8d9e2f1
-Revises: 1a31ce608336
+Revises: 9c7054c6147b
 Create Date: 2026-05-19 10:00:00.000000
 
 """
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'a7b3c8d9e2f1'
-down_revision = '1a31ce608336'
+down_revision = '9c7054c6147b'
 branch_labels = None
 depends_on = None
 
