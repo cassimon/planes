@@ -2924,6 +2924,8 @@ export function ProcessesPage() {
                       onMouseDown={(e) => {
                         const target = e.target as HTMLElement
                         if (
+                          target.closest('[data-quenching-modal="true"]') ||
+                          target.closest('[role="dialog"]') ||
                           target.closest('[data-step-box="true"]') ||
                           target.closest('[data-step-details="true"]') ||
                           target.closest('[role="listbox"]') ||

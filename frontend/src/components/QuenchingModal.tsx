@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import {
   ActionIcon,
+  Autocomplete,
   Box,
   Button,
   Group,
@@ -13,7 +14,17 @@ import {
   Text,
   TextInput,
 } from "@mantine/core"
+import type { SelectProps, AutocompleteProps } from "@mantine/core"
 import { IconX } from "@tabler/icons-react"
+
+// Wrappers that keep combobox dropdowns inside the Modal portal so they don't
+// trigger the modal close via outside-click / focus-trap detection.
+function ModalSelect(props: SelectProps) {
+  return <Select comboboxProps={{ withinPortal: false }} {...props} />
+}
+function ModalAutocomplete(props: AutocompleteProps) {
+  return <Autocomplete comboboxProps={{ withinPortal: false }} {...props} />
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -102,7 +113,7 @@ function defaultVacuum(): VacuumState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Compress quenching parameters to a pipe-delimited key=value string. */
-export function buildQuenchingString(
+function buildQuenchingString(
   type: QuenchingType,
   gas: GasState,
   antisolvent: AntisolventState,
@@ -254,20 +265,12 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
     <SimpleGrid cols={2} spacing="sm" verticalSpacing="sm">
       <Box>
         <FieldLabel>Gas Type</FieldLabel>
-        <Select
+        <ModalAutocomplete
           size="xs"
-          data={["N2", "Air", "O2", "Ar", "He", "Other"]}
-          value={state.gasType || null}
-          onChange={(v) => set({ gasType: v ?? "" })}
+          data={["N2", "Air", "O2", "Ar", "He"]}
+          value={state.gasType}
+          onChange={(v) => set({ gasType: v })}
           placeholder="e.g. N2"
-          clearable
-          searchable
-          creatable
-          getCreateLabel={(q) => `+ Use "${q}"`}
-          onCreate={(q) => {
-            set({ gasType: q })
-            return q
-          }}
         />
       </Box>
 
@@ -282,7 +285,7 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["Slm", "m/s"]}
             value={state.flowRateUnit}
@@ -303,7 +306,7 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["Pa", "Psi"]}
             value={state.pressureUnit}
@@ -324,7 +327,7 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["mm", "cm"]}
             value={state.heightUnit}
@@ -345,7 +348,7 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["mm", "cm"]}
             value={state.nozzleWidthUnit}
@@ -359,20 +362,12 @@ function GasForm({ state, onChange }: { state: GasState; onChange: (s: GasState)
 
       <Box>
         <FieldLabel>Nozzle Form</FieldLabel>
-        <Select
+        <ModalAutocomplete
           size="xs"
-          data={["round", "slit", "wide", "Other"]}
-          value={state.nozzleForm || null}
-          onChange={(v) => set({ nozzleForm: v ?? "" })}
+          data={["round", "slit", "wide"]}
+          value={state.nozzleForm}
+          onChange={(v) => set({ nozzleForm: v })}
           placeholder="e.g. round"
-          clearable
-          searchable
-          creatable
-          getCreateLabel={(q) => `+ Use "${q}"`}
-          onCreate={(q) => {
-            set({ nozzleForm: q })
-            return q
-          }}
         />
       </Box>
     </SimpleGrid>
@@ -404,20 +399,12 @@ function AntisolventForm({
 
       <Box>
         <FieldLabel>Deposition Method</FieldLabel>
-        <Select
+        <ModalAutocomplete
           size="xs"
-          data={["drip", "spray", "bath", "Other"]}
-          value={state.depositionMethod || null}
-          onChange={(v) => set({ depositionMethod: v ?? "" })}
+          data={["drip", "spray", "bath"]}
+          value={state.depositionMethod}
+          onChange={(v) => set({ depositionMethod: v })}
           placeholder="e.g. drip"
-          clearable
-          searchable
-          creatable
-          getCreateLabel={(q) => `+ Use "${q}"`}
-          onCreate={(q) => {
-            set({ depositionMethod: q })
-            return q
-          }}
         />
       </Box>
 
@@ -443,7 +430,7 @@ function AntisolventForm({
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["mm", "cm"]}
             value={state.heightUnit}
@@ -464,7 +451,7 @@ function AntisolventForm({
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["Pa", "Psi"]}
             value={state.pressureUnit}
@@ -497,7 +484,7 @@ function VacuumForm({ state, onChange }: { state: VacuumState; onChange: (s: Vac
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["mm", "cm"]}
             value={state.heightUnit}
@@ -518,7 +505,7 @@ function VacuumForm({ state, onChange }: { state: VacuumState; onChange: (s: Vac
             style={{ flex: 1 }}
             min={0}
           />
-          <Select
+          <ModalSelect
             size="xs"
             data={["cm2", "m2"]}
             value={state.baseAreaUnit}
@@ -597,15 +584,22 @@ export function QuenchingModal({ opened, initialValue, onClose, onApply }: Quenc
     onClose()
   }
 
+  // DEBUG: onClose is intentionally suppressed to isolate unexpected close behaviour.
+  // The modal can only be dismissed via Apply.
+  function noOp() {/* intentionally empty */}
+
   return (
     <Modal
       opened={opened}
-      onClose={onClose}
+      onClose={noOp}
       title="Quenching / Drying Parameters"
       size="lg"
       centered
+      closeOnClickOutside={false}
+      closeOnEscape={false}
+      withinPortal
     >
-      <Stack gap="md">
+      <Stack data-quenching-modal="true" gap="md" onClick={(e) => e.stopPropagation()}>
         <SegmentedControl
           data={["Gas", "Antisolvent", "Vacuum"]}
           value={type}
@@ -710,7 +704,10 @@ export function DryingMethodInput({ label, param, onChange }: DryingMethodInputP
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           }
-          onClick={() => setModalOpen(true)}
+          onClick={(e) => {
+            e.stopPropagation()
+            setModalOpen(true)
+          }}
           style={{ justifyContent: "flex-start" }}
         >
           {`Add ${label}`}
@@ -737,7 +734,10 @@ export function DryingMethodInput({ label, param, onChange }: DryingMethodInputP
             size="xs"
             variant="subtle"
             color="red"
-            onClick={handleClear}
+            onClick={(e) => {
+              e.stopPropagation()
+              handleClear()
+            }}
             title="Clear"
           >
             <IconX size={10} />
@@ -748,7 +748,10 @@ export function DryingMethodInput({ label, param, onChange }: DryingMethodInputP
           variant="light"
           size="xs"
           fullWidth
-          onClick={() => setModalOpen(true)}
+          onClick={(e) => {
+            e.stopPropagation()
+            setModalOpen(true)
+          }}
           styles={{ inner: { justifyContent: "flex-start" } }}
         >
           <Text size="xs" truncate style={{ maxWidth: "100%" }}>

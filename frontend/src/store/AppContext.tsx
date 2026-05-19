@@ -1029,6 +1029,16 @@ const AppContext = createContext<AppContextValue | null>(null)
 
 const DEFAULT_BACKEND = new InMemoryBackend({ planes: [newPlane("Plane 1")] })
 const INITIAL_PLANES = [newPlane("Plane 1")]
+const ACTIVE_PLANE_STORAGE_KEY = "plains_active_plane_id"
+
+function readPersistedActivePlaneId(): string | null {
+  try {
+    const value = localStorage.getItem(ACTIVE_PLANE_STORAGE_KEY)
+    return value && value.trim().length > 0 ? value : null
+  } catch {
+    return null
+  }
+}
 
 /** Auto-save interval in milliseconds */
 const SAVE_INTERVAL_MS = 30_000
@@ -1063,7 +1073,7 @@ export function AppProvider({
     null,
   )
   const [activePlaneId, setActivePlaneId] = useState<string | null>(
-    INITIAL_PLANES[0]?.id ?? null,
+    () => readPersistedActivePlaneId() ?? INITIAL_PLANES[0]?.id ?? null,
   )
   const [pendingCollectionLink, setPendingCollectionLink] = useState<{
     collectionId: string
@@ -1183,11 +1193,19 @@ export function AppProvider({
       }
       if (snapshot.planes.length > 0) {
         setPlanes(snapshot.planes)
-        setActivePlaneId((current) =>
-          current && snapshot.planes.some((plane) => plane.id === current)
-            ? current
-            : snapshot.planes[0]?.id ?? null,
-        )
+        setActivePlaneId((current) => {
+          if (current && snapshot.planes.some((plane) => plane.id === current)) {
+            return current
+          }
+          const persisted = readPersistedActivePlaneId()
+          if (
+            persisted &&
+            snapshot.planes.some((plane) => plane.id === persisted)
+          ) {
+            return persisted
+          }
+          return snapshot.planes[0]?.id ?? null
+        })
       }
       setLoaded(true)
     })
@@ -1269,6 +1287,22 @@ export function AppProvider({
       void persistDirtyState()
     }
   }, [loaded, persistDirtyState])
+
+  // Persist the selected plane so the next login/session restores it.
+  useEffect(() => {
+    if (!loaded) {
+      return
+    }
+    try {
+      if (activePlaneId && planes.some((p) => p.id === activePlaneId)) {
+        localStorage.setItem(ACTIVE_PLANE_STORAGE_KEY, activePlaneId)
+      } else {
+        localStorage.removeItem(ACTIVE_PLANE_STORAGE_KEY)
+      }
+    } catch {
+      // Storage unavailable — graceful no-op
+    }
+  }, [loaded, activePlaneId, planes])
 
   // ── Plane mutations ────────────────────────────────────────────────────────
 
