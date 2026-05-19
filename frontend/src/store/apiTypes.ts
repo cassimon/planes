@@ -144,6 +144,7 @@ export function apiMaterialToMaterial(api: ApiMaterial): Material {
     purity: "", // Not in API
     stateAtRt: "",
     substrateRigidity: "",
+    heightMm: "", // Not in API
   }
 }
 

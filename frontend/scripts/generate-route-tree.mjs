@@ -4,6 +4,7 @@ const config = getConfig(
   {
     target: "react",
     autoCodeSplitting: true,
+    routeFileIgnorePattern: "\\.page\\.tsx$",
   },
   process.cwd(),
 )
