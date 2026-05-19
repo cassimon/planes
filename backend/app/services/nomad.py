@@ -1043,7 +1043,7 @@ def create_nomad_metadata_yaml(
                 "name": file_name,
                 "operator": op,
                 "jv_file": file_name,
-                "pvk_sample": f"..../upload/raw/{sample_filename}#/data",
+                "pvk_sample": f"../upload/raw/{sample_filename}#/data",
             }
         if file_type in IPCE_TYPES:
             return {
@@ -1058,7 +1058,7 @@ def create_nomad_metadata_yaml(
                 "m_def": "nomad_chose.schema_packages.schema_package.LabStabilityMeasurement",
                 "name": file_name,
                 "operator": op,
-                "pvk_sample": f"..../upload/raw/{sample_filename}#/data",
+                "pvk_sample": f"../upload/raw/{sample_filename}#/data",
             }
             if file_type == "Stability (Tracking)":
                 entry["stability_tracking_file"] = file_name
@@ -1078,6 +1078,9 @@ def create_nomad_metadata_yaml(
         add_e: list,
         substrate: dict[str, Any] | None,
         jv_sec: dict[str, Any],
+        cell_area: float,
+        substrate_ref: str | None = None,
+        deposition_ref: str | None = None,
     ) -> dict[str, Any]:
         """Assemble the PerovskiteSolarCell data dict."""
         d: dict[str, Any] = {
@@ -1089,13 +1092,18 @@ def create_nomad_metadata_yaml(
             "cell": {
                 "stack_sequence": cell_stack_sequence,
                 "architecture": architecture_nomad,
-                "area_total": device_area,
+                "area_total": cell_area,
             },
             "substrate": {
                 "stack_sequence": substrate_layer_name,
                 "thickness": "nan",
             },
         }
+
+        if substrate_ref:
+            d["substrate_entity"] = substrate_ref
+        if deposition_ref:
+            d["deposition_routine"] = deposition_ref
 
         substrate_material_meta = _resolve_substrate_material(substrate)
         substrate_dimensions = _get_substrate_dimensions(substrate)
@@ -1266,6 +1274,240 @@ def create_nomad_metadata_yaml(
         d["jv"] = jv_sec
         return d
 
+    def _stack_for_substrate(sub_idx: int) -> dict[str, Any] | None:
+        n = len(active_stacks)
+        return active_stacks[sub_idx % n] if n > 0 else None
+
+    def _num_pixels_for_substrate(sub_idx: int) -> int:
+        stack = _stack_for_substrate(sub_idx)
+        if isinstance(stack, dict):
+            raw = str(stack.get("numberOfPixels") or "").strip()
+            try:
+                parsed = int(raw)
+                if parsed > 0:
+                    return parsed
+            except ValueError:
+                pass
+        return max(devices_per_substrate, 1)
+
+    def _cell_area_for_substrate(sub_idx: int) -> float:
+        stack = _stack_for_substrate(sub_idx)
+        if isinstance(stack, dict):
+            raw = str(stack.get("pixelAreaCm2") or "").strip()
+            try:
+                parsed = float(raw)
+                if parsed > 0:
+                    return parsed
+            except ValueError:
+                pass
+        return device_area
+
+    def _step_type_for_nomad(step_category: str) -> str:
+        mapping = {
+            "wet_deposition": "Wet Deposition",
+            "dry_deposition": "Dry Deposition",
+            "surface_treatment": "Surface Modification",
+            "substrate_preparation": "Substrate Treatment",
+            "doping_aging": "Aging Doping",
+        }
+        return mapping.get(step_category.strip().lower(), "Wet Deposition")
+
+    def _parse_datetime(value: str) -> str | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw).isoformat()
+        except ValueError:
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat()
+            except ValueError:
+                return None
+
+    def _step_material_payload(step: dict[str, Any]) -> dict[str, Any] | None:
+        solution_id = str(step.get("solutionId") or "").strip()
+        if solution_id:
+            solution = solutions_by_id.get(solution_id)
+            if isinstance(solution, dict):
+                return {
+                    "name": _clean_value(solution.get("name"), "Unknown"),
+                    "supplier": "Unknown",
+                }
+
+        material_id = str(step.get("materialId") or "").strip()
+        if material_id:
+            material = materials_by_id.get(material_id)
+            return {
+                "name": _material_name(material, material_id),
+                "supplier": _material_supplier(material),
+            }
+
+        return None
+
+    def _selected_steps_for_substrate(substrate: dict[str, Any]) -> list[tuple[int, dict[str, Any]]]:
+        if not process_data or not isinstance(process_data, dict):
+            return []
+
+        parameter_values = substrate.get("parameterValues") or {}
+        stages = process_data.get("stages") or []
+        selected_steps: list[tuple[int, dict[str, Any]]] = []
+
+        for stage_idx, stage in enumerate(stages):
+            if not isinstance(stage, dict):
+                continue
+            alternatives = [
+                step for step in (stage.get("alternatives") or []) if isinstance(step, dict)
+            ]
+            if not alternatives:
+                continue
+
+            selected_id = str(parameter_values.get(f"stageSelection:{stage_idx}") or "").strip()
+            if selected_id.upper() == "SKIP":
+                continue
+
+            selected_step = None
+            if selected_id:
+                selected_step = next(
+                    (step for step in alternatives if str(step.get("id") or "") == selected_id),
+                    None,
+                )
+            if selected_step is None:
+                selected_step = alternatives[0]
+
+            selected_steps.append((stage_idx, selected_step))
+
+        return selected_steps
+
+    def _build_substrate_section(
+        substrate_layer_name: str,
+        substrate: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        substrate_data: dict[str, Any] = {
+            "stack_sequence": substrate_layer_name,
+            "thickness": "nan",
+        }
+
+        substrate_material_meta = _resolve_substrate_material(substrate)
+        substrate_dimensions = _get_substrate_dimensions(substrate)
+        substrate_height_mm = _to_float(
+            (substrate_material_meta or {}).get("heightMm") if isinstance(substrate_material_meta, dict) else "",
+        )
+        substrate_length_cm = _to_float(substrate_dimensions.get("lengthCm"))
+        substrate_width_cm = _to_float(substrate_dimensions.get("widthCm"))
+        substrate_roughness_nm = _to_float(substrate_dimensions.get("surfaceRoughnessRmsNm"))
+
+        substrate_area = (
+            substrate_length_cm * substrate_width_cm
+            if substrate_length_cm is not None and substrate_width_cm is not None
+            else "nan"
+        )
+
+        substrate_data.update(
+            {
+                "area": substrate_area,
+                "supplier": _material_supplier(substrate_material_meta),
+                "brand_name": _clean_value(
+                    (substrate_material_meta or {}).get("supplierNumber")
+                    if isinstance(substrate_material_meta, dict)
+                    else "",
+                ),
+                "deposition_procedure": "Commercial",
+                "cleaning_procedure": _substrate_cleaning_procedure(substrate),
+                "surface_roughness_rms": (
+                    substrate_roughness_nm if substrate_roughness_nm is not None else "nan"
+                ),
+            }
+        )
+        if substrate_height_mm is not None:
+            substrate_data["thickness"] = substrate_height_mm
+
+        return substrate_data
+
+    def _build_substrate_entity_data(
+        substrate: dict[str, Any],
+        substrate_layer_name: str,
+    ) -> dict[str, Any]:
+        experiment_dt = _parse_datetime(str(exp_data.get("date") or ""))
+        payload: dict[str, Any] = {
+            "m_def": "nomad_perovskite_solar_cell_sample_plains.schema_packages.sample.SubstrateEntity",
+            "name": str(substrate.get("name") or substrate.get("id") or "substrate"),
+            "lab_id": str(substrate.get("id") or substrate.get("name") or "substrate"),
+            "substrate": _build_substrate_section(substrate_layer_name, substrate),
+        }
+        if experiment_dt:
+            payload["datetime"] = experiment_dt
+        return payload
+
+    def _build_deposition_routine_data(
+        substrate: dict[str, Any],
+        substrate_ref: str,
+    ) -> dict[str, Any]:
+        selected_steps = _selected_steps_for_substrate(substrate)
+        processing_times = exp_data.get("processingTimes") or {}
+        step_payloads: list[dict[str, Any]] = []
+        start_ts: str | None = None
+        end_ts: str | None = None
+
+        for step_idx, (stage_idx, step) in enumerate(selected_steps, start=1):
+            timestamp = _parse_datetime(str(processing_times.get(f"stage:{stage_idx}") or ""))
+            if not timestamp:
+                timestamp = _parse_datetime(_get_step_param(step, "depositionStartTime", substrate, ""))
+
+            name = _get_step_param(step, "depositionMethod", substrate, "")
+            if not name:
+                name = _clean_value(step.get("name"), "Unknown")
+
+            step_payload: dict[str, Any] = {
+                "step_index": step_idx,
+                "step_type": _step_type_for_nomad(str(step.get("stepCategory") or "")),
+                "name": name,
+            }
+            if timestamp:
+                step_payload["timestamp"] = timestamp
+                if start_ts is None or timestamp < start_ts:
+                    start_ts = timestamp
+                if end_ts is None or timestamp > end_ts:
+                    end_ts = timestamp
+
+            duration_value = _to_float(_get_step_param(step, "annealingTime", substrate, ""))
+            if duration_value is not None:
+                step_payload["duration"] = duration_value
+
+            material_payload = _step_material_payload(step)
+            if material_payload:
+                step_payload["material"] = material_payload
+
+            step_payloads.append(step_payload)
+
+        process_payload: dict[str, Any] = {
+            "m_def": "nomad_perovskite_solar_cell_sample_plains.schema_packages.sample.DepositionRoutine",
+            "name": f"{str(substrate.get('name') or substrate.get('id') or 'substrate')} deposition",
+            "lab_id": f"{str(substrate.get('id') or substrate.get('name') or 'substrate')}_deposition",
+            "substrate_entity": substrate_ref,
+            "steps": step_payloads,
+        }
+
+        experiment_dt = _parse_datetime(str(exp_data.get("date") or ""))
+        if start_ts:
+            process_payload["start_time"] = start_ts
+        if end_ts:
+            process_payload["end_time"] = end_ts
+        if start_ts:
+            process_payload["datetime"] = start_ts
+        elif experiment_dt:
+            process_payload["datetime"] = experiment_dt
+
+        return process_payload
+
+    def _reserve_archive_filename(base_name: str) -> str:
+        candidate = base_name
+        counter = 1
+        while candidate in archives:
+            stem = Path(base_name).stem.replace(".archive", "")
+            candidate = f"{stem}_{counter}.archive.yaml"
+            counter += 1
+        return candidate
+
     # ── 7. Per-substrate layer grouping (shared logic) ────────────────────────
 
     def _layers_for_substrate(
@@ -1278,8 +1520,7 @@ def create_nomad_metadata_yaml(
                 backcontact_entries, add_entries)
         for the given substrate index using the cyclically-assigned stack.
         """
-        n = len(active_stacks)
-        stack: dict[str, Any] | None = active_stacks[sub_idx % n] if n > 0 else None
+        stack = _stack_for_substrate(sub_idx)
 
         sub_layer_name: str = substrate_material
         stack_layers: list[dict[str, Any]] = []
@@ -1355,49 +1596,76 @@ def create_nomad_metadata_yaml(
             _layers_for_substrate(sub_idx, substrate)
         )
 
+        substrate_entity_fname = _reserve_archive_filename(
+            f"{sub_name_slug}_substrate.archive.yaml",
+        )
+        substrate_ref = f"../upload/raw/{substrate_entity_fname}#/data"
+        archives[substrate_entity_fname] = {
+            "data": _build_substrate_entity_data(substrate, sub_layer),
+        }
+
+        deposition_fname = _reserve_archive_filename(
+            f"{sub_name_slug}_deposition.archive.yaml",
+        )
+        deposition_ref = f"../upload/raw/{deposition_fname}#/data"
+        archives[deposition_fname] = {
+            "data": _build_deposition_routine_data(substrate, substrate_ref),
+        }
+
         substrate_groups = groups_by_substrate.get(substrate_id, [])
+        num_pixels = _num_pixels_for_substrate(sub_idx)
+        cell_area = _cell_area_for_substrate(sub_idx)
 
-        if substrate_groups:
-            # ── One sample + measurement YAMLs per device group ────────────────
-            for group in substrate_groups:
-                device_name = str(group.get("deviceName") or "device")
-                dev_slug = _slug(device_name)
-                sample_fname = f"{sub_name_slug}_{dev_slug}_sample.archive.yaml"
+        sample_count = max(num_pixels, len(substrate_groups), 1)
+        sample_filenames: list[str] = []
 
-                group_files: list[dict[str, Any]] = list(group.get("files") or [])
-                best_jv = _best_jv(group_files)
-                best_ipce = _best_ipce(group_files)
-                jv_sec = _jv_section(best_jv, best_ipce)
+        for dev_idx in range(sample_count):
+            sample_fname = _reserve_archive_filename(
+                f"{sub_name_slug}_dev{dev_idx + 1}_sample.archive.yaml",
+            )
+            sample_filenames.append(sample_fname)
 
-                sample_data = _build_sample_data(
-                    sub_layer, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e,
-                    substrate, jv_sec,
-                )
-                archives[sample_fname] = {"data": sample_data}
+            group_files: list[dict[str, Any]] = []
+            if dev_idx < len(substrate_groups):
+                group_files = list(substrate_groups[dev_idx].get("files") or [])
 
-                # ── Measurement YAMLs ──────────────────────────────────────────
-                for meas_file in group_files:
-                    meas_data = _measurement_archive(meas_file, sample_fname, user_name)
-                    if meas_data is None:
-                        continue
-                    meas_stem = _slug(Path(meas_file.get("fileName", "unknown")).stem)
-                    # Avoid filename collisions
-                    meas_fname = f"{meas_stem}.archive.yaml"
-                    counter = 1
-                    while meas_fname in archives:
-                        meas_fname = f"{meas_stem}_{counter}.archive.yaml"
-                        counter += 1
-                    archives[meas_fname] = {"data": meas_data}
-        else:
-            # ── Fallback: one sample YAML per device index, no measurements ────
-            for dev_idx in range(devices_per_substrate):
-                sample_fname = f"{sub_name_slug}_dev{dev_idx + 1}_sample.archive.yaml"
-                jv_sec = {"light_spectra": "AM 1.5G"}
-                sample_data = _build_sample_data(
-                    sub_layer, stack_seq, etl_e, absorber_e, htl_e, bc_e, add_e,
-                    substrate, jv_sec,
-                )
-                archives[sample_fname] = {"data": sample_data}
+            best_jv = _best_jv(group_files)
+            best_ipce = _best_ipce(group_files)
+            jv_sec = _jv_section(best_jv, best_ipce)
+
+            sample_data = _build_sample_data(
+                sub_layer,
+                stack_seq,
+                etl_e,
+                absorber_e,
+                htl_e,
+                bc_e,
+                add_e,
+                substrate,
+                jv_sec,
+                cell_area=cell_area,
+                substrate_ref=substrate_ref,
+                deposition_ref=deposition_ref,
+            )
+            archives[sample_fname] = {"data": sample_data}
+
+        for group_idx, group in enumerate(substrate_groups):
+            group_files = list(group.get("files") or [])
+            if not sample_filenames:
+                continue
+            target_sample_fname = sample_filenames[group_idx % len(sample_filenames)]
+
+            for meas_file in group_files:
+                meas_data = _measurement_archive(meas_file, target_sample_fname, user_name)
+                if meas_data is None:
+                    continue
+                meas_stem = _slug(Path(meas_file.get("fileName", "unknown")).stem)
+                meas_fname = f"{meas_stem}.archive.yaml"
+                counter = 1
+                while meas_fname in archives:
+                    meas_fname = f"{meas_stem}_{counter}.archive.yaml"
+                    counter += 1
+                archives[meas_fname] = {"data": meas_data}
 
     # ── 10. Unassigned device groups (no substrate match) ─────────────────────
     for group in unassigned_groups:

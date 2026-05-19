@@ -290,3 +290,162 @@ def test_create_nomad_metadata_yaml_formats_perovskite_ions_and_coefficients():
     assert perovskite["composition_b_ions_coefficients"] == "0.2; 0.8"
     assert perovskite["composition_c_ions"] == "I; Br"
     assert perovskite["composition_c_ions_coefficients"] == "0.75; 0.25"
+
+
+def test_create_nomad_metadata_yaml_generates_substrate_and_deposition_and_per_pixel_samples():
+    owner_id = uuid.uuid4()
+    experiment_id = str(uuid.uuid4())
+
+    experiment = SimpleNamespace(
+        id=uuid.UUID(experiment_id),
+        owner_id=owner_id,
+        name="Pixel-mapped experiment",
+        description="",
+        device_type="n-i-p",
+        frontend_data=None,
+    )
+
+    user_state = SimpleNamespace(
+        data={
+            "materials": [
+                {
+                    "id": "mat-sub",
+                    "name": "Glass/ITO",
+                    "type": "substrate",
+                    "stateAtRt": "solid",
+                    "supplier": "Vendor",
+                    "supplierNumber": "S-1",
+                    "heightMm": "1.0",
+                }
+            ],
+            "solutions": [],
+            "processes": [],
+        }
+    )
+    session = _FakeSession([experiment, user_state])
+
+    process_snapshot = {
+        "id": "process-pixels",
+        "stages": [
+            {
+                "index": 0,
+                "alternatives": [
+                    {
+                        "id": "step-etl",
+                        "name": "ETL deposition",
+                        "stepCategory": "wet_deposition",
+                        "depositionMethod": {"value": "Spin coating", "mode": "constant"},
+                    }
+                ],
+            }
+        ],
+        "generatedStacks": [
+            {
+                "combination": 1,
+                "numberOfPixels": "4",
+                "pixelAreaCm2": "0.16",
+                "layers": [
+                    {
+                        "id": "substrate-layer",
+                        "name": "Glass/ITO",
+                        "isSubstrate": True,
+                        "layerType": "",
+                        "thicknessNm": "",
+                        "bandgapEv": "",
+                        "perovskiteA": "",
+                        "perovskiteB": "",
+                        "perovskiteX": "",
+                    },
+                    {
+                        "id": "step-etl",
+                        "name": "SnO2",
+                        "isSubstrate": False,
+                        "layerType": "ETL",
+                        "thicknessNm": "30",
+                        "bandgapEv": "",
+                        "perovskiteA": "",
+                        "perovskiteB": "",
+                        "perovskiteX": "",
+                    },
+                ],
+            }
+        ],
+        "deletedStackCombinations": [],
+    }
+
+    experiment_snapshot = {
+        "id": experiment_id,
+        "name": "Pixel-mapped experiment",
+        "description": "",
+        "architecture": "n-i-p",
+        "substrateMaterial": "Glass/ITO",
+        "devicesPerSubstrate": 1,
+        "deviceArea": 0.09,
+        "date": "2026-05-19T10:00",
+        "processingTimes": {"stage:0": "2026-05-19T11:00"},
+        "substrates": [
+            {
+                "id": "sub-1",
+                "name": "sub-1",
+                "substrateMaterialId": "mat-sub",
+                "parameterValues": {"stageSelection:0": "step-etl"},
+            }
+        ],
+    }
+
+    device_groups = [
+        {
+            "id": f"group-{i}",
+            "deviceName": f"dev-{i}",
+            "assignedSubstrateId": "sub-1",
+            "files": [
+                {
+                    "fileName": f"pixel_{i}.txt",
+                    "fileType": "JV",
+                    "value": 20.0 + i,
+                }
+            ],
+        }
+        for i in range(1, 5)
+    ]
+
+    archives = create_nomad_metadata_yaml(
+        experiment_id=experiment_id,
+        user_name="Tester",
+        session=session,
+        experiment_snapshot=experiment_snapshot,
+        process_snapshot=process_snapshot,
+        device_groups=device_groups,
+    )
+
+    substrate_file = "sub-1_substrate.archive.yaml"
+    deposition_file = "sub-1_deposition.archive.yaml"
+    sample_files = [f"sub-1_dev{i}_sample.archive.yaml" for i in range(1, 5)]
+    measurement_files = [f"pixel_{i}.archive.yaml" for i in range(1, 5)]
+
+    assert substrate_file in archives
+    assert deposition_file in archives
+    for sample_file in sample_files:
+        assert sample_file in archives
+    for meas_file in measurement_files:
+        assert meas_file in archives
+
+    substrate_ref = f"../upload/raw/{substrate_file}#/data"
+    deposition_ref = f"../upload/raw/{deposition_file}#/data"
+
+    for sample_file in sample_files:
+        sample_data = archives[sample_file]["data"]
+        assert sample_data["substrate_entity"] == substrate_ref
+        assert sample_data["deposition_routine"] == deposition_ref
+
+    expected_sample_refs = {
+        f"../upload/raw/{sample_file}#/data" for sample_file in sample_files
+    }
+    for meas_file in measurement_files:
+        meas_data = archives[meas_file]["data"]
+        assert meas_data["pvk_sample"] in expected_sample_refs
+
+    deposition_data = archives[deposition_file]["data"]
+    assert deposition_data["substrate_entity"] == substrate_ref
+    assert len(deposition_data["steps"]) == 1
+    assert deposition_data["steps"][0]["step_type"] == "Wet Deposition"
