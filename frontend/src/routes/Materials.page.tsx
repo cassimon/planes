@@ -391,7 +391,11 @@ export function MaterialsPage() {
               substrateIds: [...substrateIds, m.id],
               substrateDimensionsById: {
                 ...(process.substrateDimensionsById ?? {}),
-                [m.id]: { lengthCm: "2", widthCm: "2" },
+                [m.id]: {
+                  lengthCm: "2",
+                  widthCm: "2",
+                  surfaceRoughnessRmsNm: "",
+                },
               },
             }
           }

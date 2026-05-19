@@ -80,7 +80,11 @@ const STEP_CATEGORY_ICON_MAP: Record<ProcessStepCategory, React.ReactNode> = {
 
 const SUBSTRATE_COLOR = "#6e8c9e"
 const ROW_ACTION_SLOT_WIDTH = 220
-const DEFAULT_SUBSTRATE_DIMENSIONS = { lengthCm: "2", widthCm: "2" }
+const DEFAULT_SUBSTRATE_DIMENSIONS = {
+  lengthCm: "2",
+  widthCm: "2",
+  surfaceRoughnessRmsNm: "",
+}
 const NEW_CHEMICAL_OPTION = "action:new-material:chemical_compound"
 const NEW_COMMERCIAL_MIXTURE_OPTION = "action:new-material:commercial_mixture"
 const NEW_SOLUTION_OPTION = "action:new-solution"
@@ -2209,7 +2213,11 @@ export function ProcessesPage() {
 
   const handleUpdateSubstrateDimensions = (
     substrateId: string,
-    patch: Partial<{ lengthCm: string; widthCm: string }>,
+    patch: Partial<{
+      lengthCm: string
+      widthCm: string
+      surfaceRoughnessRmsNm: string
+    }>,
   ) => {
     if (!selectedProcess) return
     const current =
@@ -3200,6 +3208,27 @@ export function ProcessesPage() {
                                                   style={{ flex: 1 }}
                                                 />
                                               </Group>
+                                              <NumberInput
+                                                size="xs"
+                                                label="Surface roughness RMS (nm)"
+                                                min={0}
+                                                value={
+                                                  substrateDimensions.surfaceRoughnessRmsNm
+                                                    ? Number(
+                                                        substrateDimensions.surfaceRoughnessRmsNm,
+                                                      )
+                                                    : ""
+                                                }
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={(value) =>
+                                                  handleUpdateSubstrateDimensions(subId, {
+                                                    surfaceRoughnessRmsNm:
+                                                      typeof value === "number"
+                                                        ? String(value)
+                                                        : "",
+                                                  })
+                                                }
+                                              />
                                             </Stack>
                                           ) : (
                                             <Stack gap={2}>
@@ -3212,6 +3241,9 @@ export function ProcessesPage() {
                                               </Text>
                                               <Text size="xs" c="dimmed">
                                                 {`L ${substrateDimensions.lengthCm || "2"} cm · W ${substrateDimensions.widthCm || "2"} cm`}
+                                              </Text>
+                                              <Text size="xs" c="dimmed">
+                                                {`Roughness RMS ${substrateDimensions.surfaceRoughnessRmsNm || "—"} nm`}
                                               </Text>
                                             </Stack>
                                           )}

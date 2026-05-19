@@ -676,6 +676,107 @@ def create_nomad_metadata_yaml(
         ]
         return " | ".join(thicknesses)
 
+    def _to_float(value: Any) -> float | None:
+        try:
+            text = str(value).strip()
+            if not text:
+                return None
+            return float(text)
+        except (ValueError, TypeError):
+            return None
+
+    def _resolve_substrate_material(substrate: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not isinstance(substrate, dict):
+            return None
+
+        material_id = str(substrate.get("substrateMaterialId") or "").strip()
+        if material_id:
+            return materials_by_id.get(material_id)
+
+        raw_name = str(substrate.get("substrateMaterial") or substrate_material or "").strip()
+        if not raw_name:
+            return None
+
+        for material in materials_by_id.values():
+            if not isinstance(material, dict):
+                continue
+            name = str(material.get("name") or "").strip()
+            if name and name == raw_name:
+                return material
+        return None
+
+    def _get_substrate_dimensions(substrate: dict[str, Any] | None) -> dict[str, Any]:
+        defaults = {
+            "lengthCm": "",
+            "widthCm": "",
+            "surfaceRoughnessRmsNm": "",
+        }
+        if not process_data or not isinstance(process_data, dict):
+            return defaults
+        if not isinstance(substrate, dict):
+            return defaults
+
+        dims_by_id = process_data.get("substrateDimensionsById") or {}
+        if not isinstance(dims_by_id, dict):
+            return defaults
+
+        material_id = str(substrate.get("substrateMaterialId") or "").strip()
+        dims = dims_by_id.get(material_id) if material_id else None
+        if not isinstance(dims, dict):
+            return defaults
+
+        return {
+            "lengthCm": str(dims.get("lengthCm") or "").strip(),
+            "widthCm": str(dims.get("widthCm") or "").strip(),
+            "surfaceRoughnessRmsNm": str(dims.get("surfaceRoughnessRmsNm") or "").strip(),
+        }
+
+    def _substrate_cleaning_procedure(substrate: dict[str, Any] | None) -> str:
+        if not process_data or not isinstance(process_data, dict):
+            return "Unknown"
+
+        stages = process_data.get("stages") or []
+        if not isinstance(stages, list):
+            return "Unknown"
+
+        parameter_values: dict[str, Any] = {}
+        if isinstance(substrate, dict):
+            raw_params = substrate.get("parameterValues") or {}
+            if isinstance(raw_params, dict):
+                parameter_values = raw_params
+
+        cleaning_steps: list[str] = []
+        for stage_idx, stage in enumerate(stages):
+            if not isinstance(stage, dict):
+                continue
+            alternatives = [
+                step for step in (stage.get("alternatives") or []) if isinstance(step, dict)
+            ]
+            if not alternatives:
+                continue
+
+            selected_step: dict[str, Any] | None = None
+            selected_id = str(parameter_values.get(f"stageSelection:{stage_idx}") or "").strip()
+            if selected_id:
+                selected_step = next(
+                    (step for step in alternatives if str(step.get("id") or "") == selected_id),
+                    None,
+                )
+            if selected_step is None:
+                selected_step = alternatives[0]
+
+            if str(selected_step.get("stepCategory") or "").strip().lower() != "substrate_preparation":
+                continue
+
+            method = _get_step_param(selected_step, "depositionMethod", substrate, "Unknown")
+            params = _get_step_param(selected_step, "depositionParameters", substrate, "")
+            if params and params != "Unknown":
+                cleaning_steps.append(f"{method} ({params})")
+            else:
+                cleaning_steps.append(method)
+
+        return " >> ".join(cleaning_steps) if cleaning_steps else "Unknown"
+
     def _ions_coefficients(ions_str: str) -> str:
         """Return '1' for a single ion, 'x; x; ...' for multiple ions."""
         ions = [i.strip() for i in ions_str.split(";") if i.strip()]
@@ -995,6 +1096,40 @@ def create_nomad_metadata_yaml(
                 "thickness": "nan",
             },
         }
+
+        substrate_material_meta = _resolve_substrate_material(substrate)
+        substrate_dimensions = _get_substrate_dimensions(substrate)
+        substrate_height_mm = _to_float(
+            (substrate_material_meta or {}).get("heightMm") if isinstance(substrate_material_meta, dict) else "",
+        )
+        substrate_length_cm = _to_float(substrate_dimensions.get("lengthCm"))
+        substrate_width_cm = _to_float(substrate_dimensions.get("widthCm"))
+        substrate_roughness_nm = _to_float(substrate_dimensions.get("surfaceRoughnessRmsNm"))
+
+        substrate_area = (
+            substrate_length_cm * substrate_width_cm
+            if substrate_length_cm is not None and substrate_width_cm is not None
+            else "nan"
+        )
+
+        d["substrate"].update(
+            {
+                "area": substrate_area,
+                "supplier": _material_supplier(substrate_material_meta),
+                "brand_name": _clean_value(
+                    (substrate_material_meta or {}).get("supplierNumber")
+                    if isinstance(substrate_material_meta, dict)
+                    else "",
+                ),
+                "deposition_procedure": "Commercial",
+                "cleaning_procedure": _substrate_cleaning_procedure(substrate),
+                "surface_roughness_rms": (
+                    substrate_roughness_nm if substrate_roughness_nm is not None else "nan"
+                ),
+            }
+        )
+        if substrate_height_mm is not None:
+            d["substrate"]["thickness"] = substrate_height_mm
 
         if etl_e:
             d["etl"] = _build_section(etl_e, substrate, thickness_key="thickness")

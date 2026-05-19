@@ -35,6 +35,15 @@ def test_create_nomad_metadata_yaml_uses_solution_components_for_wet_layers():
 
     materials = [
         {
+            "id": "mat-sub",
+            "name": "FTO glass",
+            "type": "substrate",
+            "stateAtRt": "solid",
+            "supplier": "Pilkington",
+            "supplierNumber": "TEC15",
+            "heightMm": "1.1",
+        },
+        {
             "id": "mat-solvent-dmf",
             "name": "DMF",
             "type": "solvent",
@@ -81,9 +90,30 @@ def test_create_nomad_metadata_yaml_uses_solution_components_for_wet_layers():
 
     process_snapshot = {
         "id": "process-1",
+        "substrateDimensionsById": {
+            "mat-sub": {
+                "lengthCm": "2",
+                "widthCm": "2",
+                "surfaceRoughnessRmsNm": "12.5",
+            }
+        },
         "stages": [
             {
                 "index": 0,
+                "alternatives": [
+                    {
+                        "id": "step-clean",
+                        "name": "Substrate cleaning",
+                        "stepCategory": "substrate_preparation",
+                        "depositionMethod": {
+                            "value": "Soap >> Ultrasonic bath >> UV-Ozone",
+                            "mode": "constant",
+                        },
+                    }
+                ],
+            },
+            {
+                "index": 1,
                 "alternatives": [
                     {
                         "id": "step-etl",
@@ -136,7 +166,9 @@ def test_create_nomad_metadata_yaml_uses_solution_components_for_wet_layers():
         "substrateMaterial": "substrate: Glass/ITO",
         "devicesPerSubstrate": 1,
         "deviceArea": 0.09,
-        "substrates": [{"id": "sub-1", "name": "sub-1"}],
+        "substrates": [
+            {"id": "sub-1", "name": "sub-1", "substrateMaterialId": "mat-sub"}
+        ],
     }
 
     archives = create_nomad_metadata_yaml(
@@ -150,6 +182,15 @@ def test_create_nomad_metadata_yaml_uses_solution_components_for_wet_layers():
     sample_archive = archives["sub-1_dev1_sample.archive.yaml"]["data"]
 
     assert sample_archive["substrate"]["stack_sequence"] == "Glass | ITO"
+    assert sample_archive["substrate"]["area"] == 4.0
+    assert sample_archive["substrate"]["thickness"] == 1.1
+    assert sample_archive["substrate"]["supplier"] == "Pilkington"
+    assert sample_archive["substrate"]["brand_name"] == "TEC15"
+    assert sample_archive["substrate"]["surface_roughness_rms"] == 12.5
+    assert (
+        sample_archive["substrate"]["cleaning_procedure"]
+        == "Soap >> Ultrasonic bath >> UV-Ozone"
+    )
     assert sample_archive["etl"]["stack_sequence"] == "SnO2"
     assert sample_archive["etl"]["deposition_solvents"] == "DMF; DMSO"
     assert sample_archive["etl"]["deposition_reaction_solutions_compounds"] == "SnO2"

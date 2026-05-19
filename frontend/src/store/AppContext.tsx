@@ -67,6 +67,7 @@ export function newMaterial(
 export type ProcessSubstrateDimension = {
   lengthCm: string
   widthCm: string
+  surfaceRoughnessRmsNm?: string
 }
 
 // ── Experiment ───────────────────────────────────────────────────────────────
