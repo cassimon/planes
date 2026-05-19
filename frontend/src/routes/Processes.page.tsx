@@ -60,6 +60,7 @@ import {
 } from "@/store/AppContext"
 import { useAppContext, useEntityCollection } from "@/store/AppContext"
 import { SelectCollectionModal, type CollectionConfirmParams } from "@/components/SelectCollectionModal"
+import { DryingMethodInput } from "@/components/QuenchingModal"
 
 const STEP_CATEGORIES: Array<{ value: ProcessStepCategory; label: string; icon: React.ReactNode }> = [
   { value: "wet_deposition", label: "Wet Deposition", icon: <IconDroplet size={14} /> },
@@ -2443,23 +2444,36 @@ export function ProcessesPage() {
                           background: `linear-gradient(90deg, ${selectedStep.color}18 0%, transparent 100%)`,
                         }}
                       >
-                        <ProcessParamInput
-                          label={
-                            selectedStepParameterSections.labelOverrides[key] ??
-                            definition.label
-                          }
-                          param={selectedStep[key]}
-                          onChange={(param) =>
-                            handleUpdateStepParam(selectedStep.id, key, param)
-                          }
-                          placeholder={
-                            selectedStepParameterSections.placeholderOverrides[key] ??
-                            definition.placeholder
-                          }
-                          unit={definition.unit}
-                          sourceSuggestions={getSourceSuggestions(key)}
-                          type={definition.type ?? "text"}
-                        />
+                        {key === "dryingMethod" ? (
+                          <DryingMethodInput
+                            label={
+                              selectedStepParameterSections.labelOverrides[key] ??
+                              definition.label
+                            }
+                            param={selectedStep[key]}
+                            onChange={(param) =>
+                              handleUpdateStepParam(selectedStep.id, key, param)
+                            }
+                          />
+                        ) : (
+                          <ProcessParamInput
+                            label={
+                              selectedStepParameterSections.labelOverrides[key] ??
+                              definition.label
+                            }
+                            param={selectedStep[key]}
+                            onChange={(param) =>
+                              handleUpdateStepParam(selectedStep.id, key, param)
+                            }
+                            placeholder={
+                              selectedStepParameterSections.placeholderOverrides[key] ??
+                              definition.placeholder
+                            }
+                            unit={definition.unit}
+                            sourceSuggestions={getSourceSuggestions(key)}
+                            type={definition.type ?? "text"}
+                          />
+                        )}
                       </Box>
                     )
                   })}

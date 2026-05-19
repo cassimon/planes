@@ -727,16 +727,95 @@ def create_nomad_metadata_yaml(
 
         return " | ".join(ion_layers), " | ".join(coeff_layers), len(ion_layers)
 
+    def _parse_quenching_string(value: str) -> dict[str, Any]:
+        """Parse a structured quenching string (type=Gas|gasType=N2|...) into NOMAD-friendly fields."""
+        result: dict[str, Any] = {
+            "induced": False,
+            "media": "Unknown",
+            "volume": "Unknown",
+            "mixing_ratios": "Unknown",
+            "additives_compounds": "Unknown",
+            "additives_concentrations": "Unknown",
+        }
+        if not value or not value.strip():
+            return result
+        pairs: dict[str, str] = {}
+        for segment in value.split("|"):
+            idx = segment.find("=")
+            if idx == -1:
+                continue
+            pairs[segment[:idx].strip()] = segment[idx + 1:].strip()
+        qtype = pairs.get("type", "")
+        if qtype not in ("Gas", "Antisolvent", "Vacuum"):
+            # Legacy / freeform value — use as-is
+            result["induced"] = bool(value.strip())
+            result["media"] = value.strip()
+            return result
+        result["induced"] = True
+        if qtype == "Gas":
+            gas_type = pairs.get("gasType", "")
+            result["media"] = gas_type if gas_type else "Gas"
+            detail_parts: list[str] = []
+            if pairs.get("flowRate"):
+                detail_parts.append(f"Flow: {pairs['flowRate']}")
+            if pairs.get("pressure"):
+                detail_parts.append(f"Pressure: {pairs['pressure']}")
+            if pairs.get("height"):
+                detail_parts.append(f"Height: {pairs['height']}")
+            if pairs.get("nozzleWidth"):
+                detail_parts.append(f"Nozzle width: {pairs['nozzleWidth']}")
+            if pairs.get("nozzleForm"):
+                detail_parts.append(f"Nozzle form: {pairs['nozzleForm']}")
+            result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
+        elif qtype == "Antisolvent":
+            material = pairs.get("material", "")
+            result["media"] = material if material else "Antisolvent"
+            detail_parts = []
+            if pairs.get("depositionMethod"):
+                detail_parts.append(f"Method: {pairs['depositionMethod']}")
+            if pairs.get("flowRate"):
+                detail_parts.append(f"Flow: {pairs['flowRate']}")
+            if pairs.get("height"):
+                detail_parts.append(f"Height: {pairs['height']}")
+            if pairs.get("pressure"):
+                detail_parts.append(f"Pressure: {pairs['pressure']}")
+            result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
+        elif qtype == "Vacuum":
+            result["media"] = "Vacuum"
+            detail_parts = []
+            if pairs.get("height"):
+                detail_parts.append(f"Height: {pairs['height']}")
+            if pairs.get("baseArea"):
+                detail_parts.append(f"Base area: {pairs['baseArea']}")
+            if pairs.get("pumpModel"):
+                detail_parts.append(f"Pump: {pairs['pumpModel']}")
+            if pairs.get("deadVolume"):
+                detail_parts.append(f"Dead vol: {pairs['deadVolume']} m3")
+            if pairs.get("evacuationTime"):
+                detail_parts.append(f"Evac time: {pairs['evacuationTime']} s")
+            result["volume"] = "; ".join(detail_parts) if detail_parts else "Unknown"
+        return result
+
     def _build_section(
         entries: list[tuple[dict[str, Any], str]],
         substrate: dict[str, Any] | None,
         thickness_key: str = "thickness",
     ) -> dict[str, Any]:
         """Build a generic deposition section dict (etl/htl/backcontact/add)."""
+        procedure = _join_params(entries, "depositionMethod", substrate)
+        quenching_parts: list[str] = []
+        for e, _ in entries:
+            dm = _get_step_param(e, "dryingMethod", substrate, "")
+            if dm and dm != "Unknown":
+                qd = _parse_quenching_string(dm)
+                if qd["induced"]:
+                    quenching_parts.append(f"Quenching: {qd['media']}")
+        if quenching_parts:
+            procedure = f"{procedure} + {' | '.join(quenching_parts)}"
         return {
             "stack_sequence": " | ".join(name for _, name in entries),
             thickness_key: _layer_thickness(entries),
-            "deposition_procedure": _join_params(entries, "depositionMethod", substrate),
+            "deposition_procedure": procedure,
             "deposition_synthesis_atmosphere": _join_params(entries, "depositionAtmosphere", substrate),
             "deposition_solvents": _join_layer_solution_field(entries, "solvents"),
             "deposition_reaction_solutions_compounds": _join_layer_solution_field(entries, "compounds"),
@@ -923,10 +1002,25 @@ def create_nomad_metadata_yaml(
                 "reaction_solutions_age": "Unknown",
                 "reaction_solutions_temperature": "Unknown",
                 "substrate_temperature": _join_params(absorber_e, "substrateTemp", substrate),
-                "quenching_induced_crystallisation": False,
-                "quenching_media": _join_params(absorber_e, "dryingMethod", substrate),
+                "quenching_induced_crystallisation": any(
+                    _parse_quenching_string(
+                        _get_step_param(e, "dryingMethod", substrate, "")
+                    )["induced"]
+                    for e, _ in absorber_e
+                ),
+                "quenching_media": " | ".join(
+                    qd["media"]
+                    for e, _ in absorber_e
+                    for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
+                    if qd["induced"]
+                ) or "Unknown",
                 "quenching_media_mixing_ratios": "Unknown",
-                "quenching_media_volume": "Unknown",
+                "quenching_media_volume": " | ".join(
+                    qd["volume"]
+                    for e, _ in absorber_e
+                    for qd in [_parse_quenching_string(_get_step_param(e, "dryingMethod", substrate, ""))]
+                    if qd["induced"] and qd["volume"] != "Unknown"
+                ) or "Unknown",
                 "quenching_media_additives_compounds": "Unknown",
                 "quenching_media_additives_concentrations": "Unknown",
                 "thermal_annealing_temperature": _join_params(absorber_e, "annealingTemp", substrate),
