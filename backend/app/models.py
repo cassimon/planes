@@ -62,6 +62,7 @@ class User(UserBase, table=True):
     experiments: list["Experiment"] = Relationship(back_populates="owner", cascade_delete=True)
     results: list["ExperimentResults"] = Relationship(back_populates="owner", cascade_delete=True)
     planes: list["Plane"] = Relationship(back_populates="owner", cascade_delete=True)
+    shared_planes: list["PlaneShare"] = Relationship(cascade_delete=True)
 
 
 # Properties to return via API, id is always required
@@ -496,6 +497,39 @@ class Plane(PlaneBase, table=True):
     elements: list[CanvasElement] = Relationship(
         back_populates="plane", cascade_delete=True
     )
+    shared_with: list["PlaneShare"] = Relationship(
+        back_populates="plane",
+        sa_relationship_kwargs={"foreign_keys": "[PlaneShare.plane_id]"},
+        cascade_delete=True,
+    )
+
+
+class PlaneShare(SQLModel, table=True):
+    """Many-to-many relationship for plane sharing."""
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    plane_id: uuid.UUID = Field(
+        foreign_key="plane.id", nullable=False, ondelete="CASCADE"
+    )
+    user_id: uuid.UUID = Field(
+        foreign_key="user.id", nullable=False, ondelete="CASCADE"
+    )
+    created_at: datetime | None = Field(
+        default_factory=get_datetime_utc,
+        sa_type=DateTime(timezone=True),
+    )
+    plane: Plane | None = Relationship(
+        back_populates="shared_with",
+        sa_relationship_kwargs={"foreign_keys": "[PlaneShare.plane_id]"},
+    )
+    user: User | None = Relationship()
+
+
+class PlaneShareCreate(SQLModel):
+    user_id: uuid.UUID
+
+
+class PlaneSharePublic(SQLModel):
+    user: UserPublic
 
 
 class PlanePublic(PlaneBase):
@@ -503,6 +537,7 @@ class PlanePublic(PlaneBase):
     owner_id: uuid.UUID
     created_at: datetime | None = None
     elements: list[CanvasElementPublic]
+    shared_with: list[UserPublic] = []
 
 
 class PlanesPublic(SQLModel):

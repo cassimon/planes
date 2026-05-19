@@ -213,7 +213,7 @@ export function AppLayout() {
               style={{ display: "flex", alignItems: "center" }}
             >
               <Text fw={600} size="lg">
-                {activePlane?.name ?? "General"}
+                {activePlane?.name ?? "Overview & Data Sharing"}
               </Text>
             </UnstyledButton>
             {/* Plane dropdown chevron only */}
@@ -240,7 +240,7 @@ export function AppLayout() {
                     setActiveCollectionId(null)
                   }}
                 >
-                  General
+                  Overview & Data Sharing
                 </Menu.Item>
                 <Menu.Divider />
                 {planes.map((p) => (

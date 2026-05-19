@@ -5425,7 +5425,7 @@ export function OrganizationPage() {
           <ScrollArea type="never" style={{ flex: 1 }}>
             <Tabs.List style={{ flexWrap: "nowrap", borderBottom: "none" }}>
               <Tabs.Tab value="__general__">
-                <Text size="sm">General</Text>
+                <Text size="sm">Overview & Data Sharing</Text>
               </Tabs.Tab>
               {planes.map((p) => (
                 <Tabs.Tab

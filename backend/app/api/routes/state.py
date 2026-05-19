@@ -24,6 +24,7 @@ from app.models import (
     MeasurementFile,
     DeviceGroup,
     Plane,
+    PlaneShare,
     CanvasElement,
 )
 
@@ -150,7 +151,18 @@ def read_state(session: SessionDep, current_user: CurrentUser) -> Any:
             })
 
     # --- Planes + Elements ---
-    planes_db = session.exec(select(Plane).where(Plane.owner_id == uid)).all()
+    # Get planes owned by user OR shared with user
+    from sqlmodel import or_
+    planes_db = session.exec(
+        select(Plane)
+        .outerjoin(PlaneShare, Plane.id == PlaneShare.plane_id)
+        .where(
+            or_(
+                Plane.owner_id == uid,
+                PlaneShare.user_id == uid,
+            )
+        )
+    ).all()
     planes_out = []
     for p in planes_db:
         if p.frontend_data:

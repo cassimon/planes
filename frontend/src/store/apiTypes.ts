@@ -118,6 +118,11 @@ export interface ApiPlane {
   owner_id: string
   created_at: string | null
   elements: ApiCanvasElement[]
+  shared_with?: Array<{
+    id: string
+    email: string
+    full_name: string | null
+  }>
 }
 
 export interface ApiBulkState {
@@ -225,6 +230,8 @@ export function apiPlaneToPlane(api: ApiPlane): Plane {
   return {
     id: api.id,
     name: api.name,
+    ownerId: api.owner_id,
+    sharedWith: api.shared_with ?? [],
     elements: api.elements.map((e) => {
       // Parse content as JSON for collection elements
       const parsed = e.content ? tryParseJson(e.content) : null

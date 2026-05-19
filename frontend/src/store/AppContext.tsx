@@ -740,6 +740,8 @@ export type Plane = {
   id: string
   name: string
   elements: CanvasElement[]
+  ownerId?: string
+  sharedWith?: Array<{ id: string; email: string; full_name: string | null }>
 }
 
 export function newPlane(name?: string): Plane {
